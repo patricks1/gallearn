@@ -14,3 +14,5 @@ function get_hosts()
     host_ids = gal_ids[is_host]
 
     return host_ids
+
+PyCall.pyimport("
