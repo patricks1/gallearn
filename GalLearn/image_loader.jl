@@ -1,24 +1,31 @@
+module image_loader
+
 using HDF5
 using CSV
 using DataFrames
 using ProgressBars
 using ImageFiltering
 
-direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/ugrband_massmocks"
+direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
+    "ugrband_massmocks_final"
+direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/ugrband_massmocks"
 gallearn_dir = "/export/nfs0home/pstaudt/projects/gal-learn/GalLearn"
-tgt_dir = "/export/nfs0home/lyxia/scripts/FIREBox/scripts/csvresults/" *
-              "FIREBox_Allstars"
+# tgt_dir = "/export/nfs0home/lyxia/scripts/FIREBox/scripts/csvresults/" *
+#     "FIREBox_Allstars"
+tgt_dir = "/DFS-L/DATA/cosmo/pstaudt/luke_protodata"
+feature_matrix_dir = "DFS-L/DATA/cosmo/pstaudt"
 
 function read_tgt()
     files = readdir(tgt_dir)
     ys = CSV.read(joinpath(tgt_dir, "FIREBoxm9.csv"), DataFrame)
-    for mclass in ["7", "8"] 
+    for mclass in ["7", "8", "10"] 
         ys_add = CSV.read(
             joinpath(tgt_dir, "FIREBoxm" * mclass * ".csv"), 
             DataFrame
         )
         ys = vcat(ys, ys_add)
     end
+    return ys
 end
 
 function load_images()
@@ -28,9 +35,9 @@ function load_images()
     )
     Nfiles = length(files)
 
-    X = zeros(Nfiles, 3, 2, 2) 
-    shapeXimgs = size(X)[end - 1 : end]
-    objs_sorted = String[]
+    global X = zeros(Nfiles, 3, 2, 2) 
+    global shapeXimgs = size(X)[end - 1 : end]
+    obs_sorted = String[]
 
     open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
         println(f, "Beginning.")
@@ -42,11 +49,16 @@ function load_images()
     ]
     is_bad = [any(occursin(baddy, f) for baddy in baddies) for f in files]
 
+    ys = read_tgt()
+    in_tgt = [
+        any(occursin(obj * "_", f) for obj in ys.Simulation) 
+        for f in files
+    ]
 
-    for (ifile, fname) in ProgressBar(enumerate(files[.!is_bad][1:10]))
-        global X
-        global shapeXimgs
-
+    good_files = files[.!is_bad .& in_tgt][1:5]
+    for (ifile, fname) in ProgressBar(
+                enumerate(good_files[1:5])
+            )
         open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
             println(f, fname)      
         end
@@ -86,9 +98,7 @@ function load_images()
 
         # Save this file's position. 
         underscores = findall(isequal('_'), fname)
-        println(fname)
-        println(underscores)
-        push!(objs_sorted, fname[1 : underscores[2] - 1])
+        push!(obs_sorted, fname[1 : underscores[2] - 1])
 
         if shapeXimgs < shape_band
             pad = (shape_band .- shapeXimgs) ./ 2
@@ -106,18 +116,42 @@ function load_images()
             
         X[ifile, :, :, :] = img
         shapeXimgs = size(X)[end - 1 : end]
-                    open(joinpath(
-                                gallearn_dir, 
-                                "image_loader_ram_use.txt"
-                            ), "a") do f
-                        println(f, shapeXimgs)
-                    end
-        GC.gc()
-        open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f    
+        open(joinpath(
+                    gallearn_dir, 
+                    "image_loader_ram_use.txt"
+                ), "a") do f
+            println(f, shapeXimgs)
             println(f, "Memory used by X: $(Base.summarysize(X) / 1e9) GB")
         end
-    println(objs_sorted)
     end
+    return obs_sorted, X, files
 end
 
-load_images()
+function load_data(save=false)
+    obs_sorted, X, files = load_images()
+    ys = read_tgt() 
+    ys_sorted = ys[[
+            findfirst(x -> x == val, ys.Simulation) for val in obs_sorted
+        ], :]
+
+    if save
+        h5open(joinpath(feature_matrix_dir, "feature_matrix.h5"), "w") do f
+            for (label, data) in [
+                        ["X", X],
+                        ["obs_sorted", obs_sorted],
+                        ["ys_sorted", ys_sorted],
+                        ["file_names", files]
+                    ]
+                write(f, label, data)
+            end
+        end
+    end
+
+    return obs_sorted, ys, ys_sorted, X, files
+end
+
+end # module image_loader
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    image_loader.load_data(save=true)
+end
