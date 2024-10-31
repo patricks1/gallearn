@@ -8,12 +8,12 @@ using ImageFiltering
 
 direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
     "ugrband_massmocks_final"
-direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/ugrband_massmocks"
+direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/ugrband_massmocks_final"
 gallearn_dir = "/export/nfs0home/pstaudt/projects/gal-learn/GalLearn"
 # tgt_dir = "/export/nfs0home/lyxia/scripts/FIREBox/scripts/csvresults/" *
 #     "FIREBox_Allstars"
 tgt_dir = "/DFS-L/DATA/cosmo/pstaudt/luke_protodata"
-feature_matrix_dir = "DFS-L/DATA/cosmo/pstaudt"
+feature_matrix_dir = "/DFS-L/DATA/cosmo/pstaudt"
 
 function read_tgt()
     files = readdir(tgt_dir)
@@ -124,10 +124,12 @@ function load_images()
             println(f, "Memory used by X: $(Base.summarysize(X) / 1e9) GB")
         end
     end
+    println("X shape: $(size(X))")
+    X = Array(X) 
     return obs_sorted, X, files
 end
 
-function load_data(save=false)
+function load_data(; save=false)
     obs_sorted, X, files = load_images()
     ys = read_tgt() 
     ys_sorted = ys[[
@@ -142,6 +144,7 @@ function load_data(save=false)
                         ["ys_sorted", ys_sorted],
                         ["file_names", files]
                     ]
+                println("Trying to save " * label * " of type $(typeof(data))")
                 write(f, label, data)
             end
         end
