@@ -1,3 +1,6 @@
+using Distributed
+addprocs(32)
+
 module image_loader
 
 using HDF5
@@ -28,12 +31,16 @@ function read_tgt()
     return ys
 end
 
-function load_images()
+function load_images(; Nfiles=nothing)
     files = filter(
         f -> isfile(joinpath(direc, f)) && endswith(f, ".hdf5"), 
         readdir(direc)
     )
-    Nfiles = length(files)
+    if Nfiles === nothing
+        # If the user hasn't specified the number of files to run through, then
+        # run through all of them.
+        Nfiles = length(files)
+    end
 
     global X = zeros(Nfiles, 3, 2, 2) 
     global shapeXimgs = size(X)[end - 1 : end]
@@ -55,9 +62,9 @@ function load_images()
         for f in files
     ]
 
-    good_files = files[.!is_bad .& in_tgt][1:5]
-    for (ifile, fname) in ProgressBar(
-                enumerate(good_files[1:5])
+    good_files = files[.!is_bad .& in_tgt]
+    @everywhere for (ifile, fname) in ProgressBar(
+                enumerate(good_files[1:Nfiles])
             )
         open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
             println(f, fname)      
@@ -124,25 +131,31 @@ function load_images()
             println(f, "Memory used by X: $(Base.summarysize(X) / 1e9) GB")
         end
     end
+    X = parent(X) # Get rid of the ridiculous OffsetArray indexing
     println("X shape: $(size(X))")
-    X = Array(X) 
     return obs_sorted, X, files
 end
 
-function load_data(; save=false)
-    obs_sorted, X, files = load_images()
+function load_data(; Nfiles=nothing, save=false)
+    obs_sorted, X, files = load_images(Nfiles=Nfiles)
     ys = read_tgt() 
     ys_sorted = ys[[
             findfirst(x -> x == val, ys.Simulation) for val in obs_sorted
         ], :]
+    ys_sorted = Array(ys_sorted[:, ["b/a", "c/a"]])
+
+    println(size(ys))
+    println(size(ys_sorted))
+    println(size(obs_sorted))
+    println(size(X))
 
     if save
         h5open(joinpath(feature_matrix_dir, "feature_matrix.h5"), "w") do f
             for (label, data) in [
                         ["X", X],
                         ["obs_sorted", obs_sorted],
-                        ["ys_sorted", ys_sorted],
-                        ["file_names", files]
+                        ["file_names", files],
+                        ["ys_sorted", ys_sorted]
                     ]
                 println("Trying to save " * label * " of type $(typeof(data))")
                 write(f, label, data)
@@ -156,5 +169,5 @@ end
 end # module image_loader
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    image_loader.load_data(save=true)
+    image_loader.load_data(Nfiles=200, save=false)
 end
