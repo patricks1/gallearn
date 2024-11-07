@@ -127,8 +127,10 @@ function load_images(; Nfiles=nothing)
     ]
 
     good_files = files[.!is_bad .& in_tgt]
+    tasks = []
     for (ifile, fname) in ProgressBar(enumerate(goodfiles[1:Nfiles]))
-        process_file(fname, X, obs_sorted)
+        task = @spawn process_file(fname, X, obs_sorted, direc, gallearn_dir)
+        push!(tasks, task)
     end
     X = parent(X) # Get rid of the ridiculous OffsetArray indexing
     println("X shape: $(size(X))")
