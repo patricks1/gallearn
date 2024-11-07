@@ -3,12 +3,6 @@ addprocs(32)
 
 module image_loader
 
-using HDF5
-using CSV
-using DataFrames
-using ProgressBars
-using ImageFiltering
-
 direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
     "ugrband_massmocks_final"
 direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/ugrband_massmocks_final"
@@ -17,6 +11,76 @@ gallearn_dir = "/export/nfs0home/pstaudt/projects/gal-learn/GalLearn"
 #     "FIREBox_Allstars"
 tgt_dir = "/DFS-L/DATA/cosmo/pstaudt/luke_protodata"
 feature_matrix_dir = "/DFS-L/DATA/cosmo/pstaudt"
+
+@everywhere using HDF5, CSV, DataFrames, ProgressBars, ImageFiltering
+
+@everywhere function process_file(fname, X, obs_sorted, direc, gallearn_dir)
+    open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
+        println(f, fname)      
+    end
+
+    path = joinpath(direc, fname)
+    h5open(path, "r") do file
+        global shape_band
+        shape_band = nothing
+        img = nothing
+        for (i, band) in enumerate(["g", "u", "r"])
+            band = "band_" * band
+            band_img = read(file, "projection_xy/" * band)
+            shape_band = size(band_img) 
+            if shape_band[end] > 2000
+                # Leave img as nothing if the image is too big. Once we 
+                # break
+                # this loop here, we'll continue to the next file below.
+                break 
+            end
+            if i == 1 
+                img = zeros(3, shape_band...) 
+            elseif size(band_img) != shape_band
+                error("Bands have different shapes.")
+            end
+            img[i, :, :] = band_img 
+        end
+    end
+    
+    if shape_band[end] > 2000
+        # Image is too big; we should move to the next file. If this is the
+        # case, img == nothing at this point, given the break above.
+        open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
+            println(f, "Skipping " * fname)
+        end
+        return nothing 
+    end
+
+    # Save this file's position. 
+    underscores = findall(isequal('_'), fname)
+    push!(obs_sorted, fname[1 : underscores[2] - 1])
+
+    if shapeXimgs < shape_band
+        pad = (shape_band .- shapeXimgs) ./ 2
+        X = ImageFiltering.padarray(
+            X, 
+            Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
+        )
+    elseif shape_band < shapeXimgs
+        pad = (shapeXimgs .- shape_band) ./ 2
+        img = ImageFiltering.padarray(
+            img,
+            Fill(0., (0, Int(pad[1]), Int(pad[2])))
+        )
+    end           
+        
+    X[ifile, :, :, :] = img
+    shapeXimgs = size(X)[end - 1 : end]
+    open(joinpath(
+                gallearn_dir, 
+                "image_loader_ram_use.txt"
+            ), "a") do f
+        println(f, shapeXimgs)
+        println(f, "Memory used by X: $(Base.summarysize(X) / 1e9) GB")
+    end
+    return nothing
+end
 
 function read_tgt()
     files = readdir(tgt_dir)
@@ -63,73 +127,8 @@ function load_images(; Nfiles=nothing)
     ]
 
     good_files = files[.!is_bad .& in_tgt]
-    @everywhere for (ifile, fname) in ProgressBar(
-                enumerate(good_files[1:Nfiles])
-            )
-        open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
-            println(f, fname)      
-        end
-
-        path = joinpath(direc, fname)
-        h5open(path, "r") do file
-            global shape_band
-            shape_band = nothing
-            img = nothing
-            for (i, band) in enumerate(["g", "u", "r"])
-                band = "band_" * band
-                band_img = read(file, "projection_xy/" * band)
-                shape_band = size(band_img) 
-                if shape_band[end] > 2000
-                    # Leave img as nothing if the image is too big. Once we 
-                    # break
-                    # this loop here, we'll continue to the next file below.
-                    break 
-                end
-                if i == 1 
-                    img = zeros(3, shape_band...) 
-                elseif size(band_img) != shape_band
-                    error("Bands have different shapes.")
-                end
-                img[i, :, :] = band_img 
-            end
-        end
-        
-        if shape_band[end] > 2000
-            # Image is too big; we should move to the next file. If this is the
-            # case, img == nothing at this point, given the break above.
-            open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
-                println(f, "Skipping " * fname)
-            end
-            continue
-        end
-
-        # Save this file's position. 
-        underscores = findall(isequal('_'), fname)
-        push!(obs_sorted, fname[1 : underscores[2] - 1])
-
-        if shapeXimgs < shape_band
-            pad = (shape_band .- shapeXimgs) ./ 2
-            X = ImageFiltering.padarray(
-                X, 
-                Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
-            )
-        elseif shape_band < shapeXimgs
-            pad = (shapeXimgs .- shape_band) ./ 2
-            img = ImageFiltering.padarray(
-                img,
-                Fill(0., (0, Int(pad[1]), Int(pad[2])))
-            )
-        end           
-            
-        X[ifile, :, :, :] = img
-        shapeXimgs = size(X)[end - 1 : end]
-        open(joinpath(
-                    gallearn_dir, 
-                    "image_loader_ram_use.txt"
-                ), "a") do f
-            println(f, shapeXimgs)
-            println(f, "Memory used by X: $(Base.summarysize(X) / 1e9) GB")
-        end
+    for (ifile, fname) in ProgressBar(enumerate(goodfiles[1:Nfiles]))
+        process_file(fname, X, obs_sorted)
     end
     X = parent(X) # Get rid of the ridiculous OffsetArray indexing
     println("X shape: $(size(X))")
