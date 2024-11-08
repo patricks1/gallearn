@@ -28,6 +28,7 @@ module image_loader
 
         path = joinpath(direc, fname)
         h5open(path, "r") do file
+            println("reading $fname")
             global shape_band
             shape_band = nothing
             img = nothing
@@ -137,15 +138,14 @@ module image_loader
         good_files = files[.!is_bad .& in_tgt]
         tasks = []
         for (ifile, fname) in ProgressBar(enumerate(good_files[1:Nfiles]))
-            task = @spawn process_file(
-                fname, 
-                ifile,
-                X,
-                obs_sorted,
-                direc,
-                gallearn_dir
-            )
-            push!(tasks, task)
+            pmap(fname -> process_file(
+                    fname,
+                    ifile,
+                    X,
+                    obs_sorted,
+                    direc,
+                    gallearn_dir
+                ), good_files[1:Nfiles])
         end
         X = parent(X) # Get rid of the ridiculous OffsetArray indexing
         println("X shape: $(size(X))")
