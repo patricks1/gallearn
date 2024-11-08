@@ -1,6 +1,7 @@
-module image_loader
-    using Distributed
-    addprocs(32)
+using Distributed
+addprocs(32)
+
+@everywhere module image_loader
 
     direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
         "ugrband_massmocks_final"
@@ -11,6 +12,8 @@ module image_loader
     #     "FIREBox_Allstars"
     tgt_dir = "/DFS-L/DATA/cosmo/pstaudt/luke_protodata"
     feature_matrix_dir = "/DFS-L/DATA/cosmo/pstaudt"
+
+    using Distributed
 
     @everywhere using HDF5, CSV, DataFrames, ProgressBars, ImageFiltering
 
@@ -183,7 +186,3 @@ module image_loader
     end
 
 end # module image_loader
-
-if abspath(PROGRAM_FILE) == @__FILE__
-    image_loader.load_data(Nfiles=200, save=false)
-end
