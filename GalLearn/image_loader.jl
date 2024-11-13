@@ -1,7 +1,10 @@
-using Distributed
-addprocs(32)
+module image_loader
 
-@everywhere module image_loader
+    using HDF5
+    using CSV
+    using DataFrames
+    using ProgressBars
+    using ImageFiltering
 
     direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
         "ugrband_massmocks_final"
@@ -13,14 +16,53 @@ addprocs(32)
     tgt_dir = "/DFS-L/DATA/cosmo/pstaudt/luke_protodata"
     feature_matrix_dir = "/DFS-L/DATA/cosmo/pstaudt"
 
-    using Distributed
 
-    @everywhere using HDF5, CSV, DataFrames, ProgressBars, ImageFiltering
+    function modify(fname, ifile, X, shapeXimgs)
+        path = joinpath(direc, fname)
+        h5open(path, "r") do file
+            #println("reading $fname")
+            global shape_band
+            shape_band = nothing
+            img = nothing
+            for (i, band) in enumerate(["g", "u", "r"])
+                band = "band_" * band
+                band_img = read(file, "projection_xy/" * band)
+                shape_band = size(band_img) 
+                if shape_band[end] > 2000
+                    # Leave img as nothing if the image is too big. Once we 
+                    # break
+                    # this loop here, we'll continue to the next file below.
+                    break 
+                end
+                if i == 1 
+                    img = zeros(3, shape_band...) 
+                elseif size(band_img) != shape_band
+                    error("Bands have different shapes.")
+                end
+                img[i, :, :] = band_img 
+            end
+        end
+        if shapeXimgs < shape_band
+            pad = (shape_band .- shapeXimgs) ./ 2
+            X = ImageFiltering.padarray(
+                X, 
+                Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
+            )
+        elseif shape_band < shapeXimgs
+            pad = (shapeXimgs .- shape_band) ./ 2
+            img = ImageFiltering.padarray(
+                img,
+                Fill(0., (0, Int(pad[1]), Int(pad[2])))
+            )
+        end           
+        X[ifile, :, :, :] = ones(3, size(X)[end - 1 : end]...)
+    end
 
-    @everywhere function process_file(
+    function process_file(
                 fname,
                 ifile,
                 X,
+                shapeXimgs,
                 obs_sorted,
                 direc,
                 gallearn_dir
@@ -31,7 +73,7 @@ addprocs(32)
 
         path = joinpath(direc, fname)
         h5open(path, "r") do file
-            println("reading $fname")
+            #println("reading $fname")
             global shape_band
             shape_band = nothing
             img = nothing
@@ -60,7 +102,11 @@ addprocs(32)
             open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
                 println(f, "Skipping " * fname)
             end
-            return nothing 
+            # Make X one row smaller than we were expecting, since we're
+            # skipping an image and `obs_sorted` will be shorter.
+            X = [1 : end - 1, :, :, :]
+            shapeXimgs = size(X)[end - 1 : end]
+            return X, shapeXimgs
         end
 
         # Save this file's position. 
@@ -74,6 +120,8 @@ addprocs(32)
                 Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
             )
         elseif shape_band < shapeXimgs
+            println(size(img))
+            println(size(X))
             pad = (shapeXimgs .- shape_band) ./ 2
             img = ImageFiltering.padarray(
                 img,
@@ -90,7 +138,7 @@ addprocs(32)
             println(f, shapeXimgs)
             println(f, "Memory used by X: $(Base.summarysize(X) / 1e9) GB")
         end
-        return nothing
+        return X, shapeXimgs 
     end
 
     function read_tgt()
@@ -119,7 +167,7 @@ addprocs(32)
         end
 
         global X = zeros(Nfiles, 3, 2, 2) 
-        global shapeXimgs = size(X)[end - 1 : end]
+        shapeXimgs = size(X)[end - 1 : end]
         obs_sorted = String[]
 
         open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
@@ -140,15 +188,19 @@ addprocs(32)
 
         good_files = files[.!is_bad .& in_tgt]
         tasks = []
-        for (ifile, fname) in ProgressBar(enumerate(good_files[1:Nfiles]))
-            pmap(fname -> process_file(
-                    fname,
-                    ifile,
-                    X,
-                    obs_sorted,
-                    direc,
-                    gallearn_dir
-                ), good_files[1:Nfiles])
+        #modify("object_9_host_ugrbandMassMock_FOV74_p3700.hdf5", 3, X, shapeXimgs)
+        for (ifile, fname) in ProgressBar(
+                    enumerate(good_files[1:Nfiles])
+            )
+            X, shapeXimgs = process_file(
+                fname,
+                ifile,
+                X,
+                shapeXimgs,
+                obs_sorted,
+                direc,
+                gallearn_dir
+            )
         end
         X = parent(X) # Get rid of the ridiculous OffsetArray indexing
         println("X shape: $(size(X))")
