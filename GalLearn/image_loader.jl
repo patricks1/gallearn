@@ -76,17 +76,19 @@ module image_loader
         push!(obs_sorted, fname[1 : underscores[2] - 1])
 
         if shapeXimgs < shape_band
-            pad = (shape_band .- shapeXimgs) ./ 2
-            X = ImageFiltering.padarray(
-                X, 
-                Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
-            )
+            #pad = (shape_band .- shapeXimgs) ./ 2
+            #X = ImageFiltering.padarray(
+            #    X, 
+            #    Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
+            #)
+            X = Images.imresize(X, size(X)[1:2]..., shape_band)
         elseif shape_band < shapeXimgs
-            pad = (shapeXimgs .- shape_band) ./ 2
-            img = ImageFiltering.padarray(
-                img,
-                Fill(0., (0, Int(pad[1]), Int(pad[2])))
-            )
+            #pad = (shapeXimgs .- shape_band) ./ 2
+            #img = ImageFiltering.padarray(
+            #    img,
+            #    Fill(0., (0, Int(pad[1]), Int(pad[2])))
+            #)
+            img = Images.imresize(img, 3, shapeXimgs...)
         end           
             
         X = parent(X) # Removing ridiculous OffsetArray indexing
@@ -128,10 +130,6 @@ module image_loader
             readdir(direc)
         )
 
-        global X = zeros(Nfiles, 3, 1900, 1900) 
-        shapeXimgs = size(X)[end - 1 : end]
-        obs_sorted = String[]
-
         open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
             println(f, "Beginning.")
         end
@@ -155,7 +153,11 @@ module image_loader
             # run through all of them.
             Nfiles = length(good_files)
         end
-        tasks = []
+
+        global X = zeros(Nfiles, 3, 1900, 1900) 
+        shapeXimgs = size(X)[end - 1 : end]
+        obs_sorted = String[]
+
         iX = 1
         for fname in ProgressBar(
                     good_files[1:Nfiles]
