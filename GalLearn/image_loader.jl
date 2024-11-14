@@ -6,6 +6,8 @@ module image_loader
     using ProgressBars
     using ImageFiltering
 
+    import Images
+
     direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
         "ugrband_massmocks_final"
     direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
@@ -17,50 +19,9 @@ module image_loader
     feature_matrix_dir = "/DFS-L/DATA/cosmo/pstaudt"
 
 
-    function modify(fname, ifile, X, shapeXimgs)
-        path = joinpath(direc, fname)
-        h5open(path, "r") do file
-            #println("reading $fname")
-            global shape_band
-            shape_band = nothing
-            img = nothing
-            for (i, band) in enumerate(["g", "u", "r"])
-                band = "band_" * band
-                band_img = read(file, "projection_xy/" * band)
-                shape_band = size(band_img) 
-                if shape_band[end] > 2000
-                    # Leave img as nothing if the image is too big. Once we 
-                    # break
-                    # this loop here, we'll continue to the next file below.
-                    break 
-                end
-                if i == 1 
-                    img = zeros(3, shape_band...) 
-                elseif size(band_img) != shape_band
-                    error("Bands have different shapes.")
-                end
-                img[i, :, :] = band_img 
-            end
-        end
-        if shapeXimgs < shape_band
-            pad = (shape_band .- shapeXimgs) ./ 2
-            X = ImageFiltering.padarray(
-                X, 
-                Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
-            )
-        elseif shape_band < shapeXimgs
-            pad = (shapeXimgs .- shape_band) ./ 2
-            img = ImageFiltering.padarray(
-                img,
-                Fill(0., (0, Int(pad[1]), Int(pad[2])))
-            )
-        end           
-        X[ifile, :, :, :] = ones(3, size(X)[end - 1 : end]...)
-    end
-
     function process_file(
                 fname,
-                ifile,
+                iX,
                 X,
                 shapeXimgs,
                 obs_sorted,
@@ -104,9 +65,10 @@ module image_loader
             end
             # Make X one row smaller than we were expecting, since we're
             # skipping an image and `obs_sorted` will be shorter.
-            X = [1 : end - 1, :, :, :]
+            X = X[1 : end - 1, :, :, :]
             shapeXimgs = size(X)[end - 1 : end]
-            return X, shapeXimgs
+            # Exit without addint 1 to iX
+            return X, shapeXimgs, iX
         end
 
         # Save this file's position. 
@@ -120,8 +82,6 @@ module image_loader
                 Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
             )
         elseif shape_band < shapeXimgs
-            println(size(img))
-            println(size(X))
             pad = (shapeXimgs .- shape_band) ./ 2
             img = ImageFiltering.padarray(
                 img,
@@ -129,7 +89,8 @@ module image_loader
             )
         end           
             
-        X[ifile, :, :, :] = img
+        X = parent(X) # Removing ridiculous OffsetArray indexing
+        X[iX, :, :, :] = img
         shapeXimgs = size(X)[end - 1 : end]
         open(joinpath(
                     gallearn_dir, 
@@ -138,7 +99,14 @@ module image_loader
             println(f, shapeXimgs)
             println(f, "Memory used by X: $(Base.summarysize(X) / 1e9) GB")
         end
-        return X, shapeXimgs 
+
+        # Set the index for the next element of X to set. Note that this
+        # advancement only happens if we don't skip the image we evaluate.
+        # For instances where we skip, there's another return statement above
+        # that runs *before* we add to iX.
+        iX += 1
+
+        return X, shapeXimgs, iX
     end
 
     function read_tgt()
@@ -159,14 +127,8 @@ module image_loader
             f -> isfile(joinpath(direc, f)) && endswith(f, ".hdf5"), 
             readdir(direc)
         )
-        if Nfiles === nothing
-            # If the user hasn't specified the number of files to run through, 
-            # then
-            # run through all of them.
-            Nfiles = length(files)
-        end
 
-        global X = zeros(Nfiles, 3, 2, 2) 
+        global X = zeros(Nfiles, 3, 1900, 1900) 
         shapeXimgs = size(X)[end - 1 : end]
         obs_sorted = String[]
 
@@ -187,14 +149,20 @@ module image_loader
         ]
 
         good_files = files[.!is_bad .& in_tgt]
+        if Nfiles === nothing
+            # If the user hasn't specified the number of files to run through, 
+            # then
+            # run through all of them.
+            Nfiles = length(good_files)
+        end
         tasks = []
-        #modify("object_9_host_ugrbandMassMock_FOV74_p3700.hdf5", 3, X, shapeXimgs)
-        for (ifile, fname) in ProgressBar(
-                    enumerate(good_files[1:Nfiles])
-            )
-            X, shapeXimgs = process_file(
+        iX = 1
+        for fname in ProgressBar(
+                    good_files[1:Nfiles]
+                )
+            X, shapeXimgs, iX = process_file(
                 fname,
-                ifile,
+                iX,
                 X,
                 shapeXimgs,
                 obs_sorted,
@@ -215,10 +183,10 @@ module image_loader
             ], :]
         ys_sorted = Array(ys_sorted[:, ["b/a", "c/a"]])
 
-        println(size(ys))
-        println(size(ys_sorted))
-        println(size(obs_sorted))
-        println(size(X))
+        #println(size(ys))
+        #println(size(ys_sorted))
+        #println(size(obs_sorted))
+        #println(size(X))
 
         if save
             h5open(joinpath(feature_matrix_dir, "feature_matrix.h5"), "w") do f
