@@ -81,7 +81,7 @@ module image_loader
             #    X, 
             #    Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
             #)
-            X = Images.imresize(X, size(X)[1:2]..., shape_band)
+            X = Images.imresize(X, size(X)[1:2]..., shape_band...)
         elseif shape_band < shapeXimgs
             #pad = (shapeXimgs .- shape_band) ./ 2
             #img = ImageFiltering.padarray(
@@ -172,7 +172,8 @@ module image_loader
                 gallearn_dir
             )
         end
-        X = parent(X) # Get rid of the ridiculous OffsetArray indexing
+        # Get rid of the ridiculous OffsetArray indexing and take the log.
+        X = log10.(parent(X)) 
         println("X shape: $(size(X))")
         return obs_sorted, X, files
     end

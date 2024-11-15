@@ -13,7 +13,6 @@ import matplotlib as mpl
 import torch
 import torchvision
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import random
 
@@ -36,7 +35,9 @@ except subprocess.CalledProcessError:
     print("Julia executable not found in PATH")
 
 Main.include('image_loader.jl')
-obs_sorted, ys, ys_sorted, X, files = julia.Main.image_loader.load_data()
+obs_sorted, ys, ys_sorted, X, files = julia.Main.image_loader.load_data(
+    Nfiles=150
+)
 
 ys = torch.FloatTensor(np.array(ys_sorted))
 X = torch.FloatTensor(X)
@@ -69,8 +70,8 @@ torch.set_default_device(device_str)
 # Run this once to load the train and test data straight into a dataloader 
 # class
 # that will provide the batches
-batch_size_train = int(N_train / 5)
-batch_size_test = int(N_test / 5)
+batch_size_train = int(N_train / 30)
+batch_size_test = max(1, int(N_test / 30))
 train_loader = torch.utils.data.DataLoader(
     torch.utils.data.TensorDataset(X_train, ys_train),
     batch_size=batch_size_train, 
@@ -125,18 +126,18 @@ class Net(nn.Module):
         # print('x dtype: {}'.format(x.dtype))
         # print('x device: {}'.format(x.device))
         x = self.conv1(x) # 1
-        x = F.max_pool2d(x, kernel_size=2) # 2
-        x = F.relu(x) # 3
+        x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
+        x = torch.nn.functional.relu(x) # 3
         x = self.conv2(x) # 4
         x = self.drop(x) # 5
-        x = F.max_pool2d(x, kernel_size=2) # 6
-        x = F.relu(x) # 7
+        x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
+        x = torch.nn.functional.relu(x) # 7
         x = x.flatten(start_dim=1) # 8
         self.make_fc1(x)
         x = self.fc1(x) # 9
-        x = F.relu(x) # 10
+        x = torch.nn.functional.relu(x) # 10
         x = self.fc2(x) # 11
-        x = F.softmax(x) # 12
+        x = torch.nn.functional.sigmoid(x) # 12
         
         return x
 
@@ -173,13 +174,17 @@ def train(epoch):
         loss.backward()
         optimizer.step()
         # Store results
-        if batch_idx % 10 == 0:
-            print('Train Epoch: {} [{}/{}]\tLoss: {:.6f}'.format(
-                epoch, 
-                batch_idx * len(data), 
-                len(train_loader.dataset), 
-                loss.item()
-            ))
+        #if batch_idx % 10 == 0:
+        if True:
+            print(
+                'Train Epoch: {0}'
+                        '[{1}/{2} samples optimized]\tLoss: {3:.6f}'.format(
+                    epoch, 
+                    batch_idx * len(data), 
+                    len(train_loader.dataset), 
+                    loss.item()
+                )
+            )
 
 # Run on test data
 def test():
@@ -201,8 +206,8 @@ test()
 # Train for three epochs
 n_epochs = 3
 for epoch in range(1, n_epochs + 1):
-  train(epoch)
-  test()
+    train(epoch)
+    test()
 
 # Run network on data we got before and show predictions
 test_examples = enumerate(test_loader)
