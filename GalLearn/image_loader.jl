@@ -92,6 +92,7 @@ module image_loader
         end           
             
         X = parent(X) # Removing ridiculous OffsetArray indexing
+        img = log10.(img)
         X[iX, :, :, :] = img
         shapeXimgs = size(X)[end - 1 : end]
         open(joinpath(
@@ -172,10 +173,18 @@ module image_loader
                 gallearn_dir
             )
         end
-        # Get rid of the ridiculous OffsetArray indexing and take the log.
-        X = log10.(parent(X)) 
+        # Get rid of the ridiculous OffsetArray indexing
+        X = parent(X)
         println("X shape: $(size(X))")
-        return obs_sorted, X, files
+        # Turn zeros into the smallest value greater than zero to avoid -Inf in
+        # the logs.
+        is_zero = X .== 0
+        X[is_zero] .= minimum(X[.!is_zero])
+        logX = log10.(X)
+        normX = (
+            (logX .- minimum(logX)) ./ (maximum(logX) .- minimum(logX))
+        )
+        return obs_sorted, normX, files
     end
 
     function load_data(; Nfiles=nothing, save=false)
