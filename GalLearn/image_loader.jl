@@ -92,7 +92,6 @@ module image_loader
         end           
             
         X = parent(X) # Removing ridiculous OffsetArray indexing
-        img = log10.(img)
         X[iX, :, :, :] = img
         shapeXimgs = size(X)[end - 1 : end]
         open(joinpath(
