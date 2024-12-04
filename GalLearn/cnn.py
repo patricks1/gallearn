@@ -1,10 +1,14 @@
 def main(Nfiles=None):
-    from julia.api import Julia
-    jl = Julia(compiled_modules=False, debug=False)
+    #from julia.api import Julia
+    #jl = Julia(compiled_modules=False, debug=False)
 
-    import julia
-    from julia import Pkg
-    from julia import Main
+    #import julia
+    #from julia import Pkg
+    #from julia import Main
+
+    import preprocessing
+    import random
+    import wandb
 
     import numpy as np
     import pandas as pd
@@ -15,37 +19,57 @@ def main(Nfiles=None):
     import torchvision
     import torch.nn as nn
     import torch.optim as optim
-    import random
 
-    Pkg.activate('/export/nfs0home/pstaudt/projects/gal-learn/GalLearn')
+    lr=0.01 # learning rate
+    N_epochs = 4
 
-    # Attempt to locate the Julia executable path
-    import subprocess
-    try:
-        julia_path = subprocess.check_output(
-                ["which", "julia"]
-            ).decode("utf-8").strip()
-        print("Julia executable path:", julia_path)
-        
-        # Optional: Print Julia version to verify
-        julia_version = subprocess.check_output(
-                [julia_path, "--version"]
-            ).decode("utf-8").strip()
-        print("Julia version:", julia_version)
-    except subprocess.CalledProcessError:
-        print("Julia executable not found in PATH")
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="gallearn",
 
-    Main.include('image_loader.jl')
-    obs_sorted, ys, ys_sorted, X, files = julia.Main.image_loader.load_data(
-        Nfiles=Nfiles
+        # track hyperparameters and run metadata
+        config={
+            "learning_rate": lr,
+            "architecture": "CNN",
+            "dataset": "500x500 hosts, xy projection, drop >2000x2000",
+            "epochs": N_epochs,
+        }
     )
 
-    ys = torch.FloatTensor(np.array(ys_sorted))
-    X = torch.FloatTensor(X)
 
-    N_all = len(ys_sorted)
-    N_test = int(0.15 * N_all)
+    #Pkg.activate('/export/nfs0home/pstaudt/projects/gal-learn/GalLearn')
+
+    # Attempt to locate the Julia executable path
+    #import subprocess
+    #try:
+    #    julia_path = subprocess.check_output(
+    #            ["which", "julia"]
+    #        ).decode("utf-8").strip()
+    #    print("Julia executable path:", julia_path)
+    #    
+    #    # Optional: Print Julia version to verify
+    #    julia_version = subprocess.check_output(
+    #            [julia_path, "--version"]
+    #        ).decode("utf-8").strip()
+    #    print("Julia version:", julia_version)
+    #except subprocess.CalledProcessError:
+    #    print("Julia executable not found in PATH")
+
+    #Main.include('image_loader.jl')
+    #obs_sorted, ys, ys_sorted, X, files = julia.Main.image_loader.load_data(
+    #    Nfiles=Nfiles
+    #)
+
+    d = preprocessing.load_data()
+    X = d['X']
+    X = preprocessing.min_max_scale(X)
+    ys = d['ys_sorted']
+
+    N_all = len(ys) 
+    print('{0:0.0f} galaxies in data'.format(N_all))
+    N_test = max(1, int(0.15 * N_all))
     N_train = N_all - N_test
+    N_batches = 20
 
     indices_test = np.random.randint(0, N_all, N_test)
     is_train = np.ones(N_all, dtype=bool)
@@ -71,8 +95,8 @@ def main(Nfiles=None):
     # Run this once to load the train and test data straight into a dataloader 
     # class
     # that will provide the batches
-    batch_size_train = int(N_train / 30)
-    batch_size_test = max(1, int(N_test / 30))
+    batch_size_train = max(1, int(N_train / N_batches))
+    batch_size_test = N_test
     train_loader = torch.utils.data.DataLoader(
         torch.utils.data.TensorDataset(X_train, ys_train),
         batch_size=batch_size_train, 
@@ -87,9 +111,12 @@ def main(Nfiles=None):
         generator=torch.Generator(device=device_str)
     )
 
-    # Define the network.  This is a more typical way to define a network than the sequential structure.  We define a class for the network, and define the parameters in the constructor.  Then we use a function called forward to actually run the network.  It's easy to see how you might use residual connections in this format.
+    # Define the network.  This is a more typical way to define a network than 
+    # the sequential structure.  We define a class for the network, and define 
+    # the parameters in the constructor.  Then we use a function called forward 
+    # to actually run the network.  It's easy to see how you might use residual 
+    # connections in this format.
 
-    from os import X_OK
     # 1. A valid convolution with kernel size 5, 1 input channel and 10 output 
     #    channels
     # 2. A max pooling operation over a 2x2 area
@@ -100,7 +127,8 @@ def main(Nfiles=None):
     # 6. A max pooling operation over a 2x2 area
     # 7. A relu
     # 8. A flattening operation
-    # 9. A fully connected layer mapping from (whatever dimensions we are at-- find 
+    # 9. A fully connected layer mapping from (whatever dimensions we are at
+    #    -- find 
     #    out using .shape) to 50
     # 10. A ReLU
     # 11. A fully connected layer mapping from 50 to 10 dimensions
@@ -109,8 +137,26 @@ def main(Nfiles=None):
     class Net(nn.Module):
         def __init__(self):
             super(Net, self).__init__()
-            self.conv1 = nn.Conv2d(in_channels=3, out_channels=10, kernel_size=5)
-            self.conv2 = nn.Conv2d(in_channels=10, out_channels=20, kernel_size=5)
+            self.conv1 = nn.Conv2d(
+                in_channels=3,
+                out_channels=10,
+                kernel_size=5
+            )
+            self.conv2 = nn.Conv2d(
+                in_channels=10,
+                out_channels=20,
+                kernel_size=5
+            )
+            self.conv3 = nn.Conv2d(
+                in_channels=20,
+                out_channels=50,
+                kernel_size=5
+            )
+            self.conv4 = nn.Conv2d(
+                in_channels=50,
+                out_channels=80,
+                kernel_size=10
+            )
             # Dropout for convolutions
             self.drop = nn.Dropout2d()
             # Fully connected layer
@@ -129,10 +175,18 @@ def main(Nfiles=None):
             x = self.conv1(x) # 1
             x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
             x = torch.nn.functional.relu(x) # 3
+
             x = self.conv2(x) # 4
             x = self.drop(x) # 5
             x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
             x = torch.nn.functional.relu(x) # 7
+
+            x = self.conv3(x)
+            x = torch.nn.functional.relu(x)
+
+            x = self.conv4(x)
+            x = torch.nn.functional.relu(x)
+
             x = x.flatten(start_dim=1) # 8
             self.make_fc1(x)
             x = self.fc1(x) # 9
@@ -150,6 +204,7 @@ def main(Nfiles=None):
                 generator=torch.Generator(device=device_str)
             )
             layer_in.bias.data.fill_(0.0)
+        return None
 
     # Create network
     model = Net().to(device)
@@ -158,17 +213,17 @@ def main(Nfiles=None):
     # Define optimizer
     optimizer = optim.SGD(
         model.parameters(), 
-        lr=0.01, 
+        lr=lr, 
         momentum=0.5
     )
 
     loss_function = torch.nn.MSELoss()
-    return None
 
     # Main training routine
     def train(epoch):
         model.train()
         # Get each
+        sum_losses = 0.
         for batch_idx, (data, target) in enumerate(train_loader):
             optimizer.zero_grad()
             output = model(data.to(device))
@@ -176,18 +231,21 @@ def main(Nfiles=None):
             loss.backward()
             optimizer.step()
             # Store results
-            #if batch_idx % 10 == 0:
-            if True:
+            sum_losses += loss
+            if batch_idx % 5 == 0:
                 print(
                     'Train Epoch: {0}'
-                            '[{1}/{2} samples optimized]\tLoss: {3:.6f}'.format(
+                            '[{1}/{2} samples optimized]'
+                            '\tLoss: {3:.6f}'.format(
                         epoch, 
                         batch_idx * len(data), 
                         len(train_loader.dataset), 
                         loss.item()
                     )
                 )
-    return None
+        avg_loss = sum_losses / (batch_idx + 1)
+        wandb.log({'training loss': avg_loss})
+        return None
 
     # Run on test data
     def test():
@@ -198,18 +256,21 @@ def main(Nfiles=None):
             for data, target in test_loader:
                 output = model(data.to(device))
                 test_loss += loss_function(output, target).item()
-                pred = output.data.max(1, keepdim=True)[1]
         test_loss /= len(test_loader.dataset)
         print('\nTest set: Avg. loss: {:.4f}\n'.format(
             test_loss
         ))
-    return None
+        print('10 SAMPLE OUTPUTS')
+        print(output[:10])
+        print('\nCORRESPONDING TARGETS')
+        print(target[:10])
+        return None
 
     # Get initial performance
+    print('\nGetting initial performance.')
     test()
-    # Train for three epochs
-    n_epochs = 3
-    for epoch in range(1, n_epochs + 1):
+    print('Training.')
+    for epoch in range(1, N_epochs + 1):
         train(epoch)
         test()
 

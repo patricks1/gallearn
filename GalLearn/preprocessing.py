@@ -10,10 +10,10 @@ def load_data():
 
     start = time.time()
     with h5py.File(data_path, 'r') as f:
-        X = torch.FloatTensor(np.array(f['X'])).permute(3, 2, 1, 0)
-        obs_sorted = list(f['obs_sorted'])
-        file_names = list(f['file_names'])
-        ys_sorted = torch.FloatTensor(np.array(f['ys_sorted']))
+        X = torch.FloatTensor(np.array(f['X'])).permute(3, 2, 0, 1)
+        obs_sorted = np.array(f['obs_sorted'], dtype=str)
+        file_names = np.array(f['file_names'], dtype=str)
+        ys_sorted = torch.FloatTensor(np.array(f['ys_sorted'])).transpose(1, 0)
     d = {
         'X': X,
         'obs_sorted': obs_sorted,
