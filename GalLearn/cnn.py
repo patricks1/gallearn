@@ -160,8 +160,8 @@ def main(Nfiles=None):
                 kernel_size=kernel_size
             )
             self.conv5 = nn.Conv2d(
-                in_channel=80,
-                out_channel=80,
+                in_channels=80,
+                out_channels=80,
                 kernel_size=kernel_size
             )
             # Dropout for convolutions
