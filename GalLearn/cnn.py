@@ -22,6 +22,7 @@ def main(Nfiles=None):
 
     lr=0.01 # learning rate
     N_epochs = 4
+    kernel_size = 20
 
     wandb.init(
         # set the wandb project where this run will be logged
@@ -33,6 +34,7 @@ def main(Nfiles=None):
             "architecture": "CNN",
             "dataset": "500x500 hosts, xy projection, drop >2000x2000",
             "epochs": N_epochs,
+            'kernel size': kernel_size
         }
     )
 
@@ -140,22 +142,27 @@ def main(Nfiles=None):
             self.conv1 = nn.Conv2d(
                 in_channels=3,
                 out_channels=10,
-                kernel_size=5
+                kernel_size=kernel_size
             )
             self.conv2 = nn.Conv2d(
                 in_channels=10,
                 out_channels=20,
-                kernel_size=5
+                kernel_size=kernel_size
             )
             self.conv3 = nn.Conv2d(
                 in_channels=20,
                 out_channels=50,
-                kernel_size=5
+                kernel_size=kernel_size
             )
             self.conv4 = nn.Conv2d(
                 in_channels=50,
                 out_channels=80,
-                kernel_size=10
+                kernel_size=kernel_size
+            )
+            self.conv5 = nn.Conv2d(
+                in_channel=80,
+                out_channel=80,
+                kernel_size=kernel_dize
             )
             # Dropout for convolutions
             self.drop = nn.Dropout2d()
@@ -186,6 +193,9 @@ def main(Nfiles=None):
 
             x = self.conv4(x)
             x = torch.nn.functional.relu(x)
+
+            x = self.conv5(x)
+            x = torch.nn(functional.relu(x))
 
             x = x.flatten(start_dim=1) # 8
             self.make_fc1(x)
