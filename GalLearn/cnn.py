@@ -195,7 +195,7 @@ def main(Nfiles=None):
             x = torch.nn.functional.relu(x)
 
             x = self.conv5(x)
-            x = torch.nn(functional.relu(x))
+            x = torch.nn.functional.relu(x)
 
             x = x.flatten(start_dim=1) # 8
             self.make_fc1(x)
