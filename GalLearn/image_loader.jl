@@ -4,8 +4,7 @@ module image_loader
     using CSV
     using DataFrames
     using ProgressBars
-    using ImageFiltering
-
+    #import ImageFiltering
     import Images
 
     direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
@@ -15,9 +14,10 @@ module image_loader
     gallearn_dir = "/export/nfs0home/pstaudt/projects/gal-learn/GalLearn"
     # tgt_dir = "/export/nfs0home/lyxia/scripts/FIREBox/scripts/csvresults/" *
     #     "FIREBox_Allstars"
-    tgt_dir = "/DFS-L/DATA/cosmo/pstaudt/luke_protodata"
-    feature_matrix_dir = "/DFS-L/DATA/cosmo/pstaudt"
+    tgt_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
+    output_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn"
 
+    res = 500 # Make the images res x res resolution
 
     function process_file(
                 fname,
@@ -25,6 +25,7 @@ module image_loader
                 X,
                 shapeXimgs,
                 obs_sorted,
+                fnames_sorted,
                 direc,
                 gallearn_dir
             )
@@ -74,22 +75,26 @@ module image_loader
         # Save this file's position. 
         underscores = findall(isequal('_'), fname)
         push!(obs_sorted, fname[1 : underscores[2] - 1])
+        push!(fnames_sorted, fname)
 
-        if shapeXimgs < shape_band
-            #pad = (shape_band .- shapeXimgs) ./ 2
-            #X = ImageFiltering.padarray(
-            #    X, 
-            #    Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
-            #)
-            X = Images.imresize(X, size(X)[1:2]..., shape_band...)
-        elseif shape_band < shapeXimgs
-            #pad = (shapeXimgs .- shape_band) ./ 2
-            #img = ImageFiltering.padarray(
-            #    img,
-            #    Fill(0., (0, Int(pad[1]), Int(pad[2])))
-            #)
+        #if shapeXimgs < shape_band
+        #    #pad = (shape_band .- shapeXimgs) ./ 2
+        #    #X = ImageFiltering.padarray(
+        #    #    X, 
+        #    #    Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
+        #    #)
+        #    X = Images.imresize(X, size(X)[1:2]..., shape_band...)
+        #elseif shape_band < shapeXimgs
+        #    #pad = (shapeXimgs .- shape_band) ./ 2
+        #    #img = ImageFiltering.padarray(
+        #    #    img,
+        #    #    Fill(0., (0, Int(pad[1]), Int(pad[2])))
+        #    #)
+        #    img = Images.imresize(img, 3, shapeXimgs...)
+        #end           
+        if shapeXimgs != shape_band
             img = Images.imresize(img, 3, shapeXimgs...)
-        end           
+        end
             
         X = parent(X) # Removing ridiculous OffsetArray indexing
         X[iX, :, :, :] = img
@@ -124,7 +129,7 @@ module image_loader
         return ys
     end
 
-    function load_images(; Nfiles=nothing)
+    function load_images(; Nfiles=nothing, logandscale=false)
         files = filter(
             f -> isfile(joinpath(direc, f)) && endswith(f, ".hdf5"), 
             readdir(direc)
@@ -154,9 +159,10 @@ module image_loader
             Nfiles = length(good_files)
         end
 
-        global X = zeros(Nfiles, 3, 1900, 1900) 
+        global X = zeros(Nfiles, 3, res, res) 
         shapeXimgs = size(X)[end - 1 : end]
         obs_sorted = String[]
+        fnames_sorted = Strig[]
 
         iX = 1
         for fname in ProgressBar(
@@ -168,6 +174,7 @@ module image_loader
                 X,
                 shapeXimgs,
                 obs_sorted,
+                fnames_sorted,
                 direc,
                 gallearn_dir
             )
@@ -175,15 +182,18 @@ module image_loader
         # Get rid of the ridiculous OffsetArray indexing
         X = parent(X)
         println("X shape: $(size(X))")
-        # Turn zeros into the smallest value greater than zero to avoid -Inf in
-        # the logs.
-        is_zero = X .== 0
-        X[is_zero] .= minimum(X[.!is_zero])
-        logX = log10.(X)
-        normX = (
-            (logX .- minimum(logX)) ./ (maximum(logX) .- minimum(logX))
-        )
-        return obs_sorted, normX, files
+        if logandscale
+            # Turn zeros into the smallest value greater than zero to avoid 
+            # -Inf in
+            # the logs.
+            is_zero = X .== 0
+            X[is_zero] .= minimum(X[.!is_zero])
+            logX = log10.(X)
+            X = (
+                (logX .- minimum(logX)) ./ (maximum(logX) .- minimum(logX))
+            )
+        end
+        return obs_sorted, X, fnames_sorted
     end
 
     function load_data(; Nfiles=nothing, save=false)
@@ -200,14 +210,18 @@ module image_loader
         #println(size(X))
 
         if save
-            h5open(joinpath(feature_matrix_dir, "feature_matrix.h5"), "w") do f
+            h5open(joinpath(output_dir, "gallearn_data.h5"), "w") do f
                 for (label, data) in [
                             ["X", X],
                             ["obs_sorted", obs_sorted],
                             ["file_names", files],
                             ["ys_sorted", ys_sorted]
                         ]
-                    println("Trying to save " * label * " of type $(typeof(data))")
+                    println(
+                        "Trying to save " 
+                        * label 
+                        * " of type $(typeof(data))"
+                    )
                     write(f, label, data)
                 end
             end
