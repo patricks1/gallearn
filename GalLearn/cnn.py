@@ -20,7 +20,7 @@ def main(Nfiles=None):
     import torch.nn as nn
     import torch.optim as optim
 
-    lr=0.01 # learning rate
+    lr=0.005 # learning rate
     N_epochs = 4
     kernel_size = 20
 
