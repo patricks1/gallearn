@@ -162,7 +162,7 @@ module image_loader
         global X = zeros(Nfiles, 3, res, res) 
         shapeXimgs = size(X)[end - 1 : end]
         obs_sorted = String[]
-        fnames_sorted = Strig[]
+        fnames_sorted = String[]
 
         iX = 1
         for fname in ProgressBar(
