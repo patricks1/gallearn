@@ -34,13 +34,12 @@ def main(Nfiles=None):
     torch.set_default_device(device_str)
 
     lr=0.01 # learning rate
-    N_epochs = 2 
+    N_epochs = 4
     kernel_size = 20
 
     wandb.init(
         # set the wandb project where this run will be logged
         project="gallearn",
-        name='testing',
 
         # track hyperparameters and run metadata
         config={
