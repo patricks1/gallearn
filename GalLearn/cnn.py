@@ -33,13 +33,14 @@ def main(Nfiles=None):
     device = torch.device(device_str)
     torch.set_default_device(device_str)
 
-    lr=0.005 # learning rate
-    N_epochs = 4
+    lr=0.01 # learning rate
+    N_epochs = 2 
     kernel_size = 20
 
     wandb.init(
         # set the wandb project where this run will be logged
         project="gallearn",
+        name='testing',
 
         # track hyperparameters and run metadata
         config={
@@ -79,7 +80,6 @@ def main(Nfiles=None):
     X = d['X'].to(device=device_str)
     X = preprocessing.min_max_scale(X)
     ys = d['ys_sorted'].to(device=device_str)
-    print('ys shape: {0}'.format(ys.shape))
 
     N_all = len(ys) 
     print('{0:0.0f} galaxies in data'.format(N_all))
@@ -173,8 +173,9 @@ def main(Nfiles=None):
             return None
 
         def make_fc1(self, x):
-            length = x.shape[1]
-            self.fc1 = nn.Linear(length, 50)
+            if not hasattr(self, 'fc1'):
+                length = x.shape[1]
+                self.fc1 = nn.Linear(length, 50)
             return None
 
         def forward(self, x):
@@ -186,7 +187,7 @@ def main(Nfiles=None):
             x = torch.nn.functional.relu(x) # 3
 
             x = self.conv2(x) # 4
-            x = self.drop(x) # 5
+            #x = self.drop(x) # 5
             x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
             x = torch.nn.functional.relu(x) # 7
 
@@ -239,6 +240,13 @@ def main(Nfiles=None):
         for batch_idx, (data, target) in enumerate(train_loader):
             optimizer.zero_grad()
             output = model(data.to(device))
+            print('\nOutput while training:')
+            print(output)
+            print('\nRunning only some through the model:')
+            print(model(data.to(device)[:2]))
+            print(model(data.to(device)[2:]))
+            print('\nRunning it all through again:')
+            print(model(data.to(device)))
             loss = loss_function(output, target)
             loss.backward()
             optimizer.step()
@@ -266,11 +274,14 @@ def main(Nfiles=None):
         correct = 0
         with torch.no_grad():
             for data, target in test_loader:
+                print('Output while testing')
                 output = model(data.to(device))
-                print('OUTPUT FROM TEST')
-                print(output)
-                print('\nTEST TGT')
-                print(target)
+                print(output[:10])
+                print('Now evalating in chunks:')
+                print(model(data.to(device)[:5]))
+                print(model(data.to(device)[5:10]))
+                print('Now evaluating everything at once again.')
+                print(model(data.to(device)[:10]))
                 test_loss += loss_function(output, target).item()
         print('Length of test_loader.dataset: {0:0.0f}'.format(
             len(test_loader.dataset))
@@ -279,10 +290,6 @@ def main(Nfiles=None):
         print('\nTest set: Avg. loss: {:.4f}\n'.format(
             test_loss
         ))
-        print('10 SAMPLE OUTPUTS')
-        print(output[:10])
-        print('\nCORRESPONDING TARGETS')
-        print(target[:10])
         return None
 
     # Get initial performance
@@ -293,12 +300,28 @@ def main(Nfiles=None):
         train(epoch)
         test()
 
+    print('Running output code right from the training function.\nOutput:')
+    for batch_idx, (data, target) in enumerate(train_loader):
+        optimizer.zero_grad()
+        output = model(data.to(device))
+        print(output)
+
     # Run network on data we got before and show predictions
     test_examples = enumerate(test_loader)
     batch_idx, (test_data, test_tgts) = next(test_examples)
     output = model(test_data.to(device))
+    print('\nUsing test data:\nOutput:')
     print(output)
+    print('Targets:')
     print(test_tgts)
+
+    train_examples = enumerate(train_loader)
+    batch_idx, (train_data, train_tgts) = next(train_examples)
+    output = model(train_data.to(device))
+    print('Uinsg train data:\nOutput:')
+    print(output)
+    print('Targets:')
+    print(train_tgts)
     
     return None
 
