@@ -4,9 +4,11 @@ import math
 
 def load_data():
     import torch
+    import os
+    import paths
     import numpy as np
 
-    data_path = "/DFS-L/DATA/cosmo/pstaudt/gallearn/gallearn_data.h5"
+    data_path = os.path.join(paths.data, 'gallearn_data.h5')
 
     start = time.time()
     with h5py.File(data_path, 'r') as f:

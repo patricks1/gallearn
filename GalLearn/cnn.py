@@ -20,6 +20,19 @@ def main(Nfiles=None):
     import torch.nn as nn
     import torch.optim as optim
 
+    try:
+        has_mps = torch.backends.mps.is_available()
+    except:
+        has_mps = False
+    if has_mps:
+        device_str = 'mps'
+    elif torch.cuda.is_available():
+        device_str = 'cuda'
+    else:
+        device_str = 'cpu'
+    device = torch.device(device_str)
+    torch.set_default_device(device_str)
+
     lr=0.005 # learning rate
     N_epochs = 4
     kernel_size = 20
@@ -63,9 +76,10 @@ def main(Nfiles=None):
     #)
 
     d = preprocessing.load_data()
-    X = d['X']
+    X = d['X'].to(device=device_str)
     X = preprocessing.min_max_scale(X)
-    ys = d['ys_sorted']
+    ys = d['ys_sorted'].to(device=device_str)
+    print('ys shape: {0}'.format(ys.shape))
 
     N_all = len(ys) 
     print('{0:0.0f} galaxies in data'.format(N_all))
@@ -81,24 +95,12 @@ def main(Nfiles=None):
     X_train = X[is_train]
     X_test = X[~is_train]
 
-    try:
-        has_mps = torch.backends.mps.is_available()
-    except:
-        has_mps = False
-    if has_mps:
-        device_str = 'mps'
-    elif torch.cuda.is_available():
-        device_str = 'cuda'
-    else:
-        device_str = 'cpu'
-    device = torch.device(device_str)
-    torch.set_default_device(device_str)
-
     # Run this once to load the train and test data straight into a dataloader 
     # class
     # that will provide the batches
     batch_size_train = max(1, int(N_train / N_batches))
-    batch_size_test = N_test
+    #batch_size_test = N_test
+    batch_size_test = 20
     train_loader = torch.utils.data.DataLoader(
         torch.utils.data.TensorDataset(X_train, ys_train),
         batch_size=batch_size_train, 
@@ -265,7 +267,14 @@ def main(Nfiles=None):
         with torch.no_grad():
             for data, target in test_loader:
                 output = model(data.to(device))
+                print('OUTPUT FROM TEST')
+                print(output)
+                print('\nTEST TGT')
+                print(target)
                 test_loss += loss_function(output, target).item()
+        print('Length of test_loader.dataset: {0:0.0f}'.format(
+            len(test_loader.dataset))
+        )
         test_loss /= len(test_loader.dataset)
         print('\nTest set: Avg. loss: {:.4f}\n'.format(
             test_loss
