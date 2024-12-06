@@ -1,11 +1,45 @@
+def load_fr_julia():
+    from julia.api import Julia
+    jl = Julia(compiled_modules=False, debug=False)
+
+    import julia
+    from julia import Pkg
+    from julia import Main
+
+    import subprocess
+    import torch
+
+    import numpy as np
+
+    Pkg.activate('/export/nfs0home/pstaudt/projects/gal-learn/GalLearn')
+
+    # Attempt to locate the Julia executable path
+    try:
+        julia_path = subprocess.check_output(
+                ["which", "julia"]
+            ).decode("utf-8").strip()
+        print("Julia executable path:", julia_path)
+        
+        # Optional: Print Julia version to verify
+        julia_version = subprocess.check_output(
+                [julia_path, "--version"]
+            ).decode("utf-8").strip()
+        print("Julia version:", julia_version)
+    except subprocess.CalledProcessError:
+        print("Julia executable not found in PATH")
+
+    Main.include('image_loader.jl')
+    obs_sorted, ys, ys_sorted, X, files = julia.Main.image_loader.load_data(
+        Nfiles=Nfiles,
+        res=1500
+    )
+
+    ys = torch.FloatTensor(np.array(ys_sorted))
+    X = torch.FloatTensor(X)
+
+    return X, ys
+
 def main(Nfiles=None):
-    #from julia.api import Julia
-    #jl = Julia(compiled_modules=False, debug=False)
-
-    #import julia
-    #from julia import Pkg
-    #from julia import Main
-
     import preprocessing
     import random
     import wandb
@@ -40,42 +74,21 @@ def main(Nfiles=None):
     wandb.init(
         # set the wandb project where this run will be logged
         project="gallearn",
+        name='test',
 
         # track hyperparameters and run metadata
         config={
             "learning_rate": lr,
             "architecture": "CNN",
-            "dataset": "500x500 hosts, xy projection, drop >2000x2000",
+            "dataset": (
+                "Set of 100 1500x1500 hosts, xy projection, drop >2000x2000"
+            ),
             "epochs": N_epochs,
             'kernel size': kernel_size
         }
     )
 
-
-    #Pkg.activate('/export/nfs0home/pstaudt/projects/gal-learn/GalLearn')
-
-    # Attempt to locate the Julia executable path
-    #import subprocess
-    #try:
-    #    julia_path = subprocess.check_output(
-    #            ["which", "julia"]
-    #        ).decode("utf-8").strip()
-    #    print("Julia executable path:", julia_path)
-    #    
-    #    # Optional: Print Julia version to verify
-    #    julia_version = subprocess.check_output(
-    #            [julia_path, "--version"]
-    #        ).decode("utf-8").strip()
-    #    print("Julia version:", julia_version)
-    #except subprocess.CalledProcessError:
-    #    print("Julia executable not found in PATH")
-
-    #Main.include('image_loader.jl')
-    #obs_sorted, ys, ys_sorted, X, files = julia.Main.image_loader.load_data(
-    #    Nfiles=Nfiles
-    #)
-
-    d = preprocessing.load_data()
+    d = preprocessing.load_data('gallearn_data_1500x1500_subsample.h5')
     X = d['X'].to(device=device_str)
     X = preprocessing.min_max_scale(X)
     ys = d['ys_sorted'].to(device=device_str)

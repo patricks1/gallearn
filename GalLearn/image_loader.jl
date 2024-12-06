@@ -208,7 +208,12 @@ module image_loader
         #println(size(X))
 
         if save
-            h5open(joinpath(output_dir, "gallearn_data.h5"), "w") do f
+            fname = "gallearn_data_" * string(res) * "x" * string(res)
+            if Nfiles !== nothing
+                fname *= "_subsample"
+            end
+            fname *= ".h5"
+            h5open(joinpath(output_dir, fname), "w") do f
                 for (label, data) in [
                             ["X", X],
                             ["obs_sorted", obs_sorted],

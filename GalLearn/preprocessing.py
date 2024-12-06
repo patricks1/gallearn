@@ -2,13 +2,13 @@ import h5py
 import time
 import math
 
-def load_data():
+def load_data(fname='gallearn_data.h5'):
     import torch
     import os
     import paths
     import numpy as np
 
-    data_path = os.path.join(paths.data, 'gallearn_data.h5')
+    data_path = os.path.join(paths.data, fname)
 
     start = time.time()
     with h5py.File(data_path, 'r') as f:
