@@ -116,8 +116,31 @@ module image_loader
         return X, shapeXimgs, iX
     end
 
-    function red_2d_tgt()
-        dat = CSV.read(tgt_2d_path, DataFrame)
+    function read_2d_tgt()
+        dat = CSV.read(
+            tgt_2d_path,
+            DataFrame,
+            header=["galaxyID",
+                    "FOV",
+                    "pixel",
+                    "view",
+                    "band",
+                    "level",
+                    "ncontour",
+                    "cx",
+                    "cy",
+                    "a",
+                    "b",
+                    "theta",
+                    "flag",
+                    "lum_sum",
+                    "b_a_ave",
+                    "b_a_std",
+                    "lim",
+                    "nrange"
+                ]
+            )
+        return dat
     end
 
     function read_3d_tgt()
@@ -131,10 +154,6 @@ module image_loader
             ys = vcat(ys, ys_add)
         end
         return ys
-    end
-
-    function read_2d_tgt()
-
     end
 
     function load_images(; Nfiles=nothing, logandscale=false, res=500)
