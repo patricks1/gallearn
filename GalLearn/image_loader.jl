@@ -17,8 +17,6 @@ module image_loader
     tgt_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
     output_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn"
 
-    res = 500 # Make the images res x res resolution
-
     function process_file(
                 fname,
                 iX,
@@ -129,7 +127,7 @@ module image_loader
         return ys
     end
 
-    function load_images(; Nfiles=nothing, logandscale=false)
+    function load_images(; Nfiles=nothing, logandscale=false, res=500)
         files = filter(
             f -> isfile(joinpath(direc, f)) && endswith(f, ".hdf5"), 
             readdir(direc)
@@ -196,8 +194,8 @@ module image_loader
         return obs_sorted, X, fnames_sorted
     end
 
-    function load_data(; Nfiles=nothing, save=false)
-        obs_sorted, X, files = load_images(Nfiles=Nfiles)
+    function load_data(; Nfiles=nothing, save=false, res=500)
+        obs_sorted, X, files = load_images(Nfiles=Nfiles, res=res)
         ys = read_tgt() 
         ys_sorted = ys[[
                 findfirst(x -> x == val, ys.Simulation) for val in obs_sorted
