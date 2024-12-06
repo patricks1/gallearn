@@ -1,4 +1,4 @@
-def load_fr_julia():
+def load_fr_julia(Nfiles):
     from julia.api import Julia
     jl = Julia(compiled_modules=False, debug=False)
 
