@@ -12,9 +12,11 @@ module image_loader
     direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
         "ugrband_massmocks_final"
     gallearn_dir = "/export/nfs0home/pstaudt/projects/gal-learn/GalLearn"
-    # tgt_dir = "/export/nfs0home/lyxia/scripts/FIREBox/scripts/csvresults/" *
+    # tgt_3d_dir = "/export/nfs0home/lyxia/scripts/FIREBox/scripts/csvresults/" *
     #     "FIREBox_Allstars"
-    tgt_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
+    tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
+    tgt_2d_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
+        "AstroPhot_Host_Sersic-Copy1.csv"
     output_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn"
 
     function process_file(
@@ -114,17 +116,25 @@ module image_loader
         return X, shapeXimgs, iX
     end
 
-    function read_tgt()
-        files = readdir(tgt_dir)
-        ys = CSV.read(joinpath(tgt_dir, "FIREBoxm9.csv"), DataFrame)
+    function red_2d_tgt()
+        dat = CSV.read(tgt_2d_path, DataFrame)
+    end
+
+    function read_3d_tgt()
+        files = readdir(tgt_3d_dir)
+        ys = CSV.read(joinpath(tgt_3d_dir, "FIREBoxm9.csv"), DataFrame)
         for mclass in ["7", "8", "10"] 
             ys_add = CSV.read(
-                joinpath(tgt_dir, "FIREBoxm" * mclass * ".csv"), 
+                joinpath(tgt_3d_dir, "FIREBoxm" * mclass * ".csv"), 
                 DataFrame
             )
             ys = vcat(ys, ys_add)
         end
         return ys
+    end
+
+    function read_2d_tgt()
+
     end
 
     function load_images(; Nfiles=nothing, logandscale=false, res=500)
@@ -143,7 +153,7 @@ module image_loader
         ]
         is_bad = [any(occursin(baddy, f) for baddy in baddies) for f in files]
 
-        ys = read_tgt()
+        ys = read_3d_tgt()
         in_tgt = [
             any(occursin(obj * "_", f) for obj in ys.Simulation) 
             for f in files
@@ -196,7 +206,7 @@ module image_loader
 
     function load_data(; Nfiles=nothing, save=false, res=500)
         obs_sorted, X, files = load_images(Nfiles=Nfiles, res=res)
-        ys = read_tgt() 
+        ys = read_3d_tgt() 
         ys_sorted = ys[[
                 findfirst(x -> x == val, ys.Simulation) for val in obs_sorted
             ], :]

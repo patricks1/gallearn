@@ -199,7 +199,7 @@ def main(Nfiles=None):
             x = torch.nn.functional.relu(x) # 3
 
             x = self.conv2(x) # 4
-            #x = self.drop(x) # 5
+            x = self.drop(x) # 5
             x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
             x = torch.nn.functional.relu(x) # 7
 
