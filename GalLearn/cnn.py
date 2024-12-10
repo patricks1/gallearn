@@ -73,7 +73,7 @@ def main(Nfiles=None):
 
     wandb.init(
         # set the wandb project where this run will be logged
-        project="gallearn",
+        project="2d_gallearn",
         name='test',
 
         # track hyperparameters and run metadata
@@ -88,7 +88,7 @@ def main(Nfiles=None):
         }
     )
 
-    d = preprocessing.load_data('gallearn_data_1500x1500_subsample.h5')
+    d = preprocessing.load_data('gallearn_data_500x500_2d_tgt.h5')
     X = d['X'].to(device=device_str)
     X = preprocessing.min_max_scale(X)
     ys = d['ys_sorted'].to(device=device_str)
@@ -154,7 +154,7 @@ def main(Nfiles=None):
         def __init__(self):
             super(Net, self).__init__()
             self.conv1 = nn.Conv2d(
-                in_channels=3,
+                in_channels=1,
                 out_channels=10,
                 kernel_size=kernel_size
             )

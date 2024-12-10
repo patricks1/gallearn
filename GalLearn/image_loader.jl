@@ -12,8 +12,6 @@ module image_loader
     direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
         "ugrband_massmocks_final"
     gallearn_dir = "/export/nfs0home/pstaudt/projects/gal-learn/GalLearn"
-    # tgt_3d_dir = "/export/nfs0home/lyxia/scripts/FIREBox/scripts/csvresults/" *
-    #     "FIREBox_Allstars"
     tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
     tgt_2d_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
         "AstroPhot_Host_Sersic-Copy1.csv"
@@ -27,10 +25,17 @@ module image_loader
                 obs_sorted,
                 fnames_sorted,
                 direc,
-                gallearn_dir
+                gallearn_dir,
+                all_bands
             )
         open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
             println(f, fname)      
+        end
+
+        if all_bands
+            Nbands = 3
+        else
+            Nbands = 1
         end
 
         path = joinpath(direc, fname)
@@ -39,7 +44,12 @@ module image_loader
             global shape_band
             shape_band = nothing
             img = nothing
-            for (i, band) in enumerate(["g", "u", "r"])
+            if all_bands
+                bands = ["g", "u", "r"]
+            else
+                bands = ["g"]
+            end
+            for (i, band) in enumerate(bands)
                 band = "band_" * band
                 band_img = read(file, "projection_xy/" * band)
                 shape_band = size(band_img) 
@@ -50,7 +60,7 @@ module image_loader
                     break 
                 end
                 if i == 1 
-                    img = zeros(3, shape_band...) 
+                    img = zeros(Nbands, shape_band...) 
                 elseif size(band_img) != shape_band
                     error("Bands have different shapes.")
                 end
@@ -90,10 +100,21 @@ module image_loader
         #    #    img,
         #    #    Fill(0., (0, Int(pad[1]), Int(pad[2])))
         #    #)
-        #    img = Images.imresize(img, 3, shapeXimgs...)
+        #    img = Images.imresize(img, Nbands, shapeXimgs...)
         #end           
+
         if shapeXimgs != shape_band
-            img = Images.imresize(img, 3, shapeXimgs...)
+            if Nbands > 1
+                img = Images.imresize(
+                    img,
+                    Nbands,
+                    shapeXimgs...
+                )
+            else
+                innerimg = img[1, :, :]
+                img = Images.imresize(innerimg, shapeXimgs...)
+                img = reshape(img, (1, size(img)...))
+            end
         end
             
         X = parent(X) # Removing ridiculous OffsetArray indexing
@@ -120,27 +141,23 @@ module image_loader
         dat = CSV.read(
             tgt_2d_path,
             DataFrame,
-            header=["galaxyID",
-                    "FOV",
-                    "pixel",
-                    "view",
-                    "band",
-                    "level",
-                    "ncontour",
-                    "cx",
-                    "cy",
-                    "a",
-                    "b",
-                    "theta",
-                    "flag",
-                    "lum_sum",
-                    "b_a_ave",
-                    "b_a_std",
-                    "lim",
-                    "nrange"
-                ]
-            )
-        return dat
+            header=[
+                "galaxyID",
+                "FOV",
+                "pixel",
+                "view",
+                "band",
+                "b_a_ave",
+                "PA",
+                "n",
+                "Re",
+                "Ie"
+            ]
+        )
+        dat.galaxyID .= "object_" .* string.(dat.galaxyID)
+        DataFrames.rename!(dat, :galaxyID => :Simulation)
+        xydat = dat[dat.view .== "projection_xy", :]
+        return xydat 
     end
 
     function read_3d_tgt()
@@ -156,7 +173,12 @@ module image_loader
         return ys
     end
 
-    function load_images(; Nfiles=nothing, logandscale=false, res=500)
+    function load_images(
+                ; Nfiles=nothing,
+                logandscale=false,
+                res=500,
+                tgt_type="3d"
+            )
         files = filter(
             f -> isfile(joinpath(direc, f)) && endswith(f, ".hdf5"), 
             readdir(direc)
@@ -172,7 +194,22 @@ module image_loader
         ]
         is_bad = [any(occursin(baddy, f) for baddy in baddies) for f in files]
 
-        ys = read_3d_tgt()
+        if tgt_type == "3d"
+            ys = read_3d_tgt()
+            all_bands = true
+        elseif tgt_type == "2d"
+            ys = read_2d_tgt()
+            all_bands = false
+        else
+            throw(ArgumentError("`tgt_type` should be \"2d\" or \"3d\"."))
+        end
+        
+        # For every file name, create a mask the size of ys.Simulation where a 
+        # `true`
+        # marks the row (if any) where `obj * "_"`
+        # occurs in that file name. 
+        # If any row in that mask is true (although there should be at most
+        # one), the given file is marked with a `true`.
         in_tgt = [
             any(occursin(obj * "_", f) for obj in ys.Simulation) 
             for f in files
@@ -186,7 +223,14 @@ module image_loader
             Nfiles = length(good_files)
         end
 
-        global X = zeros(Nfiles, 3, res, res) 
+        if tgt_type == "2d"
+            Nbands = 1
+        elseif tgt_type == "3d"
+            Nbands = 3
+        else
+            throw(ArgumentError("`tgt_type` should be \"2d\" or \"3d\"."))
+        end
+        global X = zeros(Nfiles, Nbands, res, res) 
         shapeXimgs = size(X)[end - 1 : end]
         obs_sorted = String[]
         fnames_sorted = String[]
@@ -203,7 +247,8 @@ module image_loader
                 obs_sorted,
                 fnames_sorted,
                 direc,
-                gallearn_dir
+                gallearn_dir,
+                all_bands
             )
         end
         # Get rid of the ridiculous OffsetArray indexing
@@ -220,28 +265,49 @@ module image_loader
                 (logX .- minimum(logX)) ./ (maximum(logX) .- minimum(logX))
             )
         end
-        return obs_sorted, X, fnames_sorted
+        return obs_sorted, X, fnames_sorted, ys
     end
 
-    function load_data(; Nfiles=nothing, save=false, res=500)
-        obs_sorted, X, files = load_images(Nfiles=Nfiles, res=res)
-        ys = read_3d_tgt() 
-        ys_sorted = ys[[
-                findfirst(x -> x == val, ys.Simulation) for val in obs_sorted
-            ], :]
-        ys_sorted = Array(ys_sorted[:, ["b/a", "c/a"]])
+    function load_data(tgt_type; Nfiles=nothing, save=false, res=500)
+        obs_sorted, X, files, ys = load_images(
+            Nfiles=Nfiles,
+            res=res,
+            tgt_type=tgt_type
+        )
 
-        #println(size(ys))
-        #println(size(ys_sorted))
-        #println(size(obs_sorted))
-        #println(size(X))
+        indices = [
+            findfirst(x -> x == val, ys.Simulation) for val in obs_sorted
+        ]
+        ys_sorted = ys[
+            indices,
+            :
+        ]
+
+        if tgt_type == "3d"
+            ys_sorted = Array(ys_sorted[:, ["b/a", "c/a"]])
+        elseif tgt_type == "2d"
+            ys_sorted = Array(ys_sorted[:, "b_a_ave"])
+            println("`ys` type: " * string(typeof(ys_sorted)))
+            ys_sorted = reshape(ys_sorted, (size(ys_sorted)..., 1))
+            println("`ys` shape: " * string(size(ys_sorted)))
+        else
+            throw(ArgumentError("`tgt_type` should be \"2d\" or \"3d\"."))
+        end
 
         if save
+            # Resolution
             fname = "gallearn_data_" * string(res) * "x" * string(res)
+
+            # Sample type
             if Nfiles !== nothing
                 fname *= "_subsample"
             end
+
+            # 2d or 3d target data
+            fname *= "_" * tgt_type * "_tgt"
+
             fname *= ".h5"
+
             h5open(joinpath(output_dir, fname), "w") do f
                 for (label, data) in [
                             ["X", X],

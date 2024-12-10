@@ -2,7 +2,7 @@ import h5py
 import time
 import math
 
-def load_data(fname='gallearn_data.h5'):
+def load_data(fname):
     import torch
     import os
     import paths
@@ -68,8 +68,8 @@ def plt_distrib_of_means(ax, X, title=None):
     for h, e, c, l in zip(
                 heights, 
                 edges,
-                ['C0', 'C2', 'C3'],
-                ['U', 'G', 'R']
+                ['C2', 'C0', 'C3'],
+                ['G', 'U', 'R']
             ):
         ax.stairs(
             h,
@@ -101,8 +101,8 @@ def plt_distrib(ax, X, title=None):
     for h, e, c, l in zip(
                 heights, 
                 edges,
-                ['C0', 'C2', 'C3'],
-                ['U', 'G', 'R']
+                ['C2', 'C0', 'C3'],
+                ['G', 'U', 'R']
             ):
         ax.stairs(
             h,
@@ -120,7 +120,7 @@ def test(save=False):
     import torch
     from matplotlib import pyplot as plt
 
-    X = load_data()['X']
+    X = load_data('gallearn_data_500x500_3d_tgt.h5')['X']
     Xstd = std_scale(X)
     Xminmax = min_max_scale(X)
 
