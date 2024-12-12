@@ -42,6 +42,15 @@ def min_max_scale(X):
         )
     return X
 
+def new_min_max_scale(X):
+    X = X.detach().clone()
+    for i in range(X.shape[1]):
+        X[:, i] = 255. * (
+            (X[:, i] - X[:, i].min()) 
+            / (X[:, i].max() - X[:, i].min()) 
+        )
+    return X
+
 def std_scale(X):
     X = X.detach().clone()
     for i in range(X.shape[1]):

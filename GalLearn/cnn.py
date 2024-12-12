@@ -70,21 +70,22 @@ def main(Nfiles=None):
     lr=0.001 # learning rate
     momentum = 0.05
     N_epochs = 4
-    kernel_size = 10
+    kernel_size = 80 
     N_out_channels = 1
+    activation =  torch.nn.functional.relu
 
     wandb.init(
         # set the wandb project where this run will be logged
         project="2d_gallearn",
-        name='test',
 
         # track hyperparameters and run metadata
         config={
             "learning_rate": lr,
             'momentum': momentum,
+            'activation_func': activation,
             "architecture": "CNN",
             "dataset": (
-                "Set of 100 1500x1500 hosts, xy projection, drop >2000x2000"
+                "500x500 hosts, xy projection, drop >2000x2000"
             ),
             "epochs": N_epochs,
             'kernel size': kernel_size
@@ -93,7 +94,7 @@ def main(Nfiles=None):
 
     d = preprocessing.load_data('gallearn_data_500x500_2d_tgt.h5')
     X = d['X'].to(device=device_str)
-    X = preprocessing.min_max_scale(X)
+    X = preprocessing.new_min_max_scale(X)
     ys = d['ys_sorted'].to(device=device_str)
 
     N_all = len(ys) 
@@ -109,11 +110,6 @@ def main(Nfiles=None):
     ys_test = ys[~is_train]
     X_train = X[is_train]
     X_test = X[~is_train]
-
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    preprocessing.plt_distrib(ax, X)
-    plt.show()
 
     # Run this once to load the train and test data straight into a dataloader 
     # class
@@ -163,76 +159,95 @@ def main(Nfiles=None):
             super(Net, self).__init__()
             self.conv1 = nn.Conv2d(
                 in_channels=1,
-                out_channels=1,
-                kernel_size=kernel_size
-            )
-            self.conv2 = nn.Conv2d(
-                in_channels=10,
-                out_channels=20,
-                kernel_size=kernel_size
-            )
-            self.conv3 = nn.Conv2d(
-                in_channels=20,
                 out_channels=50,
                 kernel_size=kernel_size
             )
-            self.conv4 = nn.Conv2d(
+            self.conv2 = nn.Conv2d(
                 in_channels=50,
-                out_channels=80,
+                out_channels=3,
+                kernel_size=kernel_size
+            )
+            self.conv3 = nn.Conv2d(
+                in_channels=3,
+                out_channels=1,
+                kernel_size=kernel_size
+            )
+            self.conv4 = nn.Conv2d(
+                in_channels=1,
+                out_channels=1,
                 kernel_size=kernel_size
             )
             self.conv5 = nn.Conv2d(
-                in_channels=80,
-                out_channels=80,
-                kernel_size=3
+                in_channels=1,
+                out_channels=1,
+                kernel_size=kernel_size
             )
             # Dropout for convolutions
             self.drop = nn.Dropout2d()
-            # Fully connected layer
-            self.fc2 = nn.Linear(50, N_out_channels)
+
             return None
 
         def make_fc1(self, x):
             if not hasattr(self, 'fc1'):
                 length = x.shape[1]
-                self.fc1 = nn.Linear(length, N_out_channels)
+                self.fc1 = nn.Linear(length, 50)
             return None
 
+        def make_fc2(self, x):
+            if not hasattr(self, 'fc2'):
+                length = x.shape[1]
+                self.fc2 = nn.Linear(length, 300)
+            return None
+
+        def make_fc3(self, x):
+            if not hasattr(self, 'fc3'):
+                length = x.shape[1]
+                self.fc3 = nn.Linear(length, N_out_channels)
+            return None
+
+
         def forward(self, x):
-            #x = self.conv1(x) # 1
+            x = self.conv1(x) # 1
             #x = self.drop(x) # 5
             #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-            #x = torch.nn.functional.relu(x) # 3
+            x = activation(x)
 
             #x = self.conv2(x) # 4
             #x = self.drop(x) # 5
             #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
-            #x = torch.nn.functional.relu(x) # 7
+            #x = activation(x)
 
             #x = self.conv3(x)
             #x = self.drop(x) # 5
             #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-            #x = torch.nn.functional.relu(x)
+            #x = activation(x)
 
             #x = self.conv4(x)
             #x = self.drop(x) # 5
             #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-            #x = torch.nn.functional.relu(x)
+            #x = activation(x)
 
             #x = self.conv5(x)
             #x = self.drop(x) # 5
             #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-            #x = torch.nn.functional.relu(x)
+            #x = activation(x)
 
-            x = torch.nn.functional.softplus(x)
+            x = x.flatten(start_dim=1) # 8
+            
+            #self.make_fc1(x)
+            #x = self.fc1(x) # 9
+            #x = activation(x)
+
             #plt.hist(x.flatten().detach().cpu().numpy())
             #plt.show()
-            x = x.flatten(start_dim=1) # 8
-            self.make_fc1(x)
-            x = torch.nn.functional.softplus(x)
-            x = self.fc1(x) # 9
+
+            #self.make_fc2(x)
             #x = self.fc2(x) # 11
-            # x = torch.nn.functional.sigmoid(x) # 12
+            #x = activation(x)
+
+            self.make_fc3(x)
+            x = self.fc3(x) # 11
+            x = activation(x)
             
             return x
 
@@ -330,12 +345,12 @@ def main(Nfiles=None):
     print('Corresponding targets:')
     print(test_tgts)
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    y_pred = model(X)
-    ax.hist(model[0].input.reshape(-1), bins=25, histtype='step')
-    ax.set_yscale('log')
-    plt.show()
+    #fig = plt.figure()
+    #ax = fig.add_subplot(111)
+    #y_pred = model(X)
+    #ax.hist(model[0].input.reshape(-1), bins=25, histtype='step')
+    #ax.set_yscale('log')
+    #plt.show()
 
     return None
 
