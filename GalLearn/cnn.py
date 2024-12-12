@@ -67,12 +67,18 @@ def main(Nfiles=None):
     device = torch.device(device_str)
     torch.set_default_device(device_str)
 
-    lr=0.001 # learning rate
-    momentum = 0.05
-    N_epochs = 4
+    # Things wandb will track
+    lr=0.01 # learning rate
+    momentum = 0.5
+    N_batches = 20
+    N_epochs = 65 
     kernel_size = 80 
-    N_out_channels = 1
     activation =  torch.nn.functional.relu
+    N_conv1_out_chan = 50
+    N_conv2_out_chan = 1
+
+    # Other things
+    N_out_channels = 1
 
     wandb.init(
         # set the wandb project where this run will be logged
@@ -88,7 +94,12 @@ def main(Nfiles=None):
                 "500x500 hosts, xy projection, drop >2000x2000"
             ),
             "epochs": N_epochs,
-            'kernel size': kernel_size
+            'batches': N_batches,
+            'kernel size': kernel_size,
+            'N_conv_layers': 2,
+            'N_fc_layers': 1,
+            'N_conv1_out_channels': N_conv1_out_chan,
+            'N_conv2_out_channels': N_conv2_out_chan,
         }
     )
 
@@ -101,7 +112,6 @@ def main(Nfiles=None):
     print('{0:0.0f} galaxies in data'.format(N_all))
     N_test = max(1, int(0.15 * N_all))
     N_train = N_all - N_test
-    N_batches = 20
 
     indices_test = np.random.randint(0, N_all, N_test)
     is_train = np.ones(N_all, dtype=bool)
@@ -159,12 +169,12 @@ def main(Nfiles=None):
             super(Net, self).__init__()
             self.conv1 = nn.Conv2d(
                 in_channels=1,
-                out_channels=50,
+                out_channels=N_conv1_out_chan,
                 kernel_size=kernel_size
             )
             self.conv2 = nn.Conv2d(
-                in_channels=50,
-                out_channels=3,
+                in_channels=N_conv1_out_chan,
+                out_channels=N_conv2_out_chan,
                 kernel_size=kernel_size
             )
             self.conv3 = nn.Conv2d(
@@ -212,10 +222,10 @@ def main(Nfiles=None):
             #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
             x = activation(x)
 
-            #x = self.conv2(x) # 4
+            x = self.conv2(x) # 4
             #x = self.drop(x) # 5
             #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
-            #x = activation(x)
+            x = activation(x)
 
             #x = self.conv3(x)
             #x = self.drop(x) # 5
@@ -279,6 +289,7 @@ def main(Nfiles=None):
         model.train()
         # Get each
         sum_losses = 0.
+        N_optimized = 0
         for batch_idx, (data, target) in enumerate(train_loader):
             optimizer.zero_grad()
             output = model(data.to(device))
@@ -287,20 +298,31 @@ def main(Nfiles=None):
             optimizer.step()
             # Store results
             sum_losses += loss
-            if batch_idx % 5 == 0:
+            N_optimized += len(data)
+
+            #if batch_idx % 5 == 0:
+            if True:
                 print(
                     '\nTrain Epoch: {0}'
                             '[{1}/{2} samples optimized]'
                             '\tLoss: {3:.6f}'.format(
                         epoch, 
-                        batch_idx * len(data), 
+                        N_optimized,
                         len(train_loader.dataset), 
                         loss.item()
                     )
                 )
-                print('Training batch shape: {0}'.format(
-                    data.to(device).shape
-                )) 
+                feedback = torch.stack(
+                    (output.flatten(), target.flatten()),
+                    dim=1
+                )
+                df = pd.DataFrame(
+                    data=feedback.detach().cpu().numpy(),
+                    columns=['Predictions', 'Targets']
+                )
+                pd.options.display.float_format = '{:,.3f}'.format
+                print('Training batch results:')
+                print(df)
         avg_loss = sum_losses / (batch_idx + 1)
         wandb.log({'training loss': avg_loss})
         return None
@@ -317,10 +339,17 @@ def main(Nfiles=None):
                 test_loss += batch_loss
 
                 if i == 0:
-                    print('Some test outputs:')
-                    print(model(data.to(device)))
-                    print('\nCorresponding targets:')
-                    print(target)
+                    feedback = torch.stack(
+                        (output.flatten(), target.flatten()),
+                        dim=1
+                    )
+                    df = pd.DataFrame(
+                        data=feedback.detach().cpu().numpy(),
+                        columns=['Predictions', 'Targets']
+                    )
+                    pd.options.display.float_format = '{:,.3f}'.format
+                    print('\nA batch of test results:')
+                    print(df)
         test_loss /= i + 1
         print('\nTest set: Avg. loss: {:.4f}\n'.format(
             test_loss
@@ -334,7 +363,6 @@ def main(Nfiles=None):
     for epoch in range(1, N_epochs + 1):
         train(epoch)
         test()
-
 
     # Run network on data we got before and show predictions
     test_examples = enumerate(test_loader)
