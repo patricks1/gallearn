@@ -67,9 +67,11 @@ def main(Nfiles=None):
     device = torch.device(device_str)
     torch.set_default_device(device_str)
 
-    lr=0.01 # learning rate
+    lr=0.001 # learning rate
+    momentum = 0.05
     N_epochs = 4
-    kernel_size = 20
+    kernel_size = 10
+    N_out_channels = 1
 
     wandb.init(
         # set the wandb project where this run will be logged
@@ -79,6 +81,7 @@ def main(Nfiles=None):
         # track hyperparameters and run metadata
         config={
             "learning_rate": lr,
+            'momentum': momentum,
             "architecture": "CNN",
             "dataset": (
                 "Set of 100 1500x1500 hosts, xy projection, drop >2000x2000"
@@ -106,6 +109,11 @@ def main(Nfiles=None):
     ys_test = ys[~is_train]
     X_train = X[is_train]
     X_test = X[~is_train]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    preprocessing.plt_distrib(ax, X)
+    plt.show()
 
     # Run this once to load the train and test data straight into a dataloader 
     # class
@@ -155,7 +163,7 @@ def main(Nfiles=None):
             super(Net, self).__init__()
             self.conv1 = nn.Conv2d(
                 in_channels=1,
-                out_channels=10,
+                out_channels=1,
                 kernel_size=kernel_size
             )
             self.conv2 = nn.Conv2d(
@@ -176,48 +184,55 @@ def main(Nfiles=None):
             self.conv5 = nn.Conv2d(
                 in_channels=80,
                 out_channels=80,
-                kernel_size=kernel_size
+                kernel_size=3
             )
             # Dropout for convolutions
             self.drop = nn.Dropout2d()
             # Fully connected layer
-            self.fc2 = nn.Linear(50, 2)
+            self.fc2 = nn.Linear(50, N_out_channels)
             return None
 
         def make_fc1(self, x):
             if not hasattr(self, 'fc1'):
                 length = x.shape[1]
-                self.fc1 = nn.Linear(length, 50)
+                self.fc1 = nn.Linear(length, N_out_channels)
             return None
 
         def forward(self, x):
-            # print('x type: {}'.format(type(x)))
-            # print('x dtype: {}'.format(x.dtype))
-            # print('x device: {}'.format(x.device))
-            x = self.conv1(x) # 1
-            x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-            x = torch.nn.functional.relu(x) # 3
+            #x = self.conv1(x) # 1
+            #x = self.drop(x) # 5
+            #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
+            #x = torch.nn.functional.relu(x) # 3
 
-            x = self.conv2(x) # 4
-            x = self.drop(x) # 5
-            x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
-            x = torch.nn.functional.relu(x) # 7
+            #x = self.conv2(x) # 4
+            #x = self.drop(x) # 5
+            #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
+            #x = torch.nn.functional.relu(x) # 7
 
-            x = self.conv3(x)
-            x = torch.nn.functional.relu(x)
+            #x = self.conv3(x)
+            #x = self.drop(x) # 5
+            #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
+            #x = torch.nn.functional.relu(x)
 
-            x = self.conv4(x)
-            x = torch.nn.functional.relu(x)
+            #x = self.conv4(x)
+            #x = self.drop(x) # 5
+            #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
+            #x = torch.nn.functional.relu(x)
 
-            x = self.conv5(x)
-            x = torch.nn.functional.relu(x)
+            #x = self.conv5(x)
+            #x = self.drop(x) # 5
+            #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
+            #x = torch.nn.functional.relu(x)
 
+            x = torch.nn.functional.softplus(x)
+            #plt.hist(x.flatten().detach().cpu().numpy())
+            #plt.show()
             x = x.flatten(start_dim=1) # 8
             self.make_fc1(x)
+            x = torch.nn.functional.softplus(x)
             x = self.fc1(x) # 9
-            x = torch.nn.functional.relu(x) # 10
-            x = self.fc2(x) # 11
-            x = torch.nn.functional.sigmoid(x) # 12
+            #x = self.fc2(x) # 11
+            # x = torch.nn.functional.sigmoid(x) # 12
             
             return x
 
@@ -239,7 +254,7 @@ def main(Nfiles=None):
     optimizer = optim.SGD(
         model.parameters(), 
         lr=lr, 
-        momentum=0.5
+        momentum=momentum
     )
 
     loss_function = torch.nn.MSELoss()
@@ -252,13 +267,6 @@ def main(Nfiles=None):
         for batch_idx, (data, target) in enumerate(train_loader):
             optimizer.zero_grad()
             output = model(data.to(device))
-            print('\nOutput while training:')
-            print(output)
-            print('\nRunning only some through the model:')
-            print(model(data.to(device)[:2]))
-            print(model(data.to(device)[2:]))
-            print('\nRunning it all through again:')
-            print(model(data.to(device)))
             loss = loss_function(output, target)
             loss.backward()
             optimizer.step()
@@ -266,7 +274,7 @@ def main(Nfiles=None):
             sum_losses += loss
             if batch_idx % 5 == 0:
                 print(
-                    'Train Epoch: {0}'
+                    '\nTrain Epoch: {0}'
                             '[{1}/{2} samples optimized]'
                             '\tLoss: {3:.6f}'.format(
                         epoch, 
@@ -275,6 +283,9 @@ def main(Nfiles=None):
                         loss.item()
                     )
                 )
+                print('Training batch shape: {0}'.format(
+                    data.to(device).shape
+                )) 
         avg_loss = sum_losses / (batch_idx + 1)
         wandb.log({'training loss': avg_loss})
         return None
@@ -285,20 +296,17 @@ def main(Nfiles=None):
         test_loss = 0
         correct = 0
         with torch.no_grad():
-            for data, target in test_loader:
-                print('Output while testing')
+            for i, (data, target) in enumerate(test_loader):
                 output = model(data.to(device))
-                print(output[:10])
-                print('Now evalating in chunks:')
-                print(model(data.to(device)[:5]))
-                print(model(data.to(device)[5:10]))
-                print('Now evaluating everything at once again.')
-                print(model(data.to(device)[:10]))
-                test_loss += loss_function(output, target).item()
-        print('Length of test_loader.dataset: {0:0.0f}'.format(
-            len(test_loader.dataset))
-        )
-        test_loss /= len(test_loader.dataset)
+                batch_loss = loss_function(output, target).item()
+                test_loss += batch_loss
+
+                if i == 0:
+                    print('Some test outputs:')
+                    print(model(data.to(device)))
+                    print('\nCorresponding targets:')
+                    print(target)
+        test_loss /= i + 1
         print('\nTest set: Avg. loss: {:.4f}\n'.format(
             test_loss
         ))
@@ -312,29 +320,23 @@ def main(Nfiles=None):
         train(epoch)
         test()
 
-    print('Running output code right from the training function.\nOutput:')
-    for batch_idx, (data, target) in enumerate(train_loader):
-        optimizer.zero_grad()
-        output = model(data.to(device))
-        print(output)
 
     # Run network on data we got before and show predictions
     test_examples = enumerate(test_loader)
     batch_idx, (test_data, test_tgts) = next(test_examples)
     output = model(test_data.to(device))
-    print('\nUsing test data:\nOutput:')
+    print('\nSome test outputs:')
     print(output)
-    print('Targets:')
+    print('Corresponding targets:')
     print(test_tgts)
 
-    train_examples = enumerate(train_loader)
-    batch_idx, (train_data, train_tgts) = next(train_examples)
-    output = model(train_data.to(device))
-    print('Uinsg train data:\nOutput:')
-    print(output)
-    print('Targets:')
-    print(train_tgts)
-    
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    y_pred = model(X)
+    ax.hist(model[0].input.reshape(-1), bins=25, histtype='step')
+    ax.set_yscale('log')
+    plt.show()
+
     return None
 
 if __name__ == '__main__':

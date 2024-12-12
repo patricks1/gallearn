@@ -80,7 +80,8 @@ def plt_distrib_of_means(ax, X, title=None):
     ax.set_yscale('log')
     ax.set_title(title)
 
-    print('Added {0:s} to figure.'.format(title.lower()))
+    if title is not None:
+        print('Added {0:s} to figure.'.format(title.lower()))
     return None
 
 def plt_distrib(ax, X, title=None):
@@ -93,14 +94,19 @@ def plt_distrib(ax, X, title=None):
     edges = torch.zeros(3, 21)
     min_ = Xpermflat.min()
     max_ = Xpermflat.max()
-    bins = np.linspace(min_, max_, 21) 
+    print(min_, max_)
+    bins = torch.linspace(
+        min_,
+        max_,
+        21
+    )
     for i in range(Xpermflat.shape[0]):
         hist = torch.histogram(Xpermflat[i], bins=bins)
         heights[i], edges[i] = hist
 
     for h, e, c, l in zip(
-                heights, 
-                edges,
+                heights.detach().cpu().numpy(), 
+                edges.detach().cpu().numpy(),
                 ['C2', 'C0', 'C3'],
                 ['G', 'U', 'R']
             ):
@@ -113,7 +119,8 @@ def plt_distrib(ax, X, title=None):
     ax.set_yscale('log')
     ax.set_title(title)
 
-    print('Added {0:s} to figure.'.format(title.lower()))
+    if title is not None:
+        print('Added {0:s} to figure.'.format(title.lower()))
     return None
 
 def test(save=False):
