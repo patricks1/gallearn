@@ -39,6 +39,110 @@ def load_fr_julia(Nfiles):
 
     return X, ys
 
+class Net(nn.Module):
+    def __init__(
+                self,
+                kernel_size,
+                N_conv1_out_chan,
+                N_conv2_out_chan,
+                N_out_channels 
+            ):
+        super(Net, self).__init__()
+        self.N_out_channels = N_out_channels
+        self.conv1 = nn.Conv2d(
+            in_channels=1,
+            out_channels=N_conv1_out_chan,
+            kernel_size=kernel_size
+        )
+        self.conv2 = nn.Conv2d(
+            in_channels=N_conv1_out_chan,
+            out_channels=N_conv2_out_chan,
+            kernel_size=kernel_size
+        )
+        #self.conv3 = nn.Conv2d(
+        #    in_channels=3,
+        #    out_channels=1,
+        #    kernel_size=kernel_size
+        #)
+        #self.conv4 = nn.Conv2d(
+        #    in_channels=1,
+        #    out_channels=1,
+        #    kernel_size=kernel_size
+        #)
+        #self.conv5 = nn.Conv2d(
+        #    in_channels=1,
+        #    out_channels=1,
+        #    kernel_size=kernel_size
+        #)
+        # Dropout for convolutions
+        self.drop = nn.Dropout2d()
+
+        return None
+
+    def make_fc1(self, x):
+        if not hasattr(self, 'fc1'):
+            length = x.shape[1]
+            self.fc1 = nn.Linear(length, 50)
+        return None
+
+    def make_fc2(self, x):
+        if not hasattr(self, 'fc2'):
+            length = x.shape[1]
+            self.fc2 = nn.Linear(length, 300)
+        return None
+
+    def make_fc3(self, x):
+        if not hasattr(self, 'fc3'):
+            length = x.shape[1]
+            self.fc3 = nn.Linear(length, N_out_channels)
+        return None
+
+
+    def forward(self, x):
+        x = self.conv1(x) # 1
+        #x = self.drop(x) # 5
+        #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
+        x = activation(x)
+
+        x = self.conv2(x) # 4
+        #x = self.drop(x) # 5
+        #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
+        x = activation(x)
+
+        #x = self.conv3(x)
+        #x = self.drop(x) # 5
+        #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
+        #x = activation(x)
+
+        #x = self.conv4(x)
+        #x = self.drop(x) # 5
+        #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
+        #x = activation(x)
+
+        #x = self.conv5(x)
+        #x = self.drop(x) # 5
+        #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
+        #x = activation(x)
+
+        x = x.flatten(start_dim=1) # 8
+        
+        #self.make_fc1(x)
+        #x = self.fc1(x) # 9
+        #x = activation(x)
+
+        #plt.hist(x.flatten().detach().cpu().numpy())
+        #plt.show()
+
+        #self.make_fc2(x)
+        #x = self.fc2(x) # 11
+        #x = activation(x)
+
+        self.make_fc3(x)
+        x = self.fc3(x) # 11
+        x = activation(x)
+        
+        return x
+
 def main(Nfiles=None):
     import preprocessing
     import random
@@ -164,103 +268,6 @@ def main(Nfiles=None):
     # 11. A fully connected layer mapping from 50 to 10 dimensions
     # 12. A softmax function.
 
-    class Net(nn.Module):
-        def __init__(self):
-            super(Net, self).__init__()
-            self.conv1 = nn.Conv2d(
-                in_channels=1,
-                out_channels=N_conv1_out_chan,
-                kernel_size=kernel_size
-            )
-            self.conv2 = nn.Conv2d(
-                in_channels=N_conv1_out_chan,
-                out_channels=N_conv2_out_chan,
-                kernel_size=kernel_size
-            )
-            self.conv3 = nn.Conv2d(
-                in_channels=3,
-                out_channels=1,
-                kernel_size=kernel_size
-            )
-            self.conv4 = nn.Conv2d(
-                in_channels=1,
-                out_channels=1,
-                kernel_size=kernel_size
-            )
-            self.conv5 = nn.Conv2d(
-                in_channels=1,
-                out_channels=1,
-                kernel_size=kernel_size
-            )
-            # Dropout for convolutions
-            self.drop = nn.Dropout2d()
-
-            return None
-
-        def make_fc1(self, x):
-            if not hasattr(self, 'fc1'):
-                length = x.shape[1]
-                self.fc1 = nn.Linear(length, 50)
-            return None
-
-        def make_fc2(self, x):
-            if not hasattr(self, 'fc2'):
-                length = x.shape[1]
-                self.fc2 = nn.Linear(length, 300)
-            return None
-
-        def make_fc3(self, x):
-            if not hasattr(self, 'fc3'):
-                length = x.shape[1]
-                self.fc3 = nn.Linear(length, N_out_channels)
-            return None
-
-
-        def forward(self, x):
-            x = self.conv1(x) # 1
-            #x = self.drop(x) # 5
-            #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-            x = activation(x)
-
-            x = self.conv2(x) # 4
-            #x = self.drop(x) # 5
-            #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
-            x = activation(x)
-
-            #x = self.conv3(x)
-            #x = self.drop(x) # 5
-            #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-            #x = activation(x)
-
-            #x = self.conv4(x)
-            #x = self.drop(x) # 5
-            #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-            #x = activation(x)
-
-            #x = self.conv5(x)
-            #x = self.drop(x) # 5
-            #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-            #x = activation(x)
-
-            x = x.flatten(start_dim=1) # 8
-            
-            #self.make_fc1(x)
-            #x = self.fc1(x) # 9
-            #x = activation(x)
-
-            #plt.hist(x.flatten().detach().cpu().numpy())
-            #plt.show()
-
-            #self.make_fc2(x)
-            #x = self.fc2(x) # 11
-            #x = activation(x)
-
-            self.make_fc3(x)
-            x = self.fc3(x) # 11
-            x = activation(x)
-            
-            return x
-
     # He initialization of weights
     def weights_init(layer_in):
         if isinstance(layer_in, nn.Linear):
@@ -272,7 +279,12 @@ def main(Nfiles=None):
         return None
 
     # Create network
-    model = Net().to(device)
+    model = Net(
+            kernel_size,
+            N_conv1_out_chan,
+            N_conv2_out_chan,
+            N_out_channels 
+        ).to(device)
     # Initialize model weights
     model.apply(weights_init)
     # Define optimizer
