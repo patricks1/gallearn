@@ -1,4 +1,4 @@
-name: gallearn
+name: test
 channels:
   - conda-forge
   - defaults

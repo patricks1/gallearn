@@ -1,3 +1,6 @@
+import torch.nn as nn
+import torch
+
 def load_fr_julia(Nfiles):
     from julia.api import Julia
     jl = Julia(compiled_modules=False, debug=False)
@@ -7,7 +10,6 @@ def load_fr_julia(Nfiles):
     from julia import Main
 
     import subprocess
-    import torch
 
     import numpy as np
 
@@ -42,12 +44,16 @@ def load_fr_julia(Nfiles):
 class Net(nn.Module):
     def __init__(
                 self,
+                activation,
                 kernel_size,
                 N_conv1_out_chan,
                 N_conv2_out_chan,
                 N_out_channels 
             ):
+
         super(Net, self).__init__()
+
+        self.activation = activation
         self.N_out_channels = N_out_channels
         self.conv1 = nn.Conv2d(
             in_channels=1,
@@ -77,6 +83,16 @@ class Net(nn.Module):
         # Dropout for convolutions
         self.drop = nn.Dropout2d()
 
+        self.features = {}
+
+        return None
+
+    def init_optimizer(self, lr, momentum):
+        self.optimizer = torch.optim.SGD(
+                self.parameters(), 
+                lr=lr, 
+                momentum=momentum
+            )
         return None
 
     def make_fc1(self, x):
@@ -94,54 +110,103 @@ class Net(nn.Module):
     def make_fc3(self, x):
         if not hasattr(self, 'fc3'):
             length = x.shape[1]
-            self.fc3 = nn.Linear(length, N_out_channels)
+            self.fc3 = nn.Linear(length, self.N_out_channels)
         return None
-
 
     def forward(self, x):
         x = self.conv1(x) # 1
         #x = self.drop(x) # 5
         #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-        x = activation(x)
+        x = self.activation(x)
 
         x = self.conv2(x) # 4
         #x = self.drop(x) # 5
         #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
-        x = activation(x)
+        x = self.activation(x)
 
         #x = self.conv3(x)
         #x = self.drop(x) # 5
         #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-        #x = activation(x)
+        #x = self.activation(x)
 
         #x = self.conv4(x)
         #x = self.drop(x) # 5
         #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-        #x = activation(x)
+        #x = self.activation(x)
 
         #x = self.conv5(x)
         #x = self.drop(x) # 5
         #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-        #x = activation(x)
+        #x = self.activation(x)
 
         x = x.flatten(start_dim=1) # 8
         
         #self.make_fc1(x)
         #x = self.fc1(x) # 9
-        #x = activation(x)
+        #x = self.activation(x)
 
         #plt.hist(x.flatten().detach().cpu().numpy())
         #plt.show()
 
         #self.make_fc2(x)
         #x = self.fc2(x) # 11
-        #x = activation(x)
+        #x = self.activation(x)
 
         self.make_fc3(x)
         x = self.fc3(x) # 11
-        x = activation(x)
+        x = self.activation(x)
         
         return x
+
+    def get_features(self, name):
+        def hook(module, input, output):
+            self.features[name] = output.detach()
+        return hook
+
+    def register_feature_hooks(self):
+        self.conv1.register_forward_hook(self.get_features('conv1'))
+        return None
+
+    def save(self, epoch, train_loss, test_loss):
+        import os
+        import time
+        import math
+
+        start = time.time()
+
+        if os.path.isfile('./sate.tar'):
+            checkpoints = torch.load('./state.tar', weights_only=True)
+        else:
+            checkpoints = {}
+
+        checkpoints[epoch] = {
+            'train_loss': train_loss,
+            'test_loss': test_loss,
+            'model_state_dict': self.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict()
+        }
+        torch.save(checkpoints, './state.tar')
+
+        end = time.time()
+        elapsed = end - start
+        minutes = math.floor(elapsed / 60.)
+        print('{0:0.0f} min, {1:0.1f} s to save epoch {2:0.0f}'.format(
+            minutes, 
+            elapsed - minutes * 60.,
+            epoch
+        ))
+
+        return None
+
+    def load(self):
+        checkpoints = torch.load('./state.tar', weights_only=True)
+        epochs = np.array(list(checkpoints.keys()))
+        last_epoch = epochs.max()
+        self.load_state_dict(checkpoints[last_epoch]['model_state_dict'])
+        self.optimizer.load_state_dict(
+            checkpoints[last_epoch]['optimizer_state_dict']
+        )
+        return None
 
 def main(Nfiles=None):
     import preprocessing
@@ -153,10 +218,8 @@ def main(Nfiles=None):
     import matplotlib.pyplot as plt
     import matplotlib as mpl
 
-    import torch
     import torchvision
     import torch.nn as nn
-    import torch.optim as optim
 
     try:
         has_mps = torch.backends.mps.is_available()
@@ -175,7 +238,7 @@ def main(Nfiles=None):
     lr=0.01 # learning rate
     momentum = 0.5
     N_batches = 20
-    N_epochs = 65 
+    N_epochs = 4
     kernel_size = 80 
     activation =  torch.nn.functional.relu
     N_conv1_out_chan = 50
@@ -187,6 +250,7 @@ def main(Nfiles=None):
     wandb.init(
         # set the wandb project where this run will be logged
         project="2d_gallearn",
+        name='test',
 
         # track hyperparameters and run metadata
         config={
@@ -209,8 +273,8 @@ def main(Nfiles=None):
 
     d = preprocessing.load_data('gallearn_data_500x500_2d_tgt.h5')
     X = d['X'].to(device=device_str)
-    X = preprocessing.new_min_max_scale(X)
-    ys = d['ys_sorted'].to(device=device_str)
+    X = preprocessing.new_min_max_scale(X)[:Nfiles]
+    ys = d['ys_sorted'].to(device=device_str)[:Nfiles]
 
     N_all = len(ys) 
     print('{0:0.0f} galaxies in data'.format(N_all))
@@ -230,7 +294,7 @@ def main(Nfiles=None):
     # that will provide the batches
     batch_size_train = max(1, int(N_train / N_batches))
     #batch_size_test = N_test
-    batch_size_test = 20
+    batch_size_test = min(20, N_test)
     train_loader = torch.utils.data.DataLoader(
         torch.utils.data.TensorDataset(X_train, ys_train),
         batch_size=batch_size_train, 
@@ -280,6 +344,7 @@ def main(Nfiles=None):
 
     # Create network
     model = Net(
+            activation,
             kernel_size,
             N_conv1_out_chan,
             N_conv2_out_chan,
@@ -287,12 +352,7 @@ def main(Nfiles=None):
         ).to(device)
     # Initialize model weights
     model.apply(weights_init)
-    # Define optimizer
-    optimizer = optim.SGD(
-        model.parameters(), 
-        lr=lr, 
-        momentum=momentum
-    )
+    model.init_optimizer(lr, momentum)
 
     loss_function = torch.nn.MSELoss()
 
@@ -303,11 +363,11 @@ def main(Nfiles=None):
         sum_losses = 0.
         N_optimized = 0
         for batch_idx, (data, target) in enumerate(train_loader):
-            optimizer.zero_grad()
+            model.optimizer.zero_grad()
             output = model(data.to(device))
             loss = loss_function(output, target)
             loss.backward()
-            optimizer.step()
+            model.optimizer.step()
             # Store results
             sum_losses += loss
             N_optimized += len(data)
@@ -337,7 +397,7 @@ def main(Nfiles=None):
                 print(df)
         avg_loss = sum_losses / (batch_idx + 1)
         wandb.log({'training loss': avg_loss})
-        return None
+        return avg_loss 
 
     # Run on test data
     def test():
@@ -366,15 +426,16 @@ def main(Nfiles=None):
         print('\nTest set: Avg. loss: {:.4f}\n'.format(
             test_loss
         ))
-        return None
+        return test_loss 
 
     # Get initial performance
     print('\nGetting initial performance.')
     test()
     print('Training.')
     for epoch in range(1, N_epochs + 1):
-        train(epoch)
-        test()
+        train_loss = train(epoch)
+        test_loss = test()
+        model.save(epoch, train_loss, test_loss)
 
     # Run network on data we got before and show predictions
     test_examples = enumerate(test_loader)
@@ -392,7 +453,7 @@ def main(Nfiles=None):
     #ax.set_yscale('log')
     #plt.show()
 
-    return None
+    return model 
 
 if __name__ == '__main__':
     import argparse
