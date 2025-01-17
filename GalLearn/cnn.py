@@ -53,6 +53,8 @@ class Net(nn.Module):
 
         super(Net, self).__init__()
 
+        self.state_path = '/Volumes/patrick/data/state.tar'
+
         self.activation = activation
         self.N_out_channels = N_out_channels
         self.conv1 = nn.Conv2d(
@@ -174,8 +176,8 @@ class Net(nn.Module):
 
         start = time.time()
 
-        if os.path.isfile('./sate.tar'):
-            checkpoints = torch.load('./state.tar', weights_only=True)
+        if os.path.isfile(self.state_path):
+            checkpoints = torch.load(self.state_path, weights_only=True)
         else:
             checkpoints = {}
 
@@ -185,7 +187,7 @@ class Net(nn.Module):
             'model_state_dict': self.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict()
         }
-        torch.save(checkpoints, './state.tar')
+        torch.save(checkpoints, self.state_path)
 
         end = time.time()
         elapsed = end - start
@@ -199,7 +201,8 @@ class Net(nn.Module):
         return None
 
     def load(self):
-        checkpoints = torch.load('./state.tar', weights_only=True)
+        import numpy as np
+        checkpoints = torch.load(self.state_path, weights_only=True)
         epochs = np.array(list(checkpoints.keys()))
         last_epoch = epochs.max()
         self.load_state_dict(checkpoints[last_epoch]['model_state_dict'])
@@ -212,6 +215,7 @@ def main(Nfiles=None):
     import preprocessing
     import random
     import wandb
+    import os
 
     import numpy as np
     import pandas as pd
@@ -332,6 +336,15 @@ def main(Nfiles=None):
     # 11. A fully connected layer mapping from 50 to 10 dimensions
     # 12. A softmax function.
 
+    # Create network
+    model = Net(
+            activation,
+            kernel_size,
+            N_conv1_out_chan,
+            N_conv2_out_chan,
+            N_out_channels 
+        ).to(device)
+
     # He initialization of weights
     def weights_init(layer_in):
         if isinstance(layer_in, nn.Linear):
@@ -342,17 +355,12 @@ def main(Nfiles=None):
             layer_in.bias.data.fill_(0.0)
         return None
 
-    # Create network
-    model = Net(
-            activation,
-            kernel_size,
-            N_conv1_out_chan,
-            N_conv2_out_chan,
-            N_out_channels 
-        ).to(device)
-    # Initialize model weights
-    model.apply(weights_init)
-    model.init_optimizer(lr, momentum)
+    if os.path.isfile(model.state_path):
+        model.load()
+    else:
+        # Initialize model weights
+        model.apply(weights_init)
+        model.init_optimizer(lr, momentum)
 
     loss_function = torch.nn.MSELoss()
 
