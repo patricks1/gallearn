@@ -41,10 +41,24 @@ def load_fr_julia(Nfiles):
 
     return X, ys
 
+def get_all_layers(net):
+    for name, layer in net._modules.items():
+        # Credit to 
+        # https://www.digitalocean.com/community/tutorials/pytorch-hooks
+        # -gradient-clipping-debugging
+
+        #If it is a sequential, don't register a hook on it
+        # but recursively register a hook on all it's module children
+        if isinstance(layer, nn.Sequential):
+            get_all_layers(layer)
+        else:
+            # It's a non sequential. Register a hook
+            layer.register_forward_hook(hook_wrapper(something))
+
 class Net(nn.Module):
     def __init__(
                 self,
-                activation,
+                activation_module,
                 kernel_size,
                 N_conv1_out_chan,
                 N_conv2_out_chan,
@@ -53,14 +67,22 @@ class Net(nn.Module):
 
         super(Net, self).__init__()
 
-        self.state_path = '/Volumes/patrick/data/state.tar'
+        self.state_path = '/Volumes/patrick/data/state_20250121.tar'
 
-        self.activation = activation
+        self.activation_module = activation_module
         self.N_out_channels = N_out_channels
-        self.conv1 = nn.Conv2d(
-            in_channels=1,
-            out_channels=N_conv1_out_chan,
-            kernel_size=kernel_size
+        self.features = {}
+
+        #----------------------------------------------------------------------
+        # Define architecture
+        #----------------------------------------------------------------------
+        self.conv1_stack = nn.Sequential(
+            nn.Conv2d(
+                in_channels=1,
+                out_channels=N_conv1_out_chan,
+                kernel_size=kernel_size
+            ),
+            activation_module()
         )
         self.conv2 = nn.Conv2d(
             in_channels=N_conv1_out_chan,
@@ -85,7 +107,6 @@ class Net(nn.Module):
         # Dropout for convolutions
         self.drop = nn.Dropout2d()
 
-        self.features = {}
 
         return None
 
@@ -116,15 +137,12 @@ class Net(nn.Module):
         return None
 
     def forward(self, x):
-        x = self.conv1(x) # 1
-        #x = self.drop(x) # 5
-        #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-        x = self.activation(x)
+        x = self.conv1_stack(x)
 
         x = self.conv2(x) # 4
         #x = self.drop(x) # 5
         #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
-        x = self.activation(x)
+        x = self.activation_module()(x)
 
         #x = self.conv3(x)
         #x = self.drop(x) # 5
@@ -156,7 +174,7 @@ class Net(nn.Module):
 
         self.make_fc3(x)
         x = self.fc3(x) # 11
-        x = self.activation(x)
+        x = self.activation_module()(x)
         
         return x
 
@@ -165,8 +183,10 @@ class Net(nn.Module):
             self.features[name] = output.detach()
         return hook
 
+    
+
     def register_feature_hooks(self):
-        self.conv1.register_forward_hook(self.get_features('conv1'))
+        self.conv1_stack[0].register_forward_hook(self.get_features('conv1'))
         return None
 
     def save(self, epoch, train_loss, test_loss):
@@ -244,7 +264,7 @@ def main(Nfiles=None):
     N_batches = 20
     N_epochs = 4
     kernel_size = 80 
-    activation =  torch.nn.functional.relu
+    activation_module = nn.ReLU
     N_conv1_out_chan = 50
     N_conv2_out_chan = 1
 
@@ -260,7 +280,7 @@ def main(Nfiles=None):
         config={
             "learning_rate": lr,
             'momentum': momentum,
-            'activation_func': activation,
+            'activation_func': activation_module,
             "architecture": "CNN",
             "dataset": (
                 "500x500 hosts, xy projection, drop >2000x2000"
@@ -338,7 +358,7 @@ def main(Nfiles=None):
 
     # Create network
     model = Net(
-            activation,
+            activation_module,
             kernel_size,
             N_conv1_out_chan,
             N_conv2_out_chan,
