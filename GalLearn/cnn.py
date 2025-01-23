@@ -178,15 +178,30 @@ class Net(nn.Module):
         
         return x
 
-    def get_features(self, name):
-        def hook(module, input, output):
-            self.features[name] = output.detach()
-        return hook
-
-    
-
     def register_feature_hooks(self):
-        self.conv1_stack[0].register_forward_hook(self.get_features('conv1'))
+        features = {}  # Dictionary to store outputs
+
+        def hook_wrapper(output_dict, key):
+            # Define the hook function
+            def hook(module, input, output):
+                # Traverse the keys to update the appropriate nested dictionary
+                output_dict[key] = output
+            return hook
+
+        def process_module(module, output_dict):
+            for name, layer in module._modules.items():
+                if isinstance(layer, nn.Sequential) or len(layer._modules) > 0:
+                    # Create a sub-dictionary for nested layers
+                    output_dict[name] = {}
+                    process_module(layer, output_dict[name]) # Recursion
+                else:
+                    # Register a hook for non-nested layers
+                    layer_type = str(layer).split('(')[0]
+                    key = ':'.join([name, layer_type])
+                    layer.register_forward_hook(hook_wrapper(output_dict, key))
+
+        process_module(self, features)
+        self.features = features
         return None
 
     def save(self, epoch, train_loss, test_loss):
