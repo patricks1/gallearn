@@ -41,20 +41,6 @@ def load_fr_julia(Nfiles):
 
     return X, ys
 
-def get_all_layers(net):
-    for name, layer in net._modules.items():
-        # Credit to 
-        # https://www.digitalocean.com/community/tutorials/pytorch-hooks
-        # -gradient-clipping-debugging
-
-        #If it is a sequential, don't register a hook on it
-        # but recursively register a hook on all it's module children
-        if isinstance(layer, nn.Sequential):
-            get_all_layers(layer)
-        else:
-            # It's a non sequential. Register a hook
-            layer.register_forward_hook(hook_wrapper(something))
-
 class Net(nn.Module):
     def __init__(
                 self,
@@ -67,7 +53,7 @@ class Net(nn.Module):
 
         super(Net, self).__init__()
 
-        self.state_path = '/Volumes/patrick/data/state_20250121.tar'
+        self.state_path = '/Volumes/patrick/data/state_20250123.tar'
 
         self.activation_module = activation_module
         self.N_out_channels = N_out_channels
@@ -76,7 +62,7 @@ class Net(nn.Module):
         #----------------------------------------------------------------------
         # Define architecture
         #----------------------------------------------------------------------
-        self.conv1_stack = nn.Sequential(
+        self.conv1_block = nn.Sequential(
             nn.Conv2d(
                 in_channels=1,
                 out_channels=N_conv1_out_chan,
@@ -84,10 +70,17 @@ class Net(nn.Module):
             ),
             activation_module()
         )
-        self.conv2 = nn.Conv2d(
-            in_channels=N_conv1_out_chan,
-            out_channels=N_conv2_out_chan,
-            kernel_size=kernel_size
+        self.conv2_block = nn.Sequential(
+            nn.Conv2d(
+                in_channels=N_conv1_out_chan,
+                out_channels=N_conv2_out_chan,
+                kernel_size=kernel_size
+            ),
+            activation_module()
+        )
+        self.fc_block = nn.Sequential(
+            nn.LazyLinear(N_out_channels),
+            activation_module()
         )
         #self.conv3 = nn.Conv2d(
         #    in_channels=3,
@@ -106,7 +99,6 @@ class Net(nn.Module):
         #)
         # Dropout for convolutions
         self.drop = nn.Dropout2d()
-
 
         return None
 
@@ -137,9 +129,8 @@ class Net(nn.Module):
         return None
 
     def forward(self, x):
-        x = self.conv1_stack(x)
-
-        x = self.conv2(x) # 4
+        x = self.conv1_block(x)
+        x = self.conv2_block(x) # 4
         #x = self.drop(x) # 5
         #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
         x = self.activation_module()(x)
@@ -172,9 +163,7 @@ class Net(nn.Module):
         #x = self.fc2(x) # 11
         #x = self.activation(x)
 
-        self.make_fc3(x)
-        x = self.fc3(x) # 11
-        x = self.activation_module()(x)
+        x = self.fc_block(x)
         
         return x
 
@@ -348,29 +337,6 @@ def main(Nfiles=None):
         generator=torch.Generator(device=device_str)
     )
 
-    # Define the network.  This is a more typical way to define a network than 
-    # the sequential structure.  We define a class for the network, and define 
-    # the parameters in the constructor.  Then we use a function called forward 
-    # to actually run the network.  It's easy to see how you might use residual 
-    # connections in this format.
-
-    # 1. A valid convolution with kernel size 5, 1 input channel and 10 output 
-    #    channels
-    # 2. A max pooling operation over a 2x2 area
-    # 3. A Relu
-    # 4. A valid convolution with kernel size 5, 10 input channels and 20 output 
-    #    channels
-    # 5. A 2D Dropout layer
-    # 6. A max pooling operation over a 2x2 area
-    # 7. A relu
-    # 8. A flattening operation
-    # 9. A fully connected layer mapping from (whatever dimensions we are at
-    #    -- find 
-    #    out using .shape) to 50
-    # 10. A ReLU
-    # 11. A fully connected layer mapping from 50 to 10 dimensions
-    # 12. A softmax function.
-
     # Create network
     model = Net(
             activation_module,
@@ -393,8 +359,8 @@ def main(Nfiles=None):
     if os.path.isfile(model.state_path):
         model.load()
     else:
-        # Initialize model weights
-        model.apply(weights_init)
+        model(X[0]) # Run a dummy fwd pass to initialize any lazy layers.
+        model.apply(weights_init) # Init model weights.
         model.init_optimizer(lr, momentum)
 
     loss_function = torch.nn.MSELoss()
