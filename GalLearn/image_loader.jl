@@ -268,7 +268,7 @@ module image_loader
         return obs_sorted, X, fnames_sorted, ys
     end
 
-    function load_data(tgt_type; Nfiles=nothing, save=false, res=500)
+    function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
         obs_sorted, X, files, ys = load_images(
             Nfiles=Nfiles,
             res=res,
