@@ -98,7 +98,7 @@ class Net(nn.Module):
         #    kernel_size=kernel_size
         #)
         # Dropout for convolutions
-        self.drop = nn.Dropout2d()
+        #self.drop = nn.Dropout2d()
 
         return None
 
@@ -235,7 +235,7 @@ class Net(nn.Module):
         )
         return None
 
-def main(Nfiles=None):
+def main(Nfiles=None, wandb_sync=False):
     import preprocessing
     import random
     import wandb
@@ -271,35 +271,34 @@ def main(Nfiles=None):
     activation_module = nn.ReLU
     N_conv1_out_chan = 50
     N_conv2_out_chan = 1
+    dataset = 'gallearn_data_500x500_2d_tgt.h5'
 
     # Other things
     N_out_channels = 1
 
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project="2d_gallearn",
-        name='test',
+    if wandb_sync:
+        wandb.init(
+            # set the wandb project where this run will be logged
+            project="2d_gallearn",
+            name='test',
 
-        # track hyperparameters and run metadata
-        config={
-            "learning_rate": lr,
-            'momentum': momentum,
-            'activation_func': activation_module,
-            "architecture": "CNN",
-            "dataset": (
-                "500x500 hosts, xy projection, drop >2000x2000"
-            ),
-            "epochs": N_epochs,
-            'batches': N_batches,
-            'kernel size': kernel_size,
-            'N_conv_layers': 2,
-            'N_fc_layers': 1,
-            'N_conv1_out_channels': N_conv1_out_chan,
-            'N_conv2_out_channels': N_conv2_out_chan,
-        }
-    )
+            # track hyperparameters and run metadata
+            config={
+                "learning_rate": lr,
+                'momentum': momentum,
+                'activation_func': activation_module,
+                "dataset": dataset,
+                "epochs": N_epochs,
+                'batches': N_batches,
+                'kernel size': kernel_size,
+                'N_conv_layers': 2,
+                'N_fc_layers': 1,
+                'N_conv1_out_channels': N_conv1_out_chan,
+                'N_conv2_out_channels': N_conv2_out_chan,
+            }
+        )
 
-    d = preprocessing.load_data('gallearn_data_500x500_2d_tgt.h5')
+    d = preprocessing.load_data(dataset)
     X = d['X'].to(device=device_str)
     X = preprocessing.new_min_max_scale(X)[:Nfiles]
     ys = d['ys_sorted'].to(device=device_str)[:Nfiles]
@@ -363,6 +362,9 @@ def main(Nfiles=None):
         model.apply(weights_init) # Init model weights.
         model.init_optimizer(lr, momentum)
 
+    if wandb_sync:
+        wandb.config['architecture'] = repr(model)
+
     loss_function = torch.nn.MSELoss()
 
     # Main training routine
@@ -405,7 +407,8 @@ def main(Nfiles=None):
                 print('Training batch results:')
                 print(df)
         avg_loss = sum_losses / (batch_idx + 1)
-        wandb.log({'training loss': avg_loss})
+        if wandb_sync:
+            wandb.log({'training loss': avg_loss})
         return avg_loss 
 
     # Run on test data
@@ -478,6 +481,13 @@ if __name__ == '__main__':
             ' the network will use all galaxies available.'
         )
     )
+    parser.add_argument(
+        '-w',
+        '--wandb',
+        action='store_true',
+        help='Whether to make `wandb` aware of the run'
+    )
     args = parser.parse_args()
     Nfiles = args.num_gals
-    main(Nfiles)
+    wandb_sync = args.wandb
+    main(Nfiles, wandb_sync=wandb_sync)
