@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch
+import datetime
 
 def load_fr_julia(Nfiles):
     from julia.api import Julia
@@ -48,12 +49,13 @@ class Net(nn.Module):
                 kernel_size,
                 N_conv1_out_chan,
                 N_conv2_out_chan,
-                N_out_channels 
+                N_out_channels,
+                run_name
             ):
 
         super(Net, self).__init__()
 
-        self.state_path = '/Volumes/patrick/data/state_20250123.tar'
+        self.state_path = '/Volumes/patrick/data/state_' + run_name + '.tar'
 
         self.activation_module = activation_module
         self.N_out_channels = N_out_channels
@@ -78,10 +80,11 @@ class Net(nn.Module):
             ),
             activation_module()
         )
-        self.fc_block = nn.Sequential(
-            nn.LazyLinear(N_out_channels),
-            activation_module()
-        )
+        #self.fc_block = nn.Sequential(
+        #    nn.LazyLinear(N_out_channels),
+        #    activation_module()
+        #)
+
         #self.conv3 = nn.Conv2d(
         #    in_channels=3,
         #    out_channels=1,
@@ -130,10 +133,9 @@ class Net(nn.Module):
 
     def forward(self, x):
         x = self.conv1_block(x)
-        x = self.conv2_block(x) # 4
+        x = self.conv2_block(x)
         #x = self.drop(x) # 5
         #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
-        x = self.activation_module()(x)
 
         #x = self.conv3(x)
         #x = self.drop(x) # 5
@@ -159,11 +161,11 @@ class Net(nn.Module):
         #plt.hist(x.flatten().detach().cpu().numpy())
         #plt.show()
 
-        #self.make_fc2(x)
-        #x = self.fc2(x) # 11
-        #x = self.activation(x)
+        self.make_fc3(x)
+        x = self.fc3(x) # 11
+        x = self.activation_module()(x)
 
-        x = self.fc_block(x)
+        #x = self.fc_block(x)
         
         return x
 
@@ -280,7 +282,7 @@ def main(Nfiles=None, wandb_sync=False):
         wandb.init(
             # set the wandb project where this run will be logged
             project="2d_gallearn",
-            name='test',
+            #name='test',
 
             # track hyperparameters and run metadata
             config={
@@ -337,12 +339,17 @@ def main(Nfiles=None, wandb_sync=False):
     )
 
     # Create network
+    if wandb_sync:
+        run_name = wandb.run.name
+    else:
+        run_name = datetime.datetime.today().strftime('%Y%m%d')
     model = Net(
             activation_module,
             kernel_size,
             N_conv1_out_chan,
             N_conv2_out_chan,
-            N_out_channels 
+            N_out_channels,
+            run_name
         ).to(device)
 
     # He initialization of weights
@@ -407,8 +414,6 @@ def main(Nfiles=None, wandb_sync=False):
                 print('Training batch results:')
                 print(df)
         avg_loss = sum_losses / (batch_idx + 1)
-        if wandb_sync:
-            wandb.log({'training loss': avg_loss})
         return avg_loss 
 
     # Run on test data
@@ -447,6 +452,9 @@ def main(Nfiles=None, wandb_sync=False):
     for epoch in range(1, N_epochs + 1):
         train_loss = train(epoch)
         test_loss = test()
+        if wandb_sync:
+            wandb.log({'training loss': train_loss,
+                       'test loss': test_loss})
         model.save(epoch, train_loss, test_loss)
 
     # Run network on data we got before and show predictions
