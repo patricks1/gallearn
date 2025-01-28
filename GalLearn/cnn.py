@@ -47,8 +47,7 @@ class Net(nn.Module):
                 self,
                 activation_module,
                 kernel_size,
-                N_conv1_out_chan,
-                N_conv2_out_chan,
+                conv_channels,
                 N_out_channels,
                 run_name
             ):
@@ -64,26 +63,33 @@ class Net(nn.Module):
         #----------------------------------------------------------------------
         # Define architecture
         #----------------------------------------------------------------------
-        self.conv1_block = nn.Sequential(
-            nn.Conv2d(
-                in_channels=1,
-                out_channels=N_conv1_out_chan,
-                kernel_size=kernel_size
-            ),
-            activation_module()
-        )
-        self.conv2_block = nn.Sequential(
-            nn.Conv2d(
-                in_channels=N_conv1_out_chan,
-                out_channels=N_conv2_out_chan,
-                kernel_size=kernel_size
-            ),
-            activation_module()
-        )
-        #self.fc_block = nn.Sequential(
-        #    nn.LazyLinear(N_out_channels),
+        in_channels = 1 
+        for i, out_channels in enumerate(conv_channels):
+            setattr(
+                self, 
+                'conv' + str(i + 1) + '_block',
+                nn.Sequential(
+                    nn.Conv2d(
+                        in_channels=in_channels,
+                        out_channels=out_channels,
+                        kernel_size=kernel_size
+                    ),
+                    activation_module()
+                )
+            )
+            in_channels = out_channels
+        #self.conv2_block = nn.Sequential(
+        #    nn.Conv2d(
+        #        in_channels=N_conv1_out_chan,
+        #        out_channels=N_conv2_out_chan,
+        #        kernel_size=kernel_size
+        #    ),
         #    activation_module()
         #)
+        self.fc_block = nn.Sequential(
+            nn.LazyLinear(N_out_channels),
+            activation_module()
+        )
 
         #self.conv3 = nn.Conv2d(
         #    in_channels=3,
@@ -133,7 +139,6 @@ class Net(nn.Module):
 
     def forward(self, x):
         x = self.conv1_block(x)
-        x = self.conv2_block(x)
         #x = self.drop(x) # 5
         #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
 
@@ -161,11 +166,11 @@ class Net(nn.Module):
         #plt.hist(x.flatten().detach().cpu().numpy())
         #plt.show()
 
-        self.make_fc3(x)
-        x = self.fc3(x) # 11
-        x = self.activation_module()(x)
+        #self.make_fc3(x)
+        #x = self.fc3(x) # 11
+        #x = self.activation_module()(x)
 
-        #x = self.fc_block(x)
+        x = self.fc_block(x)
         
         return x
 
@@ -269,11 +274,12 @@ def main(Nfiles=None, wandb_sync=False):
     momentum = 0.5
     N_batches = 20
     N_epochs = 4
-    kernel_size = 80 
+    kernel_size = 40 
     activation_module = nn.ReLU
-    N_conv1_out_chan = 50
-    N_conv2_out_chan = 1
-    dataset = 'gallearn_data_500x500_2d_tgt.h5'
+    #N_conv1_out_chan = 50
+    #N_conv2_out_chan = 1
+    dataset = 'gallearn_data_256x256_2d_tgt.h5'
+    conv_channels = [50, 1]
 
     # Other things
     N_out_channels = 1
@@ -293,10 +299,8 @@ def main(Nfiles=None, wandb_sync=False):
                 "epochs": N_epochs,
                 'batches': N_batches,
                 'kernel size': kernel_size,
-                'N_conv_layers': 2,
                 'N_fc_layers': 1,
-                'N_conv1_out_channels': N_conv1_out_chan,
-                'N_conv2_out_channels': N_conv2_out_chan,
+                'conv_channels': conv_channels
             }
         )
 
@@ -346,8 +350,7 @@ def main(Nfiles=None, wandb_sync=False):
     model = Net(
             activation_module,
             kernel_size,
-            N_conv1_out_chan,
-            N_conv2_out_chan,
+            conv_channels,
             N_out_channels,
             run_name
         ).to(device)
@@ -368,6 +371,7 @@ def main(Nfiles=None, wandb_sync=False):
         model(X[0]) # Run a dummy fwd pass to initialize any lazy layers.
         model.apply(weights_init) # Init model weights.
         model.init_optimizer(lr, momentum)
+    print(model)
 
     if wandb_sync:
         wandb.config['architecture'] = repr(model)
