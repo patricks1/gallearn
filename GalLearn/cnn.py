@@ -69,6 +69,7 @@ def load_net(run_name):
                 'kernel_size',
                 'conv_channels',
                 'N_groups',
+                'p_fc_dropout',
                 'N_out_channels',
                 'lr',
                 'momentum']:
@@ -94,6 +95,7 @@ class Net(nn.Module):
                 kernel_size,
                 conv_channels,
                 N_groups,
+                p_fc_dropout,
                 N_out_channels,
                 lr,
                 momentum,
@@ -115,6 +117,7 @@ class Net(nn.Module):
         self.kernel_size = kernel_size
         self.conv_channels = conv_channels
         self.N_groups = N_groups
+        self.p_fc_dropout = p_fc_dropout
         self.N_out_channels = N_out_channels
         self.momentum = momentum
         self.lr = lr
@@ -156,6 +159,16 @@ class Net(nn.Module):
 
         self.fc_block = nn.Sequential(
             nn.LazyLinear(N_out_channels),
+        )
+        j = 1 
+        if p_fc_dropout is not None and p_fc_dropout > 0.:
+            self.fc_block.add_module(
+                str(j),
+                nn.Dropout1d(p_fc_dropout)
+            )
+            j += 1
+        self.fc_block.add_module(
+            str(j),
             activation_module()
         )
 
@@ -243,6 +256,7 @@ class Net(nn.Module):
             'kernel_size': self.kernel_size,
             'conv_channels': self.conv_channels,
             'N_groups': self.N_groups,
+            'p_fc_dropout': self.p_fc_dropout,
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
             'momentum': self.momentum
@@ -330,12 +344,13 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     lr=0.00001 # learning rate
     momentum = 0.5
     N_batches = 20
-    N_epochs = 5 
+    N_epochs = 1 
     kernel_size = 40
     activation_module = nn.ReLU
     dataset = 'gallearn_data_256x256_2d_tgt.h5'
     conv_channels = [50, 25, 10, 3, 1]
     N_groups = 4
+    p_fc_dropout = 0.
 
     # Other things
     N_out_channels = 1
@@ -357,7 +372,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 'kernel size': kernel_size,
                 'N_fc_layers': 1,
                 'conv_channels': conv_channels,
-                'N_groups': N_groups
+                'N_groups': N_groups,
+                'p_fc_dropout': p_fc_dropout
             }
         )
         run_name = wandb.run.name
@@ -425,6 +441,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             kernel_size,
             conv_channels,
             N_groups,
+            p_fc_dropout,
             N_out_channels,
             lr,
             momentum,
