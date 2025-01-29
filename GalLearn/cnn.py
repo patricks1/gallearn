@@ -42,6 +42,42 @@ def load_fr_julia(Nfiles):
 
     return X, ys
 
+def save_wandb_id(wandb):
+    import paths
+    import os
+    with open(os.path.join(paths.data, wandb.run.name + '_id.txt'), 'w') as f:
+        f.write(wandb.run.id)
+    return None
+
+def load_wandb_id(run_name):
+    import paths
+    import os
+    with open(os.path.join(paths.data, run_name + '_id.txt'), 'r') as f:
+        wandb_id = f.read()
+    return wandb_id
+
+def load_net(run_name):
+    import pickle
+    import paths
+    import os
+    with open(os.path.join(paths.data, run_name + '_args' + '.pkl'), 
+              'rb') as f:
+        args_dict = pickle.load(f)
+    print(args_dict)
+    args = [
+        args_dict[arg_name] for arg_name in ['activation_module',
+                                             'kernel_size',
+                                             'conv_channels',
+                                             'N_out_channels',
+                                             'lr',
+                                             'momentum']
+    ]
+    args += [run_name]
+    model = Net(*args)
+    model.init_optimizer()
+    model.load()
+    return model
+
 class Net(nn.Module):
     def __init__(
                 self,
@@ -49,6 +85,8 @@ class Net(nn.Module):
                 kernel_size,
                 conv_channels,
                 N_out_channels,
+                lr,
+                momentum,
                 run_name
             ):
         import paths
@@ -58,11 +96,18 @@ class Net(nn.Module):
 
         self.state_path = os.path.join(
             paths.data, 
-            'state_' + run_name + '.tar'
+            run_name + '_state' + '.tar'
         )
 
+        self.last_epoch = 0
+
         self.activation_module = activation_module
+        self.kernel_size = kernel_size
+        self.conv_channels = conv_channels
         self.N_out_channels = N_out_channels
+        self.momentum = momentum
+        self.lr = lr
+        self.run_name = run_name
         self.features = {}
 
         #----------------------------------------------------------------------
@@ -93,50 +138,17 @@ class Net(nn.Module):
             activation_module()
         )
 
-        #self.conv3 = nn.Conv2d(
-        #    in_channels=3,
-        #    out_channels=1,
-        #    kernel_size=kernel_size
-        #)
-        #self.conv4 = nn.Conv2d(
-        #    in_channels=1,
-        #    out_channels=1,
-        #    kernel_size=kernel_size
-        #)
-        #self.conv5 = nn.Conv2d(
-        #    in_channels=1,
-        #    out_channels=1,
-        #    kernel_size=kernel_size
-        #)
         # Dropout for convolutions
         #self.drop = nn.Dropout2d()
 
         return None
 
-    def init_optimizer(self, lr, momentum):
+    def init_optimizer(self):
         self.optimizer = torch.optim.SGD(
                 self.parameters(), 
-                lr=lr, 
-                momentum=momentum
+                lr=self.lr, 
+                momentum=self.momentum
             )
-        return None
-
-    def make_fc1(self, x):
-        if not hasattr(self, 'fc1'):
-            length = x.shape[1]
-            self.fc1 = nn.Linear(length, 50)
-        return None
-
-    def make_fc2(self, x):
-        if not hasattr(self, 'fc2'):
-            length = x.shape[1]
-            self.fc2 = nn.Linear(length, 300)
-        return None
-
-    def make_fc3(self, x):
-        if not hasattr(self, 'fc3'):
-            length = x.shape[1]
-            self.fc3 = nn.Linear(length, self.N_out_channels)
         return None
 
     def forward(self, x):
@@ -201,7 +213,24 @@ class Net(nn.Module):
         self.features = features
         return None
 
-    def save(self, epoch, train_loss, test_loss):
+    def save_args(self):
+        import pickle
+        import paths
+        import os
+        args = {
+            'activation_module': self.activation_module,
+            'kernel_size': self.kernel_size,
+            'conv_channels': self.conv_channels,
+            'N_out_channels': self.N_out_channels,
+            'lr': self.lr,
+            'momentum': self.momentum
+        }
+        with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
+                  'wb') as f:
+            pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
+        return None
+
+    def save_state(self, epoch, train_loss, test_loss):
         import os
         import time
         import math
@@ -236,14 +265,19 @@ class Net(nn.Module):
         import numpy as np
         checkpoints = torch.load(self.state_path, weights_only=True)
         epochs = np.array(list(checkpoints.keys()))
-        last_epoch = epochs.max()
-        self.load_state_dict(checkpoints[last_epoch]['model_state_dict'])
+        self.last_epoch = epochs.max()
+        self.load_state_dict(checkpoints[self.last_epoch]['model_state_dict'])
         self.optimizer.load_state_dict(
-            checkpoints[last_epoch]['optimizer_state_dict']
+            checkpoints[self.last_epoch]['optimizer_state_dict']
         )
         return None
 
-def main(Nfiles=None, wandb_sync=False):
+def main(Nfiles=None, wandb_mode='n', run_name=None):
+    if wandb_mode == 'r' and run_name is None:
+        raise Exception(
+            'User must provide a `run_name` if `wandb_mode` is \'r\' for'
+            ' resume.'
+        )
     import preprocessing
     import random
     import wandb
@@ -271,11 +305,11 @@ def main(Nfiles=None, wandb_sync=False):
     torch.set_default_device(device_str)
 
     # Things wandb will track
-    lr=0.01 # learning rate
+    lr=0.00001 # learning rate
     momentum = 0.5
     N_batches = 20
-    N_epochs = 4
-    kernel_size = 20
+    N_epochs = 3 
+    kernel_size = 40
     activation_module = nn.ReLU
     dataset = 'gallearn_data_256x256_2d_tgt.h5'
     conv_channels = [50, 1]
@@ -283,7 +317,7 @@ def main(Nfiles=None, wandb_sync=False):
     # Other things
     N_out_channels = 1
 
-    if wandb_sync:
+    if wandb_mode == 'y':
         wandb.init(
             # set the wandb project where this run will be logged
             project="2d_gallearn",
@@ -302,6 +336,16 @@ def main(Nfiles=None, wandb_sync=False):
                 'conv_channels': conv_channels
             }
         )
+        run_name = wandb.run.name
+    elif wandb_mode == 'r':
+        run_id = load_wandb_id(run_name)
+        wandb.init(
+            project='2d_gallearn',
+            id=run_id,
+            resume='must'
+        )
+    elif wandb_mode == 'n' and run_name is None:
+        run_name = datetime.datetime.today().strftime('%Y%m%d')
 
     d = preprocessing.load_data(dataset)
     X = d['X'].to(device=device_str)
@@ -321,11 +365,7 @@ def main(Nfiles=None, wandb_sync=False):
     X_train = X[is_train]
     X_test = X[~is_train]
 
-    # Run this once to load the train and test data straight into a dataloader 
-    # class
-    # that will provide the batches
     batch_size_train = max(1, int(N_train / N_batches))
-    #batch_size_test = N_test
     batch_size_test = min(20, N_test)
     train_loader = torch.utils.data.DataLoader(
         torch.utils.data.TensorDataset(X_train, ys_train),
@@ -341,18 +381,7 @@ def main(Nfiles=None, wandb_sync=False):
         generator=torch.Generator(device=device_str)
     )
 
-    # Create network
-    if wandb_sync:
-        run_name = wandb.run.name
-    else:
-        run_name = datetime.datetime.today().strftime('%Y%m%d')
-    model = Net(
-            activation_module,
-            kernel_size,
-            conv_channels,
-            N_out_channels,
-            run_name
-        ).to(device)
+    loss_function = torch.nn.MSELoss()
 
     # He initialization of weights
     def weights_init(layer_in):
@@ -364,21 +393,33 @@ def main(Nfiles=None, wandb_sync=False):
             layer_in.bias.data.fill_(0.0)
         return None
 
+    #--------------------------------------------------------------------------
+    # Build the model
+    #--------------------------------------------------------------------------
+    model = Net(
+            activation_module,
+            kernel_size,
+            conv_channels,
+            N_out_channels,
+            lr,
+            momentum,
+            run_name
+        ).to(device)
+    model(X[:1]) # Run a dummy fwd pass to initialize any lazy layers.
+    model.init_optimizer()
     if os.path.isfile(model.state_path):
         model.load()
     else:
         print('Didn\'t load a state.')
-        model(X[:1]) # Run a dummy fwd pass to initialize any lazy layers.
+        model.save_args()
+        if wandb_mode == 'y':
+            save_wandb_id(wandb)
         model.apply(weights_init) # Init model weights.
-        model.init_optimizer(lr, momentum)
-        print(model)
+    print(model)
 
-    if wandb_sync:
+    if wandb_mode == 'y':
         wandb.config['architecture'] = repr(model)
 
-    loss_function = torch.nn.MSELoss()
-
-    # Main training routine
     def train(epoch):
         model.train()
         # Get each
@@ -420,7 +461,6 @@ def main(Nfiles=None, wandb_sync=False):
         avg_loss = sum_losses / (batch_idx + 1)
         return avg_loss 
 
-    # Run on test data
     def test():
         model.eval()
         test_loss = 0
@@ -449,17 +489,17 @@ def main(Nfiles=None, wandb_sync=False):
         ))
         return test_loss 
 
-    # Get initial performance
     print('\nGetting initial performance.')
     test()
+
     print('Training.')
-    for epoch in range(1, N_epochs + 1):
+    for epoch in range(model.last_epoch + 1, model.last_epoch + N_epochs + 1):
         train_loss = train(epoch)
         test_loss = test()
-        if wandb_sync:
+        if wandb_mode in ['y', 'r']:
             wandb.log({'training loss': train_loss,
                        'test loss': test_loss})
-        model.save(epoch, train_loss, test_loss)
+        model.save_state(epoch, train_loss, test_loss)
 
     # Run network on data we got before and show predictions
     test_examples = enumerate(test_loader)
@@ -469,13 +509,6 @@ def main(Nfiles=None, wandb_sync=False):
     print(output)
     print('Corresponding targets:')
     print(test_tgts)
-
-    #fig = plt.figure()
-    #ax = fig.add_subplot(111)
-    #y_pred = model(X)
-    #ax.hist(model[0].input.reshape(-1), bins=25, histtype='step')
-    #ax.set_yscale('log')
-    #plt.show()
 
     return model 
 
@@ -496,10 +529,33 @@ if __name__ == '__main__':
     parser.add_argument(
         '-w',
         '--wandb',
-        action='store_true',
-        help='Whether to make `wandb` aware of the run'
+        type=str,
+        choices=['n', 'y', 'r'],
+        default='n',
+        help=(
+            '`wandb` mode. Choices are'
+            ' \'n\': No'
+            ' interaction.'
+            ' \'y\': Yes, start a new run.'
+            ' \'r\': Resume a run.'
+        )
     )
+    parser.add_argument(
+        '-r',
+        '--run-name',
+        type=str,
+        help=(
+            'The name to give a new run, or the name of the run to resume.'
+            ' (Required'
+            ' if --wandb is \'r\')'
+        )
+    )
+
     args = parser.parse_args()
+    if args.wandb == 'r' and args.run_name is None:
+        parser.error('--run-name is required when --wandb is \'r\'')
+
     Nfiles = args.num_gals
-    wandb_sync = args.wandb
-    main(Nfiles, wandb_sync=wandb_sync)
+    wandb_mode = args.wandb
+    run_name = args.run_name
+    main(Nfiles, wandb_mode=wandb_mode, run_name=run_name)
