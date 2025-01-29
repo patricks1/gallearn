@@ -80,6 +80,13 @@ def load_net(run_name):
     model.load()
     return model
 
+def find_closest_N_groups(N_channels, N_groups):
+    # Get all divisors of N_channels
+    divisors = [i for i in range(1, N_channels + 1) if N_channels % i == 0]
+    # Find the divisor closest to N_groups
+    closest_divisor = min(divisors, key=lambda x: abs(x - N_groups))
+    return closest_divisor
+
 class Net(nn.Module):
     def __init__(
                 self,
@@ -130,10 +137,14 @@ class Net(nn.Module):
                 )
             )
             i += 1
-            if N_groups is not None:
+            if self.N_groups is not None:
+                closest_N_groups = find_closest_N_groups(
+                    out_channels, 
+                    self.N_groups
+                )
                 self.conv_block.add_module(
                     str(i),
-                    nn.GroupNorm(self.N_groups, out_channels)
+                    nn.GroupNorm(closest_N_groups, out_channels)
                 )
                 i += 1
             self.conv_block.add_module(
@@ -413,6 +424,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             activation_module,
             kernel_size,
             conv_channels,
+            N_groups,
             N_out_channels,
             lr,
             momentum,

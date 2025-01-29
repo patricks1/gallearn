@@ -33,6 +33,9 @@ def load_data(fname):
     return d
 
 def min_max_scale(X):
+    '''
+    Min-max scale the data from -1 to 1.
+    '''
     X = X.detach().clone()
     for i in range(X.shape[1]):
         X[:, i] = 2. * (
@@ -43,6 +46,14 @@ def min_max_scale(X):
     return X
 
 def new_min_max_scale(X):
+    '''
+    Min-max scale the data from 0 to 255. Scaling is done for all galaxies at
+    once, on a per-channel (u, g, r) basis. Given that the X input spans ~8
+    orders of magnitues, only the brightest regions contribute significant
+    information. Additionally, any galaxies whose maximum brightness falls many
+    orders of magnitude below the brightest galaxy may not show significant
+    information post-scaling.
+    '''
     X = X.detach().clone()
     for i in range(X.shape[1]):
         X[:, i] = 255. * (
