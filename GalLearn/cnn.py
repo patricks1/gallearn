@@ -308,11 +308,11 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     lr=0.00001 # learning rate
     momentum = 0.5
     N_batches = 20
-    N_epochs = 3 
+    N_epochs = 5 
     kernel_size = 40
     activation_module = nn.ReLU
     dataset = 'gallearn_data_256x256_2d_tgt.h5'
-    conv_channels = [50, 1]
+    conv_channels = [50, 25, 1]
 
     # Other things
     N_out_channels = 1
