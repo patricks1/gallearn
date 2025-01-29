@@ -64,16 +64,18 @@ def load_net(run_name):
               'rb') as f:
         args_dict = pickle.load(f)
     print(args_dict)
-    args = [
-        args_dict[arg_name] for arg_name in ['activation_module',
-                                             'kernel_size',
-                                             'conv_channels',
-                                             'N_out_channels',
-                                             'lr',
-                                             'momentum']
-    ]
-    args += [run_name]
-    model = Net(*args)
+    args = []
+    for key in ['activation_module',
+                'kernel_size',
+                'conv_channels',
+                'N_groups',
+                'N_out_channels',
+                'lr',
+                'momentum']:
+        if key not in args_dict:
+            args_dict[key] = None
+    args_dict['run_name'] = run_name
+    model = Net(**args_dict)
     model.init_optimizer()
     model.load()
     return model
@@ -84,6 +86,7 @@ class Net(nn.Module):
                 activation_module,
                 kernel_size,
                 conv_channels,
+                N_groups,
                 N_out_channels,
                 lr,
                 momentum,
@@ -104,6 +107,7 @@ class Net(nn.Module):
         self.activation_module = activation_module
         self.kernel_size = kernel_size
         self.conv_channels = conv_channels
+        self.N_groups = N_groups
         self.N_out_channels = N_out_channels
         self.momentum = momentum
         self.lr = lr
@@ -126,6 +130,12 @@ class Net(nn.Module):
                 )
             )
             i += 1
+            if N_groups is not None:
+                self.conv_block.add_module(
+                    str(i),
+                    nn.GroupNorm(self.N_groups, out_channels)
+                )
+                i += 1
             self.conv_block.add_module(
                 str(i), 
                 activation_module()
@@ -221,6 +231,7 @@ class Net(nn.Module):
             'activation_module': self.activation_module,
             'kernel_size': self.kernel_size,
             'conv_channels': self.conv_channels,
+            'N_groups': self.N_groups,
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
             'momentum': self.momentum
@@ -312,7 +323,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     kernel_size = 40
     activation_module = nn.ReLU
     dataset = 'gallearn_data_256x256_2d_tgt.h5'
-    conv_channels = [50, 25, 1]
+    conv_channels = [50, 25, 10, 3, 1]
+    N_groups = 4
 
     # Other things
     N_out_channels = 1
@@ -333,7 +345,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 'batches': N_batches,
                 'kernel size': kernel_size,
                 'N_fc_layers': 1,
-                'conv_channels': conv_channels
+                'conv_channels': conv_channels,
+                'N_groups': N_groups
             }
         )
         run_name = wandb.run.name
