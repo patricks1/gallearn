@@ -344,13 +344,13 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     lr=0.00001 # learning rate
     momentum = 0.5
     N_batches = 20
-    N_epochs = 1 
+    N_epochs = 50 
     kernel_size = 40
     activation_module = nn.ReLU
     dataset = 'gallearn_data_256x256_2d_tgt.h5'
     conv_channels = [50, 25, 10, 3, 1]
     N_groups = 4
-    p_fc_dropout = 0.
+    p_fc_dropout = 0.5
 
     # Other things
     N_out_channels = 1
