@@ -341,7 +341,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     torch.set_default_device(device_str)
 
     # Things wandb will track
-    lr=0.00001 # learning rate
+    lr = 0.00001 # learning rate
     momentum = 0.5
     N_batches = 20
     N_epochs = 50 
@@ -350,7 +350,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     dataset = 'gallearn_data_256x256_2d_tgt.h5'
     conv_channels = [50, 25, 10, 3, 1]
     N_groups = 4
-    p_fc_dropout = 0.5
+    p_fc_dropout = 0.
 
     # Other things
     N_out_channels = 1
