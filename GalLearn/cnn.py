@@ -156,7 +156,7 @@ class Net(nn.Module):
             )
             in_channels = out_channels
             i += 1
-        if p_fc_dropout is not None and p_fc_dropout  0.:
+        if p_fc_dropout is not None and p_fc_dropout > 0.:
             self.dropout = nn.Dropout1d(p_fc_dropout)
         self.fc_block = nn.Sequential(
             nn.LazyLinear(N_out_channels),
