@@ -18,34 +18,27 @@ else:
 device = torch.device(device_str)
 torch.set_default_device(device_str)
 
-i = 2 
-d = preprocessing.load_data('gallearn_data_500x500_2d_tgt.h5')
+i = 8 
+d = preprocessing.load_data('gallearn_data_256x256_2d_tgt.h5')
 X = d['X'].to(device=device_str)
 X = preprocessing.new_min_max_scale(X)[i:i+1]
 ys = d['ys_sorted'].to(device=device_str)[i:i+1]
 
-model = cnn.Net(
-    torch.nn.ReLU,
-    80,
-    50,
-    1,
-    1
-)
-model.init_optimizer(0.01, 0.5)
+model = cnn.load_net('trim-bird-186')
 
 def show_filters():
-    ys_pred = model(X)
-
-    model.load()
     model.eval()
     model.register_feature_hooks()
     ys_pred = model(X)
-    filters = model.features['conv1'][0].detach().cpu().numpy()
+    filters = (
+        model.features['conv_block']['12:Conv2d'].detach().cpu().numpy()[0]
+    )
 
     fig = plt.figure(figsize=(3 * 10, 3 * 5))
 
-    for i in range(50):
-        ax = fig.add_subplot(5, 10, i+1)
+    print(ys_pred)
+    for i in range(1):
+        ax = fig.add_subplot(1, 1, i+1)
         ax.imshow(
             filters[i],
             cmap='viridis',

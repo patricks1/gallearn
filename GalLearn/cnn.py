@@ -197,7 +197,8 @@ class Net(nn.Module):
         #x = self.activation(x)
 
         x = x.flatten(start_dim=1) # 8
-        x = self.dropout(x)
+        if self.p_fc_dropout is not None and self.p_fc_dropout > 0.:
+            x = self.dropout(x)
         x = self.fc_block(x)
         
         return x
