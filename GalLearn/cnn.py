@@ -108,7 +108,7 @@ class Net(nn.Module):
 
         self.state_path = os.path.join(
             paths.data, 
-            run_name + '_state' + '.tar'
+            run_name + '_state.tar'
         )
 
         self.last_epoch = 0
@@ -318,6 +318,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     import random
     import wandb
     import os
+    import paths
 
     import numpy as np
     import pandas as pd
@@ -340,91 +341,10 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     device = torch.device(device_str)
     torch.set_default_device(device_str)
 
-    # Things wandb will track
-    lr = 0.00001 # learning rate
-    momentum = 0.5
-    N_batches = 20
-    N_epochs = 50 
-    kernel_size = 40
-    activation_module = nn.ReLU
-    dataset = 'gallearn_data_256x256_2d_tgt.h5'
-    conv_channels = [50, 25, 10, 3, 1]
-    N_groups = 4
-    p_fc_dropout = 0.
-
-    # Other things
-    N_out_channels = 1
-
-    if wandb_mode == 'y':
-        wandb.init(
-            # set the wandb project where this run will be logged
-            project="2d_gallearn",
-            #name='test',
-
-            # track hyperparameters and run metadata
-            config={
-                "learning_rate": lr,
-                'momentum': momentum,
-                'activation_func': activation_module,
-                "dataset": dataset,
-                "epochs": N_epochs,
-                'batches': N_batches,
-                'kernel size': kernel_size,
-                'N_fc_layers': 1,
-                'conv_channels': conv_channels,
-                'N_groups': N_groups,
-                'p_fc_dropout': p_fc_dropout
-            }
-        )
-        run_name = wandb.run.name
-    elif wandb_mode == 'r':
-        run_id = load_wandb_id(run_name)
-        wandb.init(
-            project='2d_gallearn',
-            id=run_id,
-            resume='must'
-        )
-    elif wandb_mode == 'n' and run_name is None:
-        run_name = datetime.datetime.today().strftime('%Y%m%d')
-
-    d = preprocessing.load_data(dataset)
-    X = d['X'].to(device=device_str)
-    X = preprocessing.new_min_max_scale(X)[:Nfiles]
-    ys = d['ys_sorted'].to(device=device_str)[:Nfiles]
-
-    N_all = len(ys) 
-    print('{0:0.0f} galaxies in data'.format(N_all))
-    N_test = max(1, int(0.15 * N_all))
-    N_train = N_all - N_test
-
-    indices_test = np.random.randint(0, N_all, N_test)
-    is_train = np.ones(N_all, dtype=bool)
-    is_train[indices_test] = False
-    ys_train = ys[is_train]
-    ys_test = ys[~is_train]
-    X_train = X[is_train]
-    X_test = X[~is_train]
-
-    batch_size_train = max(1, int(N_train / N_batches))
-    batch_size_test = min(20, N_test)
-    train_loader = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset(X_train, ys_train),
-        batch_size=batch_size_train, 
-        shuffle=True,
-        generator=torch.Generator(device=device_str)
-    )
-
-    test_loader = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset(X_test, ys_test),
-        batch_size=batch_size_test, 
-        shuffle=True,
-        generator=torch.Generator(device=device_str)
-    )
-
-    loss_function = torch.nn.MSELoss()
-
-    # He initialization of weights
     def weights_init(layer_in):
+        '''
+        Kaiming He initialization of weights
+        '''
         if isinstance(layer_in, nn.Linear):
             nn.init.kaiming_uniform_(
                 layer_in.weight,
@@ -433,38 +353,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             layer_in.bias.data.fill_(0.0)
         return None
 
-    #--------------------------------------------------------------------------
-    # Build the model
-    #--------------------------------------------------------------------------
-    model = Net(
-            activation_module,
-            kernel_size,
-            conv_channels,
-            N_groups,
-            p_fc_dropout,
-            N_out_channels,
-            lr,
-            momentum,
-            run_name
-        ).to(device)
-    model(X[:1]) # Run a dummy fwd pass to initialize any lazy layers.
-    model.init_optimizer()
-    if os.path.isfile(model.state_path):
-        model.load()
-    else:
-        print('Didn\'t load a state.')
-        model.save_args()
-        if wandb_mode == 'y':
-            save_wandb_id(wandb)
-        model.apply(weights_init) # Init model weights.
-    print(model)
-
-    if wandb_mode == 'y':
-        wandb.config['architecture'] = repr(model)
-
     def train(epoch):
         model.train()
-        # Get each
         sum_losses = 0.
         N_optimized = 0
         for batch_idx, (data, target) in enumerate(train_loader):
@@ -531,6 +421,142 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         ))
         return test_loss 
 
+    ###########################################################################
+    # Load the data
+    ###########################################################################
+
+    # Hardcoding the dataset like this instead of getting it from a model
+    # attribute could potentially cause problems if the model the code
+    # loads was supposed to use a different dataset. We'll deal with that if it
+    # ever happens.
+    dataset = 'gallearn_data_256x256_2d_tgt.h5'
+
+    d = preprocessing.load_data(dataset)
+    X = d['X'].to(device=device_str)
+    # Linearly min-max scale the data from 0 to 255.
+    X = preprocessing.new_min_max_scale(X)[:Nfiles]
+    ys = d['ys_sorted'].to(device=device_str)[:Nfiles]
+
+    N_all = len(ys) 
+    print('{0:0.0f} galaxies in data'.format(N_all))
+    N_test = max(1, int(0.15 * N_all))
+    N_train = N_all - N_test
+
+    # Train-test split
+    indices_test = np.random.randint(0, N_all, N_test)
+    is_train = np.ones(N_all, dtype=bool)
+    is_train[indices_test] = False
+    ys_train = ys[is_train]
+    ys_test = ys[~is_train]
+    X_train = X[is_train]
+    X_test = X[~is_train]
+
+    ###########################################################################
+
+    N_epochs = 50 
+    N_batches = 20
+    loss_function = torch.nn.MSELoss()
+
+    ###########################################################################
+    # Build (or rebuild) the model
+    ###########################################################################
+    if wandb_mode == 'n' and run_name is None:
+        run_name = datetime.datetime.today().strftime('%Y%m%d')
+    if run_name is not None and os.path.isfile(
+                os.path.join(paths.data, run_name + '_state.tar')
+            ):
+        model = load_net(run_name)
+        if wandb_mode == 'r':
+            run_id = load_wandb_id(run_name)
+            wandb.init(
+                project='2d_gallearn',
+                id=run_id,
+                resume='must'
+            )
+    elif wandb_mode == 'r':
+        raise Exception(
+            '`wandb_mode` is set to resume, but there is no corresponding'
+            ' state file'
+        )
+    else:
+        # If the state file doesn't exist
+
+        # Things wandb will track
+        lr = 0.00001 # learning rate
+        momentum = 0.5
+        kernel_size = 40
+        activation_module = nn.ReLU
+        conv_channels = [50, 25, 10, 3, 1]
+        N_groups = 4
+        p_fc_dropout = 0.
+
+        # Other things
+        N_out_channels = 1
+
+        if wandb_mode == 'y':
+            wandb.init(
+                # Set the wandb project where this run will be logged.
+                project="2d_gallearn",
+
+                # Track hyperparameters and run metadata.
+                config={
+                    "learning_rate": lr,
+                    'momentum': momentum,
+                    'activation_func': activation_module,
+                    "dataset": dataset,
+                    'batches': N_batches,
+                    'kernel size': kernel_size,
+                    'N_fc_layers': 1,
+                    'conv_channels': conv_channels,
+                    'N_groups': N_groups,
+                    'p_fc_dropout': p_fc_dropout
+                }
+            )
+            run_name = wandb.run.name
+            save_wandb_id(wandb)
+
+        # Define the model if the we didn't rebuild one from a argument and
+        # state files.
+        model = Net(
+                activation_module,
+                kernel_size,
+                conv_channels,
+                N_groups,
+                p_fc_dropout,
+                N_out_channels,
+                lr,
+                momentum,
+                run_name
+            ).to(device)
+        model.save_args()
+        model(X[:1]) # Run a dummy fwd pass to initialize any lazy layers.
+        model.init_optimizer()
+        model.apply(weights_init) # Init model weights.
+    
+        if wandb_mode == 'y':
+            wandb.config['architecture'] = repr(model)
+
+    print(model)
+    
+    ###########################################################################
+    # Make the DataLoaders.
+    ###########################################################################
+    batch_size_train = max(1, int(N_train / N_batches))
+    batch_size_test = min(N_batches, N_test)
+    train_loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(X_train, ys_train),
+        batch_size=batch_size_train, 
+        shuffle=True,
+        generator=torch.Generator(device=device_str)
+    )
+    test_loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(X_test, ys_test),
+        batch_size=batch_size_test, 
+        shuffle=True,
+        generator=torch.Generator(device=device_str)
+    )
+    ###########################################################################
+
     print('\nGetting initial performance.')
     test()
 
@@ -542,15 +568,6 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             wandb.log({'training loss': train_loss,
                        'test loss': test_loss})
         model.save_state(epoch, train_loss, test_loss)
-
-    # Run network on data we got before and show predictions
-    test_examples = enumerate(test_loader)
-    batch_idx, (test_data, test_tgts) = next(test_examples)
-    output = model(test_data.to(device))
-    print('\nSome test outputs:')
-    print(output)
-    print('Corresponding targets:')
-    print(test_tgts)
 
     return model 
 
