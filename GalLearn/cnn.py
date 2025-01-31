@@ -156,19 +156,10 @@ class Net(nn.Module):
             )
             in_channels = out_channels
             i += 1
-
+        if p_fc_dropout is not None and p_fc_dropout  0.:
+            self.dropout = nn.Dropout1d(p_fc_dropout)
         self.fc_block = nn.Sequential(
             nn.LazyLinear(N_out_channels),
-        )
-        j = 1 
-        if p_fc_dropout is not None and p_fc_dropout > 0.:
-            self.fc_block.add_module(
-                str(j),
-                nn.Dropout1d(p_fc_dropout)
-            )
-            j += 1
-        self.fc_block.add_module(
-            str(j),
             activation_module()
         )
 
@@ -206,17 +197,7 @@ class Net(nn.Module):
         #x = self.activation(x)
 
         x = x.flatten(start_dim=1) # 8
-        #self.make_fc1(x)
-        #x = self.fc1(x) # 9
-        #x = self.activation(x)
-
-        #plt.hist(x.flatten().detach().cpu().numpy())
-        #plt.show()
-
-        #self.make_fc3(x)
-        #x = self.fc3(x) # 11
-        #x = self.activation_module()(x)
-
+        x = self.dropout(x)
         x = self.fc_block(x)
         
         return x
@@ -488,7 +469,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         activation_module = nn.ReLU
         conv_channels = [50, 25, 10, 3, 1]
         N_groups = 4
-        p_fc_dropout = 0.
+        p_fc_dropout = 0.5
 
         # Other things
         N_out_channels = 1
