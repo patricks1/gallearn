@@ -190,7 +190,8 @@ def test(save=False):
     from matplotlib import rcParams
     rcParams['axes.titlesize'] = 8.
 
-    X = load_data('gallearn_data_256x256_3proj_2d_tgt.h5')['X']
+    d = load_data('gallearn_data_256x256_3proj_2d_tgt.h5')
+    X = d['X']
     Xstd = std_scale(X)
     Xminmax = min_max_scale(X)
     Xminmax256 = new_min_max_scale(X)
