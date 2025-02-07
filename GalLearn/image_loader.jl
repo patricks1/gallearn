@@ -26,7 +26,8 @@ module image_loader
                 fnames_sorted,
                 direc,
                 gallearn_dir,
-                all_bands
+                all_bands,
+                orientations
             )
         open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
             println(f, fname)      
@@ -85,6 +86,7 @@ module image_loader
         # Save this file's position. 
         underscores = findall(isequal('_'), fname)
         push!(obs_sorted, fname[1 : underscores[2] - 1])
+        push!(orientations, orientation)
         push!(fnames_sorted, fname)
 
         #if shapeXimgs < shape_band
@@ -176,7 +178,7 @@ module image_loader
     function load_images(
                 ; Nfiles=nothing,
                 logandscale=false,
-                res=500,
+                res=256,
                 tgt_type="3d"
             )
         files = filter(
@@ -234,6 +236,7 @@ module image_loader
         shapeXimgs = size(X)[end - 1 : end]
         obs_sorted = String[]
         fnames_sorted = String[]
+        orientations = String[]
 
         iX = 1
         for fname in ProgressBar(
@@ -248,7 +251,8 @@ module image_loader
                 fnames_sorted,
                 direc,
                 gallearn_dir,
-                all_bands
+                all_bands,
+                orientations
             )
         end
         # Get rid of the ridiculous OffsetArray indexing
