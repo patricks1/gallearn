@@ -43,99 +43,113 @@ module image_loader
         h5open(path, "r") do file
             #println("reading $fname")
             global shape_band
-            shape_band = nothing
-            img = nothing
-            if all_bands
-                bands = ["g", "u", "r"]
-            else
-                bands = ["g"]
-            end
-            for (i, band) in enumerate(bands)
-                band = "band_" * band
-                band_img = read(file, "projection_xy/" * band)
-                shape_band = size(band_img) 
+            for proj in ["projection_xy/", "projection_yz/", "projection_zx/"]
+                shape_band = nothing
+                img = nothing
+                if all_bands
+                    bands = ["g", "u", "r"]
+                else
+                    bands = ["g"]
+                end
+                for (i, band) in enumerate(bands)
+                    band = "band_" * band
+                    band_img = read(file, proj * band)
+                    shape_band = size(band_img) 
+                    if shape_band[end] > 2000
+                        # Leave img as nothing if the image is too big. Once we 
+                        # break
+                        # this loop here, we'll continue to the next file 
+                        # below.
+                        break 
+                    end
+                    if i == 1 
+                        img = zeros(Nbands, shape_band...) 
+                    elseif size(band_img) != shape_band
+                        error("Bands have different shapes.")
+                    end
+                    img[i, :, :] = band_img 
+                end
+
                 if shape_band[end] > 2000
-                    # Leave img as nothing if the image is too big. Once we 
-                    # break
-                    # this loop here, we'll continue to the next file below.
-                    break 
+                    # Image is too big; we should move to the next file. If 
+                    # this is the
+                    # case, img == nothing at this point, given the break 
+                    # above.
+                    open(joinpath(
+                            gallearn_dir, "image_loader_ram_use.txt"), 
+                            "a") do f
+                        println(f, "Skipping " * fname)
+                    end
+                    # Make X one row smaller than we were expecting, since 
+                    # we're
+                    # skipping an image and `obs_sorted` will be shorter.
+                    X = X[1 : end - 1, :, :, :]
+                    shapeXimgs = size(X)[end - 1 : end]
+                    # Go to the next projection without addint 1 to iX
+                    continue
                 end
-                if i == 1 
-                    img = zeros(Nbands, shape_band...) 
-                elseif size(band_img) != shape_band
-                    error("Bands have different shapes.")
+
+                # Save this file's position. 
+                underscores = findall(isequal('_'), fname)
+                push!(obs_sorted, fname[1 : underscores[2] - 1])
+                push!(orientations, proj)
+                push!(fnames_sorted, fname)
+
+                #if shapeXimgs < shape_band
+                #    #pad = (shape_band .- shapeXimgs) ./ 2
+                #    #X = ImageFiltering.padarray(
+                #    #    X, 
+                #    #    Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
+                #    #)
+                #    X = Images.imresize(X, size(X)[1:2]..., shape_band...)
+                #elseif shape_band < shapeXimgs
+                #    #pad = (shapeXimgs .- shape_band) ./ 2
+                #    #img = ImageFiltering.padarray(
+                #    #    img,
+                #    #    Fill(0., (0, Int(pad[1]), Int(pad[2])))
+                #    #)
+                #    img = Images.imresize(img, Nbands, shapeXimgs...)
+                #end           
+
+                if shapeXimgs != shape_band
+                    if Nbands > 1
+                        img = Images.imresize(
+                            img,
+                            Nbands,
+                            shapeXimgs...
+                        )
+                    else
+                        innerimg = img[1, :, :]
+                        img = Images.imresize(innerimg, shapeXimgs...)
+                        img = reshape(img, (1, size(img)...))
+                    end
                 end
-                img[i, :, :] = band_img 
+                    
+                X = parent(X) # Removing ridiculous OffsetArray indexing
+                X[iX, :, :, :] = img
+                shapeXimgs = size(X)[end - 1 : end]
+                open(joinpath(
+                            gallearn_dir, 
+                            "image_loader_ram_use.txt"
+                        ), "a") do f
+                    println(f, shapeXimgs)
+                    println(
+                        f, 
+                        "Memory used by X: $(Base.summarysize(X) / 1e9) GB"
+                    )
+                end
+
+                # Set the index for the next element of X to create. Note that 
+                # this
+                # advancement only happens if we don't skip the image we 
+                # evaluate.
+                # For instances where we skip, there's a continue statement 
+                # above
+                # that runs *before* we add to iX.
+                iX += 1
             end
         end
         
-        if shape_band[end] > 2000
-            # Image is too big; we should move to the next file. If this is the
-            # case, img == nothing at this point, given the break above.
-            open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
-                println(f, "Skipping " * fname)
-            end
-            # Make X one row smaller than we were expecting, since we're
-            # skipping an image and `obs_sorted` will be shorter.
-            X = X[1 : end - 1, :, :, :]
-            shapeXimgs = size(X)[end - 1 : end]
-            # Exit without addint 1 to iX
-            return X, shapeXimgs, iX
-        end
-
-        # Save this file's position. 
-        underscores = findall(isequal('_'), fname)
-        push!(obs_sorted, fname[1 : underscores[2] - 1])
-        push!(orientations, orientation)
-        push!(fnames_sorted, fname)
-
-        #if shapeXimgs < shape_band
-        #    #pad = (shape_band .- shapeXimgs) ./ 2
-        #    #X = ImageFiltering.padarray(
-        #    #    X, 
-        #    #    Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
-        #    #)
-        #    X = Images.imresize(X, size(X)[1:2]..., shape_band...)
-        #elseif shape_band < shapeXimgs
-        #    #pad = (shapeXimgs .- shape_band) ./ 2
-        #    #img = ImageFiltering.padarray(
-        #    #    img,
-        #    #    Fill(0., (0, Int(pad[1]), Int(pad[2])))
-        #    #)
-        #    img = Images.imresize(img, Nbands, shapeXimgs...)
-        #end           
-
-        if shapeXimgs != shape_band
-            if Nbands > 1
-                img = Images.imresize(
-                    img,
-                    Nbands,
-                    shapeXimgs...
-                )
-            else
-                innerimg = img[1, :, :]
-                img = Images.imresize(innerimg, shapeXimgs...)
-                img = reshape(img, (1, size(img)...))
-            end
-        end
-            
-        X = parent(X) # Removing ridiculous OffsetArray indexing
-        X[iX, :, :, :] = img
-        shapeXimgs = size(X)[end - 1 : end]
-        open(joinpath(
-                    gallearn_dir, 
-                    "image_loader_ram_use.txt"
-                ), "a") do f
-            println(f, shapeXimgs)
-            println(f, "Memory used by X: $(Base.summarysize(X) / 1e9) GB")
-        end
-
-        # Set the index for the next element of X to set. Note that this
-        # advancement only happens if we don't skip the image we evaluate.
-        # For instances where we skip, there's another return statement above
-        # that runs *before* we add to iX.
-        iX += 1
-
         return X, shapeXimgs, iX
     end
 
@@ -232,7 +246,8 @@ module image_loader
         else
             throw(ArgumentError("`tgt_type` should be \"2d\" or \"3d\"."))
         end
-        global X = zeros(Nfiles, Nbands, res, res) 
+        N_proj = 3 # Number of projections
+        global X = zeros(Nfiles * 3, Nbands, res, res) 
         shapeXimgs = size(X)[end - 1 : end]
         obs_sorted = String[]
         fnames_sorted = String[]
@@ -300,7 +315,11 @@ module image_loader
 
         if save
             # Resolution
-            fname = "gallearn_data_" * string(res) * "x" * string(res)
+            fname = "gallearn_data_" * 
+                string(res) * 
+                "x" * 
+                string(res) * 
+                "_3proj"
 
             # Sample type
             if Nfiles !== nothing
