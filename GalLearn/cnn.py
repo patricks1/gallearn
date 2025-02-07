@@ -403,20 +403,26 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         ))
         return test_loss 
 
+    N_epochs = 50 
+    N_batches = 20
+    loss_function = torch.nn.MSELoss()
+
     ###########################################################################
     # Load the data
     ###########################################################################
 
-    # Hardcoding the dataset like this instead of getting it from a model
-    # attribute could potentially cause problems if the model the code
+    # Hardcoding the dataset and scaling function like this instead of getting 
+    # them from model
+    # attributes could potentially cause problems if the model the code
     # loads was supposed to use a different dataset. We'll deal with that if it
     # ever happens.
     dataset = 'gallearn_data_256x256_2d_tgt.h5'
+    # Linearly min-max scale the data from 0 to 255.
+    scaling_function = preprocessing.new_min_max_scale
 
     d = preprocessing.load_data(dataset)
     X = d['X'].to(device=device_str)
-    # Linearly min-max scale the data from 0 to 255.
-    X = preprocessing.new_min_max_scale(X)[:Nfiles]
+    X = scaling_function(X)[:Nfiles]
     ys = d['ys_sorted'].to(device=device_str)[:Nfiles]
 
     N_all = len(ys) 
@@ -432,12 +438,6 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     ys_test = ys[~is_train]
     X_train = X[is_train]
     X_test = X[~is_train]
-
-    ###########################################################################
-
-    N_epochs = 50 
-    N_batches = 20
-    loss_function = torch.nn.MSELoss()
 
     ###########################################################################
     # Build (or rebuild) the model
@@ -485,6 +485,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     "learning_rate": lr,
                     'momentum': momentum,
                     'activation_func': activation_module,
+                    'scaling_function': scaling_function,
                     "dataset": dataset,
                     'batches': N_batches,
                     'kernel size': kernel_size,
