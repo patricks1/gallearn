@@ -416,7 +416,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # attributes could potentially cause problems if the model the code
     # loads was supposed to use a different dataset. We'll deal with that if it
     # ever happens.
-    dataset = 'gallearn_data_256x256_2d_tgt.h5'
+    dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
     # Linearly min-max scale the data from 0 to 255.
     scaling_function = preprocessing.new_min_max_scale
 
@@ -470,7 +470,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         activation_module = nn.ReLU
         conv_channels = [50, 25, 10, 3, 1]
         N_groups = 4
-        p_fc_dropout = 0.5
+        p_fc_dropout = 0.
 
         # Other things
         N_out_channels = 1
