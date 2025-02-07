@@ -72,6 +72,7 @@ def std_scale(X):
     return X 
 
 def log_min_max_scale(X):
+    import torch
     logX = torch.log10(X)
     iszero = X == 0.
     logX[iszero] = logX[~iszero].min()
