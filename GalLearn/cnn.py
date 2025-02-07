@@ -466,7 +466,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         # Things wandb will track
         lr = 0.00001 # learning rate
         momentum = 0.5
-        kernel_size = 40
+        kernel_size = 3
         activation_module = nn.ReLU
         conv_channels = [50, 25, 10, 3, 1]
         N_groups = 4

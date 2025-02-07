@@ -219,9 +219,15 @@ def test(save=False):
         axs[i].set_ylabel('Num images')
     axs[-2].set_xlabel('Mean image value')
     axs[-1].set_axis_off()
+    for ax in axs:
+        ax.set_yscale('log')
+    if save:
+        plt.savefig('mean_distribs_log.png', dpi=200)
+    for ax in axs:
+        ax.set_yscale('linear')
     if save:
         plt.savefig('mean_distribs.png', dpi=200)
-    plt.show()
+    plt.close()
 
     fig, axs = plt.subplots(2, 4, figsize=(10, 5.5), dpi=140, sharey=True)
     fig.subplots_adjust(hspace=hspace, wspace=0.)
@@ -238,9 +244,15 @@ def test(save=False):
         axs[i].set_ylabel('Num pixels')
     axs[-2].set_xlabel('Pixel value')
     axs[-1].set_axis_off()
+    for ax in axs:
+        ax.set_yscale('log')
+    if save:
+        plt.savefig('pixel_distribs_log.png', dpi=200)
+    for ax in axs:
+        ax.set_yscale('linear')
     if save:
         plt.savefig('pixel_distribs.png', dpi=200)
-    plt.show()
+    plt.close()
 
     return None
 
