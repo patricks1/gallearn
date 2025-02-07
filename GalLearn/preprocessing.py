@@ -71,7 +71,14 @@ def std_scale(X):
         X[:, i] /= std
     return X 
 
-def plt_distrib_of_means(ax, X, title=None):
+def log_min_max_scale(X):
+    logX = torch.log10(X)
+    iszero = X == 0.
+    logX[iszero] = logX[~iszero].min()
+    Xlogminmax = min_max_scale(logX)
+    return Xlogminmax
+
+def plt_distrib_of_means(ax, X, title=None, all_bands=False):
     import matplotlib.pyplot as plt
     import numpy as np
     import torch
@@ -85,11 +92,18 @@ def plt_distrib_of_means(ax, X, title=None):
     edges = torch.zeros(3, 21)
     for i, m in enumerate(means):
         heights[i], edges[i] = torch.histogram(m, bins=bins)
+
+    if all_bands:
+        colors = ['C2', 'C0', 'C3'],
+        labels = ['g', 'u', 'r']
+    else:
+        colors = ['C2']
+        labels = ['g']
     for h, e, c, l in zip(
-                heights, 
-                edges,
-                ['C2', 'C0', 'C3'],
-                ['G', 'U', 'R']
+                heights.detach().cpu().numpy(), 
+                edges.detach().cpu().numpy(),
+                colors,
+                labels
             ):
         ax.stairs(
             h,
@@ -97,14 +111,24 @@ def plt_distrib_of_means(ax, X, title=None):
             color=c,
             label=l
         )
-    ax.set_yscale('log')
+    #ax.set_yscale('log')
     ax.set_title(title)
+    ax.ticklabel_format(
+        style='sci',
+        scilimits=(-1,3),
+        axis='x',
+        useMathText=True
+    )
+    ax.tick_params(axis='x', labelrotation=45, labelright=False)
+    for label in ax.get_xticklabels():
+        label.set_rotation(45)
+        label.set_ha('right')
 
     if title is not None:
         print('Added {0:s} to figure.'.format(title.lower()))
     return None
 
-def plt_distrib(ax, X, title=None):
+def plt_distrib(ax, X, title=None, all_bands=False):
     import torch
     import matplotlib.pyplot as plt
     import numpy as np
@@ -124,11 +148,17 @@ def plt_distrib(ax, X, title=None):
         hist = torch.histogram(Xpermflat[i], bins=bins)
         heights[i], edges[i] = hist
 
+    if all_bands:
+        colors = ['C2', 'C0', 'C3'],
+        labels = ['g', 'u', 'r']
+    else:
+        colors = ['C2']
+        labels = ['g']
     for h, e, c, l in zip(
                 heights.detach().cpu().numpy(), 
                 edges.detach().cpu().numpy(),
-                ['C2', 'C0', 'C3'],
-                ['G', 'U', 'R']
+                colors,
+                labels
             ):
         ax.stairs(
             h,
@@ -136,8 +166,19 @@ def plt_distrib(ax, X, title=None):
             color=c,
             label=l
         )
-    ax.set_yscale('log')
     ax.set_title(title)
+    ax.ticklabel_format(
+        style='sci',
+        scilimits=(-1,3),
+        axis='x',
+        useMathText=True
+    )
+    ax.ticklabel_format(
+        style='sci',
+        scilimits=(-1,3),
+        axis='x',
+        useMathText=True
+    )
 
     if title is not None:
         print('Added {0:s} to figure.'.format(title.lower()))
@@ -146,10 +187,13 @@ def plt_distrib(ax, X, title=None):
 def test(save=False):
     import torch
     from matplotlib import pyplot as plt
+    from matplotlib import rcParams
+    rcParams['axes.titlesize'] = 8.
 
-    X = load_data('gallearn_data_500x500_3d_tgt.h5')['X']
+    X = load_data('gallearn_data_256x256_3proj_2d_tgt.h5')['X']
     Xstd = std_scale(X)
     Xminmax = min_max_scale(X)
+    Xminmax256 = new_min_max_scale(X)
 
     logX = torch.log10(X)
     iszero = X == 0.
@@ -160,36 +204,40 @@ def test(save=False):
 
     hspace = 0.4
 
-    fig, axs = plt.subplots(2, 3, figsize=(10, 5.5), dpi=140, sharey=True)
+    fig, axs = plt.subplots(2, 4, figsize=(10, 5.5), dpi=140, sharey=True)
     fig.subplots_adjust(hspace=hspace, wspace=0.)
     axs = axs.ravel()
     plt_distrib_of_means(axs[0], X, 'Not scaled')
     plt_distrib_of_means(axs[1], Xstd, 'Standardized')
     plt_distrib_of_means(axs[2], Xminmax, 'Min-max scaled')
-    plt_distrib_of_means(axs[3], logX, 'Logged')
-    plt_distrib_of_means(axs[4], Xlogstd, 'Logged and standardized')
-    plt_distrib_of_means(axs[5], Xlogminmax, 'Logged and min-max scaled')
+    plt_distrib_of_means(axs[3], Xminmax256, 'Min-max scaled (0-255)')
+    plt_distrib_of_means(axs[4], logX, 'Logged')
+    plt_distrib_of_means(axs[5], Xlogstd, 'Logged and standardized')
+    plt_distrib_of_means(axs[6], Xlogminmax, 'Logged and min-max scaled')
     axs[0].legend()
-    for i in [0, 3]:
+    for i in [0, 4]:
         axs[i].set_ylabel('Num images')
     axs[-2].set_xlabel('Mean image value')
+    axs[-1].set_axis_off()
     if save:
         plt.savefig('mean_distribs.png', dpi=200)
     plt.show()
 
-    fig, axs = plt.subplots(2, 3, figsize=(10, 5.5), dpi=140, sharey=True)
+    fig, axs = plt.subplots(2, 4, figsize=(10, 5.5), dpi=140, sharey=True)
     fig.subplots_adjust(hspace=hspace, wspace=0.)
     axs=axs.ravel()
     plt_distrib(axs[0], X, 'Not scaled')
     plt_distrib(axs[1], Xstd, 'Standardized')
     plt_distrib(axs[2], Xminmax, 'Min-max scaled')
-    plt_distrib(axs[3], logX, 'Logged')
-    plt_distrib(axs[4], Xlogstd, 'Logged and standardized')
-    plt_distrib(axs[5], Xlogminmax, 'Logged and min-max scaled')
+    plt_distrib(axs[3], Xminmax256, 'Min-max scaled (0-255)')
+    plt_distrib(axs[4], logX, 'Logged')
+    plt_distrib(axs[5], Xlogstd, 'Logged and standardized')
+    plt_distrib(axs[6], Xlogminmax, 'Logged and min-max scaled')
     axs[0].legend()
-    for i in [0, 3]:
+    for i in [0, 4]:
         axs[i].set_ylabel('Num pixels')
     axs[-2].set_xlabel('Pixel value')
+    axs[-1].set_axis_off()
     if save:
         plt.savefig('pixel_distribs.png', dpi=200)
     plt.show()

@@ -418,7 +418,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # ever happens.
     dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
     # Linearly min-max scale the data from 0 to 255.
-    scaling_function = preprocessing.new_min_max_scale
+    scaling_function = preprocessing.log_min_max_scale
 
     d = preprocessing.load_data(dataset)
     X = d['X'].to(device=device_str)
