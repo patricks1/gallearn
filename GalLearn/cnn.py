@@ -345,7 +345,7 @@ class ResNet(nn.Module):
                                              out_channels=64, kernel_size=7,
                                              stride=2, padding=3),
                                    nn.BatchNorm2d(64),
-                                   nn.ReLU(),
+                                   self.activation_module(),
                                    nn.MaxPool2d(kernel_size=3,
                                                 stride=2, padding=1))
 
@@ -558,8 +558,14 @@ class BasicResBlock(nn.Module):
     # Scale factor of the number of output channels
     expansion = 1
 
-    def __init__(self, in_channels, out_channels,
-                 stride=1, is_first_block=False):
+    def __init__(
+                self,
+                in_channels,
+                out_channels,
+                stride=1,
+                is_first_block=False,
+                activation_module
+            ):
         """
         Adapted from https://github.com/freshtechyy/resnet.git
 
@@ -572,6 +578,9 @@ class BasicResBlock(nn.Module):
             is_first_block: whether it is the first residual block of the layer
         """
         super().__init__()
+
+        self.activation_module = activation_module
+
         self.conv1 = nn.Conv2d(in_channels=in_channels,
                                out_channels=out_channels,
                                kernel_size=3,
@@ -584,8 +593,6 @@ class BasicResBlock(nn.Module):
                                stride=1,
                                padding=1)
         self.bn2 = nn.BatchNorm2d(out_channels)
-
-        self.relu = nn.ReLU()
 
         # Skip connection goes through 1x1 convolution with stride=2 for 
         # the first blocks of conv3_x, conv4_x, and conv5_x layers for matching
@@ -613,13 +620,13 @@ class BasicResBlock(nn.Module):
             Residual block ouput
         """
         identity = x.clone()
-        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.activation_module(self.bn1(self.conv1(x)))
         x = self.bn2(self.conv2(x))
 
         if self.downsample:
             identity = self.downsample(identity)
         x += identity
-        x = self.relu(x)
+        x = self.activation_module(x)
 
         return x
 
