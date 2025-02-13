@@ -299,7 +299,6 @@ class ResNet(nn.Module):
                 momentum,
                 run_name,
                 ResBlock,
-                N_out_channels,
                 n_blocks_list=[3, 4, 6, 3],
                 out_channels_list=[64, 128, 256, 512],
                 num_channels=3
@@ -309,7 +308,7 @@ class ResNet(nn.Module):
 
         Parameters
         ----------
-            ResBlock: residual block type, BasicBlock for ResNet-18, 34 or 
+            ResBlock: residual block type, BasicResBlock for ResNet-18, 34 or 
                       BottleNeck for ResNet-50, 101, 152
             n_class: number of classes for image classifcation (used in
                 classfication head)
@@ -437,7 +436,7 @@ class ResNet(nn.Module):
         """
         Create a layer with specified type and number of residual blocks.
         Args: 
-            ResBlock: residual block type, BasicBlock for ResNet-18, 34 or 
+            ResBlock: residual block type, BasicResBlock for ResNet-18, 34 or 
                       BottleNeck for ResNet-50, 101, 152
             n_blocks: number of residual blocks
             in_channels: number of input channels
@@ -453,8 +452,13 @@ class ResNet(nn.Module):
             if i == 0:
                 # Downsample the feature map using input stride for the first
                 # block of the layer.
-                layer.append(ResBlock(in_channels, out_channels, 
-                             stride=stride, is_first_block=True))
+                layer.append(ResBlock(
+                    in_channels,
+                    out_channels, 
+                    self.activation_module,
+                    stride=stride,
+                    is_first_block=True
+                ))
             else:
                 # Keep the feature map size same for the rest three blocks of 
                 # the layer.
@@ -462,7 +466,11 @@ class ResNet(nn.Module):
                 # By default, ResBlock.expansion = 4 for ResNet-50, 101, 152, 
                 # ResBlock.expansion = 1 for ResNet-18, 34.
                 layer.append(
-                    ResBlock(out_channels*ResBlock.expansion, out_channels)
+                    ResBlock(
+                        out_channels*ResBlock.expansion,
+                        out_channels,
+                        self.activation_module
+                    )
                 )
 
         return nn.Sequential(*layer)
@@ -562,9 +570,9 @@ class BasicResBlock(nn.Module):
                 self,
                 in_channels,
                 out_channels,
+                activation_module,
                 stride=1,
                 is_first_block=False,
-                activation_module
             ):
         """
         Adapted from https://github.com/freshtechyy/resnet.git
