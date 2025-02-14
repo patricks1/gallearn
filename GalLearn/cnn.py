@@ -64,19 +64,40 @@ def load_net(run_name):
               'rb') as f:
         args_dict = pickle.load(f)
     print(args_dict)
+    if 'net_type' not in args_dict:
+        net_type = 'original'
+    else:
+        net_type = args_dict['net_type']
+        del args_dict['net_type']
     args = []
-    for key in ['activation_module',
-                'kernel_size',
-                'conv_channels',
-                'N_groups',
-                'p_fc_dropout',
-                'N_out_channels',
-                'lr',
-                'momentum']:
-        if key not in args_dict:
-            args_dict[key] = None
-    args_dict['run_name'] = run_name
-    model = Net(**args_dict)
+    if net_type == 'original':
+        for key in ['activation_module',
+                    'kernel_size',
+                    'conv_channels',
+                    'N_groups',
+                    'p_fc_dropout',
+                    'N_out_channels',
+                    'lr',
+                    'momentum']:
+            if key not in args_dict:
+                args_dict[key] = None
+        args_dict['run_name'] = run_name
+        model = Net(**args_dict)
+    elif net_type == 'ResNet':
+        for key in [
+                    'activation_module',
+                    'N_out_channels',
+                    'lr',
+                    'momentum',
+                    'n_block_list',
+                    'out_channels_list',
+                    'N_img_channels'
+                ]:
+            if key not in args_dict:
+                args_dict[key] = None
+        args_dict['run_name'] = run_name
+        args_dict['ResBlock'] = BasicResBlock
+        model = ResNet(**args_dict)
     model.init_optimizer()
     model.load()
     return model
@@ -242,6 +263,7 @@ class Net(nn.Module):
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
             'momentum': self.momentum
+            'net_type': 'original'
         }
         with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
                   'wb') as f:
@@ -301,7 +323,7 @@ class ResNet(nn.Module):
                 ResBlock,
                 n_blocks_list=[2, 2, 2, 2],
                 out_channels_list=[64, 128, 256, 512],
-                num_channels=1
+                N_img_channels=1
             ):
         '''
         Adapted from https://github.com/freshtechyy/resnet.git
@@ -316,7 +338,7 @@ class ResNet(nn.Module):
                 (conv2_x - conv5_x)
             out_channels_list: list of the output channel numbers for conv2_x 
                 - conv5_x
-            num_channels: the number of channels of input image
+            N_img_channels: the number of channels of input image
         '''
         import paths
         import os
@@ -341,7 +363,7 @@ class ResNet(nn.Module):
         # Define architecture
         #----------------------------------------------------------------------
         # First layer
-        self.conv1 = nn.Sequential(nn.Conv2d(in_channels=num_channels, 
+        self.conv1 = nn.Sequential(nn.Conv2d(in_channels=N_img_channels, 
                                              out_channels=64, kernel_size=7,
                                              stride=2, padding=3),
                                    nn.BatchNorm2d(64),
@@ -509,7 +531,11 @@ class ResNet(nn.Module):
             'activation_module': self.activation_module,
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
-            'momentum': self.momentum
+            'momentum': self.momentum,
+            'n_blocks_list': self.n_blocks_list,
+            'out_channels_list': self.out_channels_list,
+            'N_img_channels': self.N_img_channels
+            'net_type': 'ResNet'
         }
         with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
                   'wb') as f:
@@ -748,7 +774,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         ))
         return test_loss 
 
-    N_epochs = 50 
+    N_epochs = 100
     N_batches = 20
     loss_function = torch.nn.MSELoss()
 
@@ -800,6 +826,13 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 resume='must'
             )
     elif wandb_mode == 'r':
+        # Exception if
+        #     - run_name is None and wandb_mode is resume.
+        #     - run_name is specified and wandb_mode is resume, but there is no 
+        #       state file for it.
+        # The argparser should take care of ensuring that the user provides a
+        # run_name when wandb_mode is resume, so the following error message
+        # will warn only about the state file.
         raise Exception(
             '`wandb_mode` is set to resume, but there is no corresponding'
             ' state file'
@@ -807,14 +840,14 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     else:
         # If the state file doesn't exist
 
-        modeltype = 'resnet'
+        net_type = 'ResNet'
 
         # Things wandb will track
         lr = 0.000001 # learning rate
         momentum = 0.5
         kernel_size = 3
         activation_module = nn.Sigmoid
-        if modeltype == 'original':
+        if net_type == 'original':
             conv_channels = [50, 25, 10, 3, 1]
             N_groups = 4
             p_fc_dropout = 0.
@@ -839,7 +872,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     'N_fc_layers': 1,
                 }
             )
-            if modeltype == 'original':
+            if net_type == 'original':
                 wandb.config.update({    
                     'conv_channels': conv_channels,
                     'N_groups': N_groups,
@@ -850,7 +883,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
         # Define the model if we didn't rebuild one from a argument and
         # state files.
-        if modeltype == 'original':
+        if net_type == 'original':
             model = Net(
                     activation_module,
                     kernel_size,
@@ -862,7 +895,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     momentum,
                     run_name
                 ).to(device)
-        elif modeltype == 'resnet':
+        elif net_type == 'ResNet':
             model = ResNet(
                     activation_module,
                     N_out_channels,
@@ -872,7 +905,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     BasicResBlock
                 ).to(device)
         else:
-            raise Exception('Unexpected `model_type`.')
+            raise Exception('Unexpected `net_type`.')
         model.save_args()
         model(X[:1]) # Run a dummy fwd pass to initialize any lazy layers.
         model.init_optimizer()
