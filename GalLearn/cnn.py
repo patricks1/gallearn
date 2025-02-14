@@ -89,7 +89,7 @@ def load_net(run_name):
                     'N_out_channels',
                     'lr',
                     'momentum',
-                    'n_block_list',
+                    'n_blocks_list',
                     'out_channels_list',
                     'N_img_channels'
                 ]:
@@ -334,7 +334,7 @@ class ResNet(nn.Module):
                       BottleNeck for ResNet-50, 101, 152
             n_class: number of classes for image classifcation (used in
                 classfication head)
-            n_block_lists: number of residual blocks for each conv layer 
+            n_blocks_list: number of residual blocks for each conv layer 
                 (conv2_x - conv5_x)
             out_channels_list: list of the output channel numbers for conv2_x 
                 - conv5_x
