@@ -534,7 +534,7 @@ class ResNet(nn.Module):
             'momentum': self.momentum,
             'n_blocks_list': self.n_blocks_list,
             'out_channels_list': self.out_channels_list,
-            'N_img_channels': self.N_img_channels
+            'N_img_channels': self.N_img_channels,
             'net_type': 'ResNet'
         }
         with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
