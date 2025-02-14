@@ -810,7 +810,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         modeltype = 'resnet'
 
         # Things wandb will track
-        lr = 0.00001 # learning rate
+        lr = 0.000001 # learning rate
         momentum = 0.5
         kernel_size = 3
         activation_module = nn.Sigmoid
