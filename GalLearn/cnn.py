@@ -290,6 +290,354 @@ class Net(nn.Module):
         )
         return None
 
+class ResNet(nn.Module):
+    def __init__(
+                self,
+                activation_module,
+                N_out_channels,
+                lr,
+                momentum,
+                run_name,
+                ResBlock,
+                n_blocks_list=[2, 2, 2, 2],
+                out_channels_list=[64, 128, 256, 512],
+                num_channels=1
+            ):
+        '''
+        Adapted from https://github.com/freshtechyy/resnet.git
+
+        Parameters
+        ----------
+            ResBlock: residual block type, BasicResBlock for ResNet-18, 34 or 
+                      BottleNeck for ResNet-50, 101, 152
+            n_class: number of classes for image classifcation (used in
+                classfication head)
+            n_block_lists: number of residual blocks for each conv layer 
+                (conv2_x - conv5_x)
+            out_channels_list: list of the output channel numbers for conv2_x 
+                - conv5_x
+            num_channels: the number of channels of input image
+        '''
+        import paths
+        import os
+
+        super(ResNet, self).__init__()
+
+        self.state_path = os.path.join(
+            paths.data, 
+            run_name + '_state.tar'
+        )
+
+        self.last_epoch = 0
+
+        self.activation_module = activation_module
+        self.momentum = momentum
+        self.lr = lr
+        self.run_name = run_name
+        self.features = {}
+
+        #----------------------------------------------------------------------
+        # Define architecture
+        #----------------------------------------------------------------------
+        # First layer
+        self.conv1 = nn.Sequential(nn.Conv2d(in_channels=num_channels, 
+                                             out_channels=64, kernel_size=7,
+                                             stride=2, padding=3),
+                                   nn.BatchNorm2d(64),
+                                   self.activation_module(),
+                                   nn.MaxPool2d(kernel_size=3,
+                                                stride=2, padding=1))
+
+        # Create four convoluiontal layers
+        in_channels = 64
+        # For the first block of the second layer, do not downsample and use 
+        # stride=1.
+        self.conv2_x = self.CreateLayer(
+            ResBlock,
+            n_blocks_list[0], 
+            in_channels,
+            out_channels_list[0],
+            stride=1
+        )
+        
+        # For the first blocks of conv3_x - conv5_x layers, perform 
+        # downsampling using stride=2.
+        # By default, ResBlock.expansion = 4 for ResNet-50, 101, 152, 
+        # ResBlock.expansion = 1 for ResNet-18, 34.
+        self.conv3_x = self.CreateLayer(
+            ResBlock, n_blocks_list[1], 
+            out_channels_list[0]*ResBlock.expansion,
+            out_channels_list[1],
+            stride=2
+        )
+        self.conv4_x = self.CreateLayer(
+            ResBlock,
+            n_blocks_list[2],
+            out_channels_list[1]*ResBlock.expansion,
+            out_channels_list[2],
+            stride=2
+        )
+        self.conv5_x = self.CreateLayer(
+            ResBlock,
+            n_blocks_list[3], 
+            out_channels_list[2]*ResBlock.expansion,
+            out_channels_list[3],
+            stride=2
+        )
+
+        # Average pooling (used in classification head)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+
+        # MLP for classification (used in classification head)
+        self.fc = nn.Linear(
+            out_channels_list[3] * ResBlock.expansion,
+            N_out_channels
+        )
+
+        return None
+
+    def init_optimizer(self):
+        self.optimizer = torch.optim.SGD(
+                self.parameters(), 
+                lr=self.lr, 
+                momentum=self.momentum
+            )
+        return None
+
+    def forward(self, x):
+        """
+        Args: 
+            x: input image
+        Returns:
+            x: target prediction
+        """
+        x = self.conv1(x)
+        x = self.conv2_x(x)
+        x = self.conv3_x(x)
+        x = self.conv4_x(x)
+        x = self.conv5_x(x)
+
+        # Head
+        x = self.avgpool(x)
+        x = x.flatten(start_dim=1)
+        x = self.fc(x)
+
+        return x
+
+    def CreateLayer(
+                self,
+                ResBlock,
+                n_blocks,
+                in_channels,
+                out_channels,
+                stride=1
+            ):
+        """
+        Create a layer with specified type and number of residual blocks.
+        Args: 
+            ResBlock: residual block type, BasicResBlock for ResNet-18, 34 or 
+                      BottleNeck for ResNet-50, 101, 152
+            n_blocks: number of residual blocks
+            in_channels: number of input channels
+            out_channels: number of output channels
+            stride: stride used in the first 3x3 convolution of the first 
+                resdiual block
+            of the layer and 1x1 convolution for skip connection in that block
+        Returns: 
+            Convolutional layer
+        """
+        layer = []
+        for i in range(n_blocks):
+            if i == 0:
+                # Downsample the feature map using input stride for the first
+                # block of the layer.
+                layer.append(ResBlock(
+                    in_channels,
+                    out_channels, 
+                    self.activation_module,
+                    stride=stride,
+                    is_first_block=True
+                ))
+            else:
+                # Keep the feature map size same for the rest three blocks of 
+                # the layer.
+                # by setting stride=1 and is_first_block=False.
+                # By default, ResBlock.expansion = 4 for ResNet-50, 101, 152, 
+                # ResBlock.expansion = 1 for ResNet-18, 34.
+                layer.append(
+                    ResBlock(
+                        out_channels*ResBlock.expansion,
+                        out_channels,
+                        self.activation_module
+                    )
+                )
+
+        return nn.Sequential(*layer)
+
+    def register_feature_hooks(self):
+        features = {}  # Dictionary to store outputs
+
+        def hook_wrapper(output_dict, key):
+            # Define the hook function
+            def hook(module, input, output):
+                # Traverse the keys to update the appropriate nested dictionary
+                output_dict[key] = output
+            return hook
+
+        def process_module(module, output_dict):
+            for name, layer in module._modules.items():
+                if isinstance(layer, nn.Sequential) or len(layer._modules) > 0:
+                    # Create a sub-dictionary for nested layers
+                    output_dict[name] = {}
+                    process_module(layer, output_dict[name]) # Recursion
+                else:
+                    # Register a hook for non-nested layers
+                    layer_type = str(layer).split('(')[0]
+                    key = ':'.join([name, layer_type])
+                    layer.register_forward_hook(hook_wrapper(output_dict, key))
+
+        process_module(self, features)
+        self.features = features
+        return None
+
+    def save_args(self):
+        import pickle
+        import paths
+        import os
+        args = {
+            'activation_module': self.activation_module,
+            'kernel_size': self.kernel_size,
+            'conv_channels': self.conv_channels,
+            'N_groups': self.N_groups,
+            'p_fc_dropout': self.p_fc_dropout,
+            'N_out_channels': self.N_out_channels,
+            'lr': self.lr,
+            'momentum': self.momentum
+        }
+        with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
+                  'wb') as f:
+            pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
+        return None
+
+    def save_state(self, epoch, train_loss, test_loss):
+        import os
+        import time
+        import math
+
+        start = time.time()
+
+        if os.path.isfile(self.state_path):
+            checkpoints = torch.load(self.state_path, weights_only=True)
+        else:
+            checkpoints = {}
+
+        checkpoints[epoch] = {
+            'train_loss': train_loss,
+            'test_loss': test_loss,
+            'model_state_dict': self.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict()
+        }
+        torch.save(checkpoints, self.state_path)
+
+        end = time.time()
+        elapsed = end - start
+        minutes = math.floor(elapsed / 60.)
+        print('{0:0.0f} min, {1:0.1f} s to save epoch {2:0.0f}'.format(
+            minutes, 
+            elapsed - minutes * 60.,
+            epoch
+        ))
+
+        return None
+
+    def load(self):
+        import numpy as np
+        checkpoints = torch.load(self.state_path, weights_only=True)
+        epochs = np.array(list(checkpoints.keys()))
+        self.last_epoch = epochs.max()
+        self.load_state_dict(checkpoints[self.last_epoch]['model_state_dict'])
+        self.optimizer.load_state_dict(
+            checkpoints[self.last_epoch]['optimizer_state_dict']
+        )
+        return None
+
+class BasicResBlock(nn.Module):
+    # Scale factor of the number of output channels
+    expansion = 1
+
+    def __init__(
+                self,
+                in_channels,
+                out_channels,
+                activation_module,
+                stride=1,
+                is_first_block=False,
+            ):
+        """
+        Adapted from https://github.com/freshtechyy/resnet.git
+
+        Parameters
+        ----------
+            in_channels: number of input channels
+            out_channels: number of output channels
+            stride: stride using in (a) the first 3x3 convolution and 
+                (b) 1x1 convolution used for downsampling for skip connection
+            is_first_block: whether it is the first residual block of the layer
+        """
+        super().__init__()
+
+        self.activation_module = activation_module
+        self.activation_function = activation_module()
+
+        self.conv1 = nn.Conv2d(in_channels=in_channels,
+                               out_channels=out_channels,
+                               kernel_size=3,
+                               stride=stride,
+                               padding=1)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(in_channels=out_channels,
+                               out_channels=out_channels,
+                               kernel_size=3,
+                               stride=1,
+                               padding=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        # Skip connection goes through 1x1 convolution with stride=2 for 
+        # the first blocks of conv3_x, conv4_x, and conv5_x layers for matching
+        # spatial dimension of feature maps and number of channels in order to 
+        # perform the add operations.
+        self.downsample = None
+        if is_first_block and stride != 1:
+            self.downsample = nn.Sequential(
+                nn.Conv2d(
+                        in_channels=in_channels, 
+                        out_channels=out_channels,
+                        kernel_size=1,
+                        stride=stride,
+                        padding=0
+                    ),
+                nn.BatchNorm2d(out_channels)
+            )
+        return None
+
+    def forward(self, x):
+        """
+        Args:
+            x: input
+        Returns:
+            Residual block ouput
+        """
+        identity = x.clone()
+        x = self.activation_function(self.bn1(self.conv1(x)))
+        x = self.bn2(self.conv2(x))
+
+        if self.downsample:
+            identity = self.downsample(identity)
+        x += identity
+        x = self.activation_function(x)
+
+        return x
+
 def main(Nfiles=None, wandb_mode='n', run_name=None):
     if wandb_mode == 'r' and run_name is None:
         raise Exception(
@@ -416,9 +764,9 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # attributes could potentially cause problems if the model the code
     # loads was supposed to use a different dataset. We'll deal with that if it
     # ever happens.
-    dataset = 'gallearn_data_256x256_2d_tgt.h5'
+    dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
     # Linearly min-max scale the data from 0 to 255.
-    scaling_function = preprocessing.new_min_max_scale
+    scaling_function = preprocessing.log_min_max_scale
 
     d = preprocessing.load_data(dataset)
     X = d['X'].to(device=device_str)
@@ -466,11 +814,11 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         # Things wandb will track
         lr = 0.00001 # learning rate
         momentum = 0.5
-        kernel_size = 40
+        kernel_size = 3
         activation_module = nn.ReLU
         conv_channels = [50, 25, 10, 3, 1]
         N_groups = 4
-        p_fc_dropout = 0.5
+        p_fc_dropout = 0.
 
         # Other things
         N_out_channels = 1
@@ -498,7 +846,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             run_name = wandb.run.name
             save_wandb_id(wandb)
 
-        # Define the model if the we didn't rebuild one from a argument and
+        # Define the model if we didn't rebuild one from a argument and
         # state files.
         model = Net(
                 activation_module,
