@@ -262,7 +262,7 @@ class Net(nn.Module):
             'p_fc_dropout': self.p_fc_dropout,
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
-            'momentum': self.momentum
+            'momentum': self.momentum,
             'net_type': 'original'
         }
         with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
