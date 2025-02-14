@@ -354,6 +354,9 @@ class ResNet(nn.Module):
         self.momentum = momentum
         self.lr = lr
         self.run_name = run_name
+        self.n_blocks_list = n_blocks_list
+        self.out_channels_list = out_channels_list
+        self.N_img_channels = N_img_channels
         self.features = {}
 
         #----------------------------------------------------------------------
