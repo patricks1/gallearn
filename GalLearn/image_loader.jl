@@ -323,7 +323,7 @@ module image_loader
 
             # Sample type
             if Nfiles !== nothing
-                fname *= "_subsample"
+                fname *= * "_" * string(Nfiles) * "gal_subsample"
             end
 
             # 2d or 3d target data
