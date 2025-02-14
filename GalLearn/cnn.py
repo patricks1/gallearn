@@ -89,9 +89,6 @@ def load_net(run_name):
                     'N_out_channels',
                     'lr',
                     'momentum',
-                    'n_blocks_list',
-                    'out_channels_list',
-                    'N_img_channels'
                 ]:
             if key not in args_dict:
                 args_dict[key] = None
