@@ -299,9 +299,9 @@ class ResNet(nn.Module):
                 momentum,
                 run_name,
                 ResBlock,
-                n_blocks_list=[3, 4, 6, 3],
+                n_blocks_list=[2, 2, 2, 2],
                 out_channels_list=[64, 128, 256, 512],
-                num_channels=3
+                num_channels=1
             ):
         '''
         Adapted from https://github.com/freshtechyy/resnet.git
@@ -412,7 +412,6 @@ class ResNet(nn.Module):
             x: target prediction
         """
         x = self.conv1(x)
-
         x = self.conv2_x(x)
         x = self.conv3_x(x)
         x = self.conv4_x(x)
@@ -588,6 +587,7 @@ class BasicResBlock(nn.Module):
         super().__init__()
 
         self.activation_module = activation_module
+        self.activation_function = activation_module()
 
         self.conv1 = nn.Conv2d(in_channels=in_channels,
                                out_channels=out_channels,
@@ -628,13 +628,13 @@ class BasicResBlock(nn.Module):
             Residual block ouput
         """
         identity = x.clone()
-        x = self.activation_module(self.bn1(self.conv1(x)))
+        x = self.activation_function(self.bn1(self.conv1(x)))
         x = self.bn2(self.conv2(x))
 
         if self.downsample:
             identity = self.downsample(identity)
         x += identity
-        x = self.activation_module(x)
+        x = self.activation_function(x)
 
         return x
 
