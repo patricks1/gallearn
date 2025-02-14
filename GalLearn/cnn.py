@@ -761,7 +761,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # attributes could potentially cause problems if the model the code
     # loads was supposed to use a different dataset. We'll deal with that if it
     # ever happens.
-    dataset = 'gallearn_data_256x256_3proj_10gal_subsample_2d_tgt.h5'
+    dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
     # Linearly min-max scale the data from 0 to 255.
     scaling_function = preprocessing.log_min_max_scale
 
@@ -808,7 +808,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     else:
         # If the state file doesn't exist
 
-        modeltype = 'original'
+        modeltype = 'resnet'
 
         # Things wandb will track
         lr = 0.00001 # learning rate
