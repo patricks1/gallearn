@@ -808,14 +808,17 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     else:
         # If the state file doesn't exist
 
+        modeltype = 'original'
+
         # Things wandb will track
         lr = 0.00001 # learning rate
         momentum = 0.5
         kernel_size = 3
         activation_module = nn.ReLU
-        #conv_channels = [50, 25, 10, 3, 1]
-        #N_groups = 4
-        #p_fc_dropout = 0.
+        if modeltype == 'original':
+            conv_channels = [50, 25, 10, 3, 1]
+            N_groups = 4
+            p_fc_dropout = 0.
 
         # Other things
         N_out_channels = 1
@@ -835,17 +838,19 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     'batches': N_batches,
                     'kernel size': kernel_size,
                     'N_fc_layers': 1,
-                    #'conv_channels': conv_channels,
-                    #'N_groups': N_groups,
-                    #'p_fc_dropout': p_fc_dropout
                 }
             )
+            if modeltype == 'original':
+                wandb.config.update({    
+                    'conv_channels': conv_channels,
+                    'N_groups': N_groups,
+                    'p_fc_dropout': p_fc_dropout
+                })
             run_name = wandb.run.name
             save_wandb_id(wandb)
 
         # Define the model if we didn't rebuild one from a argument and
         # state files.
-        modeltype = 'resnet'
         if modeltype == 'original':
             model = Net(
                     activation_module,
