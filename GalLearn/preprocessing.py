@@ -32,6 +32,12 @@ def load_data(fname):
 
     return d
 
+def std_asinh(X):
+    import torch
+    X = X.detach().clone()
+    X = torch.asinh(X)
+    return std_scale(X)
+
 def min_max_scale(X):
     '''
     Min-max scale the data from -1 to 1.

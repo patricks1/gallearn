@@ -762,8 +762,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # loads was supposed to use a different dataset. We'll deal with that if it
     # ever happens.
     dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
-    # Linearly min-max scale the data from 0 to 255.
-    scaling_function = preprocessing.log_min_max_scale
+    scaling_function = preprocessing.std_asinh
 
     d = preprocessing.load_data(dataset)
     X = d['X'].to(device=device_str)
@@ -814,7 +813,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         lr = 0.00001 # learning rate
         momentum = 0.5
         kernel_size = 3
-        activation_module = nn.sigmoid
+        activation_module = nn.Sigmoid
         if modeltype == 'original':
             conv_channels = [50, 25, 10, 3, 1]
             N_groups = 4
