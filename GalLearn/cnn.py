@@ -331,6 +331,7 @@ class ResNet(nn.Module):
         self.last_epoch = 0
 
         self.activation_module = activation_module
+        self.N_out_channels = N_out_channels
         self.momentum = momentum
         self.lr = lr
         self.run_name = run_name
@@ -506,10 +507,6 @@ class ResNet(nn.Module):
         import os
         args = {
             'activation_module': self.activation_module,
-            'kernel_size': self.kernel_size,
-            'conv_channels': self.conv_channels,
-            'N_groups': self.N_groups,
-            'p_fc_dropout': self.p_fc_dropout,
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
             'momentum': self.momentum
@@ -764,7 +761,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # attributes could potentially cause problems if the model the code
     # loads was supposed to use a different dataset. We'll deal with that if it
     # ever happens.
-    dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
+    dataset = 'gallearn_data_256x256_3proj_10gal_subsample_2d_tgt.h5'
     # Linearly min-max scale the data from 0 to 255.
     scaling_function = preprocessing.log_min_max_scale
 
@@ -816,9 +813,9 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         momentum = 0.5
         kernel_size = 3
         activation_module = nn.ReLU
-        conv_channels = [50, 25, 10, 3, 1]
-        N_groups = 4
-        p_fc_dropout = 0.
+        #conv_channels = [50, 25, 10, 3, 1]
+        #N_groups = 4
+        #p_fc_dropout = 0.
 
         # Other things
         N_out_channels = 1
@@ -838,9 +835,9 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     'batches': N_batches,
                     'kernel size': kernel_size,
                     'N_fc_layers': 1,
-                    'conv_channels': conv_channels,
-                    'N_groups': N_groups,
-                    'p_fc_dropout': p_fc_dropout
+                    #'conv_channels': conv_channels,
+                    #'N_groups': N_groups,
+                    #'p_fc_dropout': p_fc_dropout
                 }
             )
             run_name = wandb.run.name
@@ -848,17 +845,30 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
         # Define the model if we didn't rebuild one from a argument and
         # state files.
-        model = Net(
-                activation_module,
-                kernel_size,
-                conv_channels,
-                N_groups,
-                p_fc_dropout,
-                N_out_channels,
-                lr,
-                momentum,
-                run_name
-            ).to(device)
+        modeltype = 'resnet'
+        if modeltype == 'original':
+            model = Net(
+                    activation_module,
+                    kernel_size,
+                    conv_channels,
+                    N_groups,
+                    p_fc_dropout,
+                    N_out_channels,
+                    lr,
+                    momentum,
+                    run_name
+                ).to(device)
+        elif modeltype == 'resnet':
+            model = ResNet(
+                    activation_module,
+                    N_out_channels,
+                    lr,
+                    momentum,
+                    run_name,
+                    BasicResBlock
+                ).to(device)
+        else:
+            raise Exception('Unexpected `model_type`.')
         model.save_args()
         model(X[:1]) # Run a dummy fwd pass to initialize any lazy layers.
         model.init_optimizer()
