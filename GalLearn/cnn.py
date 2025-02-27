@@ -788,7 +788,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # loads was supposed to use a different dataset. We'll deal with that if it
     # ever happens.
     dataset = 'gallearn_data_256x256_3proj_10gal_subsample_2d_tgt.h5'
-    scaling_function = preprocessing.std_asinh
+    scaling_function = preprocessing.log_min_max_scale
 
     d = preprocessing.load_data(dataset)
     X = d['X'].to(device=device_str)
@@ -846,7 +846,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         lr = 1.e-5 # learning rate
         momentum = 0.5
         kernel_size = 3
-        activation_module = nn.Sigmoid
+        activation_module = nn.ReLU
         if net_type == 'original':
             conv_channels = [50, 25, 10, 3, 1]
             N_groups = 4
