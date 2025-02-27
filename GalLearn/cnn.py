@@ -846,7 +846,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         lr = 1.e-5 # learning rate
         momentum = 0.5
         kernel_size = 3
-        activation_module = nn.ReLU
+        activation_module = nn.Sigmoid
         if net_type == 'original':
             conv_channels = [50, 25, 10, 3, 1]
             N_groups = 4
