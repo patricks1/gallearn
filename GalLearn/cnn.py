@@ -787,8 +787,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # attributes could potentially cause problems if the model the code
     # loads was supposed to use a different dataset. We'll deal with that if it
     # ever happens.
-    dataset = 'gallearn_data_256x256_3proj_10gal_subsample_2d_tgt.h5'
-    scaling_function = preprocessing.std_asinh
+    dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
+    scaling_function = preprocessing.new_min_max_scale
 
     d = preprocessing.load_data(dataset)
     X = d['X'].to(device=device_str)
