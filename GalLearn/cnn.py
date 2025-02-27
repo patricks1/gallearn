@@ -845,9 +845,9 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         # Things wandb will track
         lr = 1.e-5 # learning rate
         momentum = 0.5
-        kernel_size = 3
         activation_module = nn.ReLU
         if net_type == 'original':
+            kernel_size = 3
             conv_channels = [50, 25, 10, 3, 1]
             N_groups = 4
             p_fc_dropout = 0.
@@ -868,7 +868,6 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     'scaling_function': scaling_function,
                     "dataset": dataset,
                     'batches': N_batches,
-                    'kernel size': kernel_size,
                     'N_fc_layers': 1,
                 }
             )
