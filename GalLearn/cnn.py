@@ -774,7 +774,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         ))
         return test_loss 
 
-    N_epochs = 100
+    N_epochs = 40 
     N_batches = 20
     loss_function = torch.nn.MSELoss()
 
