@@ -787,7 +787,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # attributes could potentially cause problems if the model the code
     # loads was supposed to use a different dataset. We'll deal with that if it
     # ever happens.
-    dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
+    dataset = 'gallearn_data_256x256_3proj_10gal_subsample_2d_tgt.h5'
     scaling_function = preprocessing.std_asinh
 
     d = preprocessing.load_data(dataset)
@@ -843,7 +843,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         net_type = 'ResNet'
 
         # Things wandb will track
-        lr = 0.000001 # learning rate
+        lr = 1.e-5 # learning rate
         momentum = 0.5
         kernel_size = 3
         activation_module = nn.Sigmoid
