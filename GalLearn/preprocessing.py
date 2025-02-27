@@ -202,6 +202,7 @@ def test(save=False):
     Xstd = std_scale(X)
     Xminmax = min_max_scale(X)
     Xminmax256 = new_min_max_scale(X)
+    Xasinh = std_asinh(X)
 
     logX = torch.log10(X)
     iszero = X == 0.
@@ -222,11 +223,12 @@ def test(save=False):
     plt_distrib_of_means(axs[4], logX, 'Logged')
     plt_distrib_of_means(axs[5], Xlogstd, 'Logged and standardized')
     plt_distrib_of_means(axs[6], Xlogminmax, 'Logged and min-max scaled')
+    plt_distrib_of_means(axs[7], Xasinh, 'Standardized asinh')
     axs[0].legend()
     for i in [0, 4]:
         axs[i].set_ylabel('Num images')
     axs[-2].set_xlabel('Mean image value')
-    axs[-1].set_axis_off()
+    #axs[-1].set_axis_off()
     for ax in axs:
         ax.set_yscale('log')
     if save:
@@ -247,11 +249,12 @@ def test(save=False):
     plt_distrib(axs[4], logX, 'Logged')
     plt_distrib(axs[5], Xlogstd, 'Logged and standardized')
     plt_distrib(axs[6], Xlogminmax, 'Logged and min-max scaled')
+    plt_distrib(axs[7], Xasinh, 'Standardized asinh')
     axs[0].legend()
     for i in [0, 4]:
         axs[i].set_ylabel('Num pixels')
     axs[-2].set_xlabel('Pixel value')
-    axs[-1].set_axis_off()
+    #axs[-1].set_axis_off()
     for ax in axs:
         ax.set_yscale('log')
     if save:
