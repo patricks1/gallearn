@@ -70,25 +70,30 @@ def load_net(run_name):
         net_type = args_dict['net_type']
         del args_dict['net_type']
     args = []
+    for key in [
+                'dataset',
+                'scaling_function',
+                'activation_module',
+                'N_out_channels',
+                'lr',
+                'momentum'
+            ]:
+        if key not in args_dict:
+            args_dict[key] = None
     if net_type == 'original':
-        for key in ['activation_module',
+        for key in [
                     'kernel_size',
                     'conv_channels',
                     'N_groups',
                     'p_fc_dropout',
-                    'N_out_channels',
-                    'lr',
-                    'momentum']:
+                ]:
             if key not in args_dict:
                 args_dict[key] = None
         args_dict['run_name'] = run_name
         model = Net(**args_dict)
     elif net_type == 'ResNet':
         for key in [
-                    'activation_module',
-                    'N_out_channels',
-                    'lr',
-                    'momentum',
+                    'n_blocks_list'
                 ]:
             if key not in args_dict:
                 args_dict[key] = None
@@ -117,7 +122,9 @@ class Net(nn.Module):
                 N_out_channels,
                 lr,
                 momentum,
-                run_name
+                run_name,
+                dataset,
+                scaling_function
             ):
         import paths
         import os
@@ -140,6 +147,8 @@ class Net(nn.Module):
         self.momentum = momentum
         self.lr = lr
         self.run_name = run_name
+        self.dataset = dataset
+        self.scaling_function = scaling_function
         self.features = {}
 
         #----------------------------------------------------------------------
@@ -260,7 +269,9 @@ class Net(nn.Module):
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
             'momentum': self.momentum,
-            'net_type': 'original'
+            'net_type': 'original',
+            'dataset': self.dataset,
+            'scaling_function': self.scaling_function
         }
         with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
                   'wb') as f:
@@ -319,6 +330,8 @@ class ResNet(nn.Module):
                 run_name,
                 ResBlock,
                 n_blocks_list,
+                dataset,
+                scaling_function,
                 out_channels_list=[64, 128, 256, 512],
                 N_img_channels=1
             ):
@@ -779,37 +792,6 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     loss_function = torch.nn.MSELoss()
 
     ###########################################################################
-    # Load the data
-    ###########################################################################
-
-    # Hardcoding the dataset and scaling function like this instead of getting 
-    # them from model
-    # attributes could potentially cause problems if the model the code
-    # loads was supposed to use a different dataset. We'll deal with that if it
-    # ever happens.
-    dataset = 'gallearn_data_256x256_3proj_10gal_subsample_2d_tgt.h5'
-    scaling_function = preprocessing.std_asinh
-
-    d = preprocessing.load_data(dataset)
-    X = d['X'].to(device=device_str)
-    X = scaling_function(X)[:Nfiles]
-    ys = d['ys_sorted'].to(device=device_str)[:Nfiles]
-
-    N_all = len(ys) 
-    print('{0:0.0f} galaxies in data'.format(N_all))
-    N_test = max(1, int(0.15 * N_all))
-    N_train = N_all - N_test
-
-    # Train-test split
-    indices_test = np.random.randint(0, N_all, N_test)
-    is_train = np.ones(N_all, dtype=bool)
-    is_train[indices_test] = False
-    ys_train = ys[is_train]
-    ys_test = ys[~is_train]
-    X_train = X[is_train]
-    X_test = X[~is_train]
-
-    ###########################################################################
     # Build (or rebuild) the model
     ###########################################################################
     if wandb_mode == 'n' and run_name is None:
@@ -846,6 +828,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         lr = 1.e-5 # learning rate
         momentum = 0.5
         activation_module = nn.Sigmoid
+        dataset = 'gallearn_data_256x256_3proj_10gal_subsample_2d_tgt.h5'
+        scaling_function = preprocessing.std_asinh
         if net_type == 'original':
             kernel_size = 40 
             conv_channels = [50, 25, 10, 3, 1]
@@ -902,7 +886,9 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     N_out_channels,
                     lr,
                     momentum,
-                    run_name
+                    run_name,
+                    dataset,
+                    scaling_function
                 ).to(device)
         elif net_type == 'ResNet':
             model = ResNet(
@@ -912,11 +898,38 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     momentum,
                     run_name,
                     BasicResBlock,
-                    n_blocks_list
+                    n_blocks_list,
+                    dataset,
+                    scaling_function
                 ).to(device)
         else:
             raise Exception('Unexpected `net_type`.')
         model.save_args()
+    
+    ###########################################################################
+    # Load the data
+    ###########################################################################
+    d = preprocessing.load_data(model.dataset)
+    X = d['X'].to(device=device_str)
+    X = model.scaling_function(X)[:Nfiles]
+    ys = d['ys_sorted'].to(device=device_str)[:Nfiles]
+
+    N_all = len(ys) 
+    print('{0:0.0f} galaxies in data'.format(N_all))
+    N_test = max(1, int(0.15 * N_all))
+    N_train = N_all - N_test
+
+    # Train-test split
+    indices_test = np.random.randint(0, N_all, N_test)
+    is_train = np.ones(N_all, dtype=bool)
+    is_train[indices_test] = False
+    ys_train = ys[is_train]
+    ys_test = ys[~is_train]
+    X_train = X[is_train]
+    X_test = X[~is_train]
+    ###########################################################################
+
+    if run_name is None:
         model(X[:1]) # Run a dummy fwd pass to initialize any lazy layers.
         model.init_optimizer()
         model.apply(weights_init) # Init model weights.
