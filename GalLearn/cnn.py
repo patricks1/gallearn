@@ -787,7 +787,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # attributes could potentially cause problems if the model the code
     # loads was supposed to use a different dataset. We'll deal with that if it
     # ever happens.
-    dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
+    dataset = 'gallearn_data_256x256_3proj_10gal_subset_2d_tgt.h5'
     scaling_function = preprocessing.std_asinh
 
     d = preprocessing.load_data(dataset)
@@ -845,12 +845,16 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         # Things wandb will track
         lr = 1.e-5 # learning rate
         momentum = 0.5
-        activation_module = nn.LeakyReLU
+        activation_module = nn.Sigmoid
         if net_type == 'original':
             kernel_size = 40 
             conv_channels = [50, 25, 10, 3, 1]
             N_groups = 4
             p_fc_dropout = 0.
+        elif net_type == 'ResNet':
+            n_blocks_list = [3, 4, 6, 3]
+        else:
+            raise Exception('Unexpected `net_type`.')
 
         # Other things
         N_out_channels = 1
@@ -877,6 +881,12 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     'N_groups': N_groups,
                     'p_fc_dropout': p_fc_dropout
                 })
+            if net_type == 'ResNet':
+                wandb.config.update({
+                    'n_blocks_list': n_blocks_list
+                })
+            else:
+                raise Exception('Unexpected `net_type`.')
             run_name = wandb.run.name
             save_wandb_id(wandb)
 
