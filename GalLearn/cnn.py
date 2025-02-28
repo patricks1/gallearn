@@ -370,6 +370,8 @@ class ResNet(nn.Module):
         self.n_blocks_list = n_blocks_list
         self.out_channels_list = out_channels_list
         self.N_img_channels = N_img_channels
+        self.scaling_function = scaling_function
+        self.dataset = dataset
         self.features = {}
 
         #----------------------------------------------------------------------
