@@ -318,7 +318,7 @@ class ResNet(nn.Module):
                 momentum,
                 run_name,
                 ResBlock,
-                n_blocks_list=[2, 2, 2, 2],
+                n_blocks_list,
                 out_channels_list=[64, 128, 256, 512],
                 N_img_channels=1
             ):
@@ -911,7 +911,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     lr,
                     momentum,
                     run_name,
-                    BasicResBlock
+                    BasicResBlock,
+                    n_blocks_list
                 ).to(device)
         else:
             raise Exception('Unexpected `net_type`.')
