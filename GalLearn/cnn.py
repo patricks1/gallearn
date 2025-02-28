@@ -831,7 +831,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         lr = 1.e-5 # learning rate
         momentum = 0.5
         activation_module = nn.LeakyReLU
-        dataset = 'gallearn_data_256x256_3proj_10gal_subsample_2d_tgt.h5'
+        dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
         scaling_function = preprocessing.std_asinh
         if net_type == 'original':
             kernel_size = 40 
