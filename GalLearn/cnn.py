@@ -798,6 +798,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     ###########################################################################
     if wandb_mode == 'n' and run_name is None:
         run_name = datetime.datetime.today().strftime('%Y%m%d')
+    must_continue = False
     if run_name is not None and os.path.isfile(
                 os.path.join(paths.data, run_name + '_state.tar')
             ):
@@ -907,6 +908,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         else:
             raise Exception('Unexpected `net_type`.')
         model.save_args()
+
+        must_continue = True
     
     ###########################################################################
     # Load the data
@@ -931,7 +934,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     X_test = X[~is_train]
     ###########################################################################
 
-    if run_name is None:
+    if must_continue:
         model(X[:1]) # Run a dummy fwd pass to initialize any lazy layers.
         model.init_optimizer()
         model.apply(weights_init) # Init model weights.
