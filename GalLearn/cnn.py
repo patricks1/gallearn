@@ -787,8 +787,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # attributes could potentially cause problems if the model the code
     # loads was supposed to use a different dataset. We'll deal with that if it
     # ever happens.
-    dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
-    scaling_function = preprocessing.new_min_max_scale
+    dataset = 'gallearn_data_256x256_3proj_10gal_subsample_2d_tgt.h5'
+    scaling_function = preprocessing.std_asinh
 
     d = preprocessing.load_data(dataset)
     X = d['X'].to(device=device_str)
@@ -840,13 +840,12 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     else:
         # If the state file doesn't exist
 
-        #net_type = 'ResNet'
-        net_type = 'original'
+        net_type = 'ResNet'
 
         # Things wandb will track
         lr = 1.e-5 # learning rate
         momentum = 0.5
-        activation_module = nn.ReLU
+        activation_module = nn.LeakyReLU
         if net_type == 'original':
             kernel_size = 40 
             conv_channels = [50, 25, 10, 3, 1]
