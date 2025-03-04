@@ -830,7 +830,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         # Things wandb will track
         lr = 1.e-5 # learning rate
         momentum = 0.5
-        activation_module = nn.LeakyReLU
+        activation_module = nn.ReLU
         dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
         scaling_function = preprocessing.std_asinh
         if net_type == 'original':
