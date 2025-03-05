@@ -432,9 +432,13 @@ class ResNet(nn.Module):
                     out_channels_list[3] * ResBlock.expansion,
                     100 
                 ),
+            nn.BatchNorm1d(100),
             self.activation_module(),
+
             nn.Linear(100, 100),
+            nn.BatchNorm1d(100),
             self.activation_module(),
+
             nn.Linear(100, self.N_out_channels),
             nn.Sigmoid()
         )
@@ -835,7 +839,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         net_type = 'ResNet'
 
         # Things wandb will track
-        lr = 5.e-4 # learning rate
+        lr = 1.e-5 # learning rate
         momentum = 0.5
         activation_module = nn.ReLU
         dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
@@ -943,7 +947,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     ###########################################################################
 
     if must_continue:
-        model(X[:1]) # Run a dummy fwd pass to initialize any lazy layers.
+        model(X[:2]) # Run a dummy fwd pass to initialize any lazy layers.
         model.init_optimizer()
         model.apply(weights_init) # Init model weights.
     
