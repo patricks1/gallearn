@@ -64,19 +64,42 @@ def load_net(run_name):
               'rb') as f:
         args_dict = pickle.load(f)
     print(args_dict)
+    if 'net_type' not in args_dict:
+        net_type = 'original'
+    else:
+        net_type = args_dict['net_type']
+        del args_dict['net_type']
     args = []
-    for key in ['activation_module',
-                'kernel_size',
-                'conv_channels',
-                'N_groups',
-                'p_fc_dropout',
+    for key in [
+                'dataset',
+                'scaling_function',
+                'activation_module',
                 'N_out_channels',
                 'lr',
-                'momentum']:
+                'momentum'
+            ]:
         if key not in args_dict:
             args_dict[key] = None
-    args_dict['run_name'] = run_name
-    model = Net(**args_dict)
+    if net_type == 'original':
+        for key in [
+                    'kernel_size',
+                    'conv_channels',
+                    'N_groups',
+                    'p_fc_dropout',
+                ]:
+            if key not in args_dict:
+                args_dict[key] = None
+        args_dict['run_name'] = run_name
+        model = Net(**args_dict)
+    elif net_type == 'ResNet':
+        for key in [
+                    'n_blocks_list'
+                ]:
+            if key not in args_dict:
+                args_dict[key] = None
+        args_dict['run_name'] = run_name
+        args_dict['ResBlock'] = BasicResBlock
+        model = ResNet(**args_dict)
     model.init_optimizer()
     model.load()
     return model
@@ -99,7 +122,9 @@ class Net(nn.Module):
                 N_out_channels,
                 lr,
                 momentum,
-                run_name
+                run_name,
+                dataset,
+                scaling_function
             ):
         import paths
         import os
@@ -122,6 +147,8 @@ class Net(nn.Module):
         self.momentum = momentum
         self.lr = lr
         self.run_name = run_name
+        self.dataset = dataset
+        self.scaling_function = scaling_function
         self.features = {}
 
         #----------------------------------------------------------------------
@@ -241,7 +268,10 @@ class Net(nn.Module):
             'p_fc_dropout': self.p_fc_dropout,
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
-            'momentum': self.momentum
+            'momentum': self.momentum,
+            'net_type': 'original',
+            'dataset': self.dataset,
+            'scaling_function': self.scaling_function
         }
         with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
                   'wb') as f:
@@ -299,9 +329,11 @@ class ResNet(nn.Module):
                 momentum,
                 run_name,
                 ResBlock,
-                n_blocks_list=[2, 2, 2, 2],
+                n_blocks_list,
+                dataset,
+                scaling_function,
                 out_channels_list=[64, 128, 256, 512],
-                num_channels=1
+                N_img_channels=1
             ):
         '''
         Adapted from https://github.com/freshtechyy/resnet.git
@@ -312,11 +344,11 @@ class ResNet(nn.Module):
                       BottleNeck for ResNet-50, 101, 152
             n_class: number of classes for image classifcation (used in
                 classfication head)
-            n_block_lists: number of residual blocks for each conv layer 
+            n_blocks_list: number of residual blocks for each conv layer 
                 (conv2_x - conv5_x)
             out_channels_list: list of the output channel numbers for conv2_x 
                 - conv5_x
-            num_channels: the number of channels of input image
+            N_img_channels: the number of channels of input image
         '''
         import paths
         import os
@@ -331,16 +363,22 @@ class ResNet(nn.Module):
         self.last_epoch = 0
 
         self.activation_module = activation_module
+        self.N_out_channels = N_out_channels
         self.momentum = momentum
         self.lr = lr
         self.run_name = run_name
+        self.n_blocks_list = n_blocks_list
+        self.out_channels_list = out_channels_list
+        self.N_img_channels = N_img_channels
+        self.scaling_function = scaling_function
+        self.dataset = dataset
         self.features = {}
 
         #----------------------------------------------------------------------
         # Define architecture
         #----------------------------------------------------------------------
         # First layer
-        self.conv1 = nn.Sequential(nn.Conv2d(in_channels=num_channels, 
+        self.conv1 = nn.Sequential(nn.Conv2d(in_channels=N_img_channels, 
                                              out_channels=64, kernel_size=7,
                                              stride=2, padding=3),
                                    nn.BatchNorm2d(64),
@@ -388,10 +426,21 @@ class ResNet(nn.Module):
         # Average pooling (used in classification head)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
-        # MLP for classification (used in classification head)
-        self.fc = nn.Linear(
-            out_channels_list[3] * ResBlock.expansion,
-            N_out_channels
+        # Head
+        self.head = nn.Sequential(
+            nn.Linear(
+                    out_channels_list[3] * ResBlock.expansion,
+                    100 
+                ),
+            nn.BatchNorm1d(100),
+            self.activation_module(),
+
+            nn.Linear(100, 100),
+            nn.BatchNorm1d(100),
+            self.activation_module(),
+
+            nn.Linear(100, self.N_out_channels),
+            nn.Sigmoid()
         )
 
         return None
@@ -420,7 +469,7 @@ class ResNet(nn.Module):
         # Head
         x = self.avgpool(x)
         x = x.flatten(start_dim=1)
-        x = self.fc(x)
+        x = self.head(x)
 
         return x
 
@@ -506,13 +555,13 @@ class ResNet(nn.Module):
         import os
         args = {
             'activation_module': self.activation_module,
-            'kernel_size': self.kernel_size,
-            'conv_channels': self.conv_channels,
-            'N_groups': self.N_groups,
-            'p_fc_dropout': self.p_fc_dropout,
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
-            'momentum': self.momentum
+            'momentum': self.momentum,
+            'n_blocks_list': self.n_blocks_list,
+            'out_channels_list': self.out_channels_list,
+            'N_img_channels': self.N_img_channels,
+            'net_type': 'ResNet'
         }
         with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
                   'wb') as f:
@@ -702,11 +751,11 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 print(
                     '\nTrain Epoch: {0}'
                             '[{1}/{2} samples optimized]'
-                            '\tLoss: {3:.6f}'.format(
+                            '\tRMSE: {3:.6f}'.format(
                         epoch, 
                         N_optimized,
                         len(train_loader.dataset), 
-                        loss.item()
+                        np.sqrt(loss.item())
                     )
                 )
                 feedback = torch.stack(
@@ -746,52 +795,21 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     print('\nA batch of test results:')
                     print(df)
         test_loss /= i + 1
-        print('\nTest set: Avg. loss: {:.4f}\n'.format(
-            test_loss
+        print('\nTest set: RMSE: {:.4f}\n'.format(
+            np.sqrt(test_loss)
         ))
         return test_loss 
 
-    N_epochs = 50 
-    N_batches = 20
+    N_epochs = 100 
+    N_batches = 60
     loss_function = torch.nn.MSELoss()
-
-    ###########################################################################
-    # Load the data
-    ###########################################################################
-
-    # Hardcoding the dataset and scaling function like this instead of getting 
-    # them from model
-    # attributes could potentially cause problems if the model the code
-    # loads was supposed to use a different dataset. We'll deal with that if it
-    # ever happens.
-    dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
-    # Linearly min-max scale the data from 0 to 255.
-    scaling_function = preprocessing.log_min_max_scale
-
-    d = preprocessing.load_data(dataset)
-    X = d['X'].to(device=device_str)
-    X = scaling_function(X)[:Nfiles]
-    ys = d['ys_sorted'].to(device=device_str)[:Nfiles]
-
-    N_all = len(ys) 
-    print('{0:0.0f} galaxies in data'.format(N_all))
-    N_test = max(1, int(0.15 * N_all))
-    N_train = N_all - N_test
-
-    # Train-test split
-    indices_test = np.random.randint(0, N_all, N_test)
-    is_train = np.ones(N_all, dtype=bool)
-    is_train[indices_test] = False
-    ys_train = ys[is_train]
-    ys_test = ys[~is_train]
-    X_train = X[is_train]
-    X_test = X[~is_train]
 
     ###########################################################################
     # Build (or rebuild) the model
     ###########################################################################
     if wandb_mode == 'n' and run_name is None:
-        run_name = datetime.datetime.today().strftime('%Y%m%d')
+        run_name = datetime.datetime.today().strftime('%Y%m%d%H%M')
+    must_continue = False
     if run_name is not None and os.path.isfile(
                 os.path.join(paths.data, run_name + '_state.tar')
             ):
@@ -804,6 +822,13 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 resume='must'
             )
     elif wandb_mode == 'r':
+        # Exception if
+        #     - run_name is None and wandb_mode is resume.
+        #     - run_name is specified and wandb_mode is resume, but there is no 
+        #       state file for it.
+        # The argparser should take care of ensuring that the user provides a
+        # run_name when wandb_mode is resume, so the following error message
+        # will warn only about the state file.
         raise Exception(
             '`wandb_mode` is set to resume, but there is no corresponding'
             ' state file'
@@ -811,14 +836,23 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     else:
         # If the state file doesn't exist
 
+        net_type = 'ResNet'
+
         # Things wandb will track
-        lr = 0.00001 # learning rate
+        lr = 5.e-4 # learning rate
         momentum = 0.5
-        kernel_size = 3
         activation_module = nn.ReLU
-        conv_channels = [50, 25, 10, 3, 1]
-        N_groups = 4
-        p_fc_dropout = 0.
+        dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
+        scaling_function = preprocessing.std_asinh
+        if net_type == 'original':
+            kernel_size = 40 
+            conv_channels = [50, 25, 10, 3, 1]
+            N_groups = 4
+            p_fc_dropout = 0.
+        elif net_type == 'ResNet':
+            n_blocks_list = [3, 4, 6, 3]
+        else:
+            raise Exception('Unexpected `net_type`.')
 
         # Other things
         N_out_channels = 1
@@ -836,31 +870,84 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     'scaling_function': scaling_function,
                     "dataset": dataset,
                     'batches': N_batches,
-                    'kernel size': kernel_size,
                     'N_fc_layers': 1,
+                }
+            )
+            if net_type == 'original':
+                wandb.config.update({    
                     'conv_channels': conv_channels,
                     'N_groups': N_groups,
                     'p_fc_dropout': p_fc_dropout
-                }
-            )
+                })
+            if net_type == 'ResNet':
+                wandb.config.update({
+                    'n_blocks_list': n_blocks_list
+                })
+            else:
+                raise Exception('Unexpected `net_type`.')
             run_name = wandb.run.name
             save_wandb_id(wandb)
 
         # Define the model if we didn't rebuild one from a argument and
         # state files.
-        model = Net(
-                activation_module,
-                kernel_size,
-                conv_channels,
-                N_groups,
-                p_fc_dropout,
-                N_out_channels,
-                lr,
-                momentum,
-                run_name
-            ).to(device)
+        if net_type == 'original':
+            model = Net(
+                    activation_module,
+                    kernel_size,
+                    conv_channels,
+                    N_groups,
+                    p_fc_dropout,
+                    N_out_channels,
+                    lr,
+                    momentum,
+                    run_name,
+                    dataset,
+                    scaling_function
+                ).to(device)
+        elif net_type == 'ResNet':
+            model = ResNet(
+                    activation_module,
+                    N_out_channels,
+                    lr,
+                    momentum,
+                    run_name,
+                    BasicResBlock,
+                    n_blocks_list,
+                    dataset,
+                    scaling_function,
+                    out_channels_list=[64, 128, 256, 512],
+                ).to(device)
+        else:
+            raise Exception('Unexpected `net_type`.')
         model.save_args()
-        model(X[:1]) # Run a dummy fwd pass to initialize any lazy layers.
+
+        must_continue = True
+    
+    ###########################################################################
+    # Load the data
+    ###########################################################################
+    d = preprocessing.load_data(model.dataset)
+    X = d['X'].to(device=device_str)
+    X = model.scaling_function(X)[:Nfiles]
+    ys = d['ys_sorted'].to(device=device_str)[:Nfiles]
+
+    N_all = len(ys) 
+    print('{0:0.0f} galaxies in data'.format(N_all))
+    N_test = max(1, int(0.15 * N_all))
+    N_train = N_all - N_test
+
+    # Train-test split
+    indices_test = np.random.randint(0, N_all, N_test)
+    is_train = np.ones(N_all, dtype=bool)
+    is_train[indices_test] = False
+    ys_train = ys[is_train]
+    ys_test = ys[~is_train]
+    X_train = X[is_train]
+    X_test = X[~is_train]
+    ###########################################################################
+
+    if must_continue:
+        model(X[:2]) # Run a dummy fwd pass to initialize any lazy layers.
         model.init_optimizer()
         model.apply(weights_init) # Init model weights.
     
