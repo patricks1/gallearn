@@ -797,14 +797,14 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         return test_loss 
 
     N_epochs = 40 
-    N_batches = 20
+    N_batches = 50
     loss_function = torch.nn.MSELoss()
 
     ###########################################################################
     # Build (or rebuild) the model
     ###########################################################################
     if wandb_mode == 'n' and run_name is None:
-        run_name = datetime.datetime.today().strftime('%Y%m%d')
+        run_name = datetime.datetime.today().strftime('%Y%m%d%H%M')
     must_continue = False
     if run_name is not None and os.path.isfile(
                 os.path.join(paths.data, run_name + '_state.tar')
@@ -835,7 +835,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         net_type = 'ResNet'
 
         # Things wandb will track
-        lr = 1.e-5 # learning rate
+        lr = 5.e-4 # learning rate
         momentum = 0.5
         activation_module = nn.ReLU
         dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
@@ -846,7 +846,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             N_groups = 4
             p_fc_dropout = 0.
         elif net_type == 'ResNet':
-            n_blocks_list = [3, 4, 6, 3]
+            n_blocks_list = [2, 2, 2, 2]
         else:
             raise Exception('Unexpected `net_type`.')
 
@@ -910,7 +910,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     BasicResBlock,
                     n_blocks_list,
                     dataset,
-                    scaling_function
+                    scaling_function,
+                    out_channels_list=[64, 128, 256, 512],
                 ).to(device)
         else:
             raise Exception('Unexpected `net_type`.')
