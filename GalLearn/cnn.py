@@ -751,11 +751,11 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 print(
                     '\nTrain Epoch: {0}'
                             '[{1}/{2} samples optimized]'
-                            '\tLoss: {3:.6f}'.format(
+                            '\tRMSE: {3:.6f}'.format(
                         epoch, 
                         N_optimized,
                         len(train_loader.dataset), 
-                        loss.item()
+                        np.sqrt(loss.item())
                     )
                 )
                 feedback = torch.stack(
@@ -795,8 +795,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     print('\nA batch of test results:')
                     print(df)
         test_loss /= i + 1
-        print('\nTest set: Avg. loss: {:.4f}\n'.format(
-            test_loss
+        print('\nTest set: RMSE: {:.4f}\n'.format(
+            np.sqrt(test_loss)
         ))
         return test_loss 
 
