@@ -432,9 +432,9 @@ class ResNet(nn.Module):
                     out_channels_list[3] * ResBlock.expansion,
                     100 
                 ),
-            self.activation_module(),
+            self.activation_module,
             nn.Linear(100, 100),
-            self.activation_module(),
+            self.activation_module,
             nn.Linear(100, self.N_out_channels),
             nn.Sigmoid
         )
