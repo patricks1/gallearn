@@ -839,7 +839,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         net_type = 'ResNet'
 
         # Things wandb will track
-        lr = 1.e-5 # learning rate
+        lr = 1.e-4 # learning rate
         momentum = 0.5
         activation_module = nn.ReLU
         dataset = 'gallearn_data_256x256_3proj_2d_tgt.h5'
