@@ -426,10 +426,17 @@ class ResNet(nn.Module):
         # Average pooling (used in classification head)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
-        # MLP for classification (used in classification head)
-        self.fc = nn.Linear(
-            out_channels_list[3] * ResBlock.expansion,
-            N_out_channels
+        # Head
+        self.head = nn.Sequential(
+            nn.Linear(
+                    out_channels_list[3] * ResBlock.expansion,
+                    100 
+                ),
+            self.activation_module(),
+            nn.Linear(100, 100),
+            self.activation_module(),
+            nn.Linear(100, self.N_out_channels),
+            nn.Sigmoid
         )
 
         return None
