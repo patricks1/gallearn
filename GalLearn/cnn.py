@@ -465,7 +465,7 @@ class ResNet(nn.Module):
         # Head
         x = self.avgpool(x)
         x = x.flatten(start_dim=1)
-        x = self.fc(x)
+        x = self.head(x)
 
         return x
 
