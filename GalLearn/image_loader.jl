@@ -9,7 +9,7 @@ module image_loader
 
     direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
         "ugrband_massmocks_final"
-    direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
+    host_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
         "ugrband_massmocks_final"
     gallearn_dir = "/export/nfs0home/pstaudt/projects/gal-learn/GalLearn"
     tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
