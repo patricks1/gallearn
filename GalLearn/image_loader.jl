@@ -13,8 +13,10 @@ module image_loader
         "ugrband_massmocks_final"
     gallearn_dir = "/export/nfs0home/pstaudt/projects/gal-learn/GalLearn"
     tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
-    tgt_2d_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
+    tgt_2d_host_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
         "AstroPhot_Host_Sersic-Copy1.csv"
+    tgt_2d_sat_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
+        "AstroPhot_Sate_Sersic-Copy1.csv"
     output_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn"
 
     function process_file(
@@ -153,22 +155,29 @@ module image_loader
     end
 
     function read_2d_tgt()
-        dat = CSV.read(
-            tgt_2d_path,
-            DataFrame,
-            header=[
-                "galaxyID",
-                "FOV",
-                "pixel",
-                "view",
-                "band",
-                "b_a_ave",
-                "PA",
-                "n",
-                "Re",
-                "Ie"
-            ]
-        )
+        function csv_read(tgt_path)
+            dat = CSV.read(
+                tgt_path,
+                DataFrame,
+                header=[
+                    "galaxyID",
+                    "FOV",
+                    "pixel",
+                    "view",
+                    "band",
+                    "b_a_ave",
+                    "PA",
+                    "n",
+                    "Re",
+                    "Ie"
+                ]
+            )
+            return dat
+        end
+        host_dat = csv_read(tgt_2d_host_path)
+        sat_dat = csv_read(tgt_2d_sat_path)
+        dat = vcat(host_dat, sat_dat)
+
         dat.galaxyID .= "object_" .* string.(dat.galaxyID)
         DataFrames.rename!(dat, :galaxyID => :Simulation)
         xydat = dat[dat.view .== "projection_xy", :]
