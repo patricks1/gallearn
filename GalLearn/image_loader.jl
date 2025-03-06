@@ -19,12 +19,12 @@ module image_loader
 
     function process_file(
                 fname,
+                path,
                 iX,
                 X,
                 shapeXimgs,
                 obs_sorted,
                 fnames_sorted,
-                direc,
                 gallearn_dir,
                 all_bands,
                 orientations
@@ -39,7 +39,6 @@ module image_loader
             Nbands = 1
         end
 
-        path = joinpath(direc, fname)
         h5open(path, "r") do file
             #println("reading $fname")
             global shape_band
@@ -195,14 +194,18 @@ module image_loader
                 res=256,
                 tgt_type="3d"
             )
-        host_files = filter(
+        host_fnames = filter(
             f -> isfile(joinpath(host_direc, f)) && endswith(f, ".hdf5"), 
             readdir(host_direc)
         )
-        sat_files = filter(
+        host_paths = joinpath.(host_direc, host_fnames)
+        sat_fnames = filter(
             f -> isfile(joinpath(sat_direc, f)) && endswith(f, ".hdf5"), 
             readdir(sat_direc)
         )
+        sat_paths = joinpath.(sat_direc, sat_fnames)
+        files = [host_fnames; sat_fnames]
+        paths = [host_paths; sat_paths]
 
         open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
             println(f, "Beginning.")
@@ -236,6 +239,7 @@ module image_loader
         ]
 
         good_files = files[.!is_bad .& in_tgt]
+        good_paths = paths[.!is_bad .& in_tgt]
         if Nfiles === nothing
             # If the user hasn't specified the number of files to run through, 
             # then
@@ -258,17 +262,18 @@ module image_loader
         orientations = String[]
 
         iX = 1
-        for fname in ProgressBar(
-                    good_files[1:Nfiles]
+        for item in ProgressBar(
+                    zip(good_files[1:Nfiles], good_paths[1:Nfiles])
                 )
+            fname, path = item
             X, shapeXimgs, iX = process_file(
                 fname,
+                path,
                 iX,
                 X,
                 shapeXimgs,
                 obs_sorted,
                 fnames_sorted,
-                direc,
                 gallearn_dir,
                 all_bands,
                 orientations
@@ -327,7 +332,7 @@ module image_loader
 
             # Sample type
             if Nfiles !== nothing
-                fname *= * "_" * string(Nfiles) * "gal_subsample"
+                fname *= "_" * string(Nfiles) * "gal_subsample"
             end
 
             # 2d or 3d target data
