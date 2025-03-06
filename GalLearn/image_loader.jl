@@ -7,7 +7,7 @@ module image_loader
     #import ImageFiltering
     import Images
 
-    direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
+    sat_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
         "ugrband_massmocks_final"
     host_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
         "ugrband_massmocks_final"
@@ -195,9 +195,13 @@ module image_loader
                 res=256,
                 tgt_type="3d"
             )
-        files = filter(
-            f -> isfile(joinpath(direc, f)) && endswith(f, ".hdf5"), 
-            readdir(direc)
+        host_files = filter(
+            f -> isfile(joinpath(host_direc, f)) && endswith(f, ".hdf5"), 
+            readdir(host_direc)
+        )
+        sat_files = filter(
+            f -> isfile(joinpath(sat_direc, f)) && endswith(f, ".hdf5"), 
+            readdir(sat_direc)
         )
 
         open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
