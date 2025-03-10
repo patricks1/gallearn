@@ -937,7 +937,12 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     N_train = N_all - N_test
 
     # Train-test split
-    indices_test = np.random.randint(0, N_all, N_test)
+    indices_all = range(N_all)
+    indices_test = np.random.default_rng().choice(
+        indices_all,
+        N_test,
+        replace=False
+    )
     is_train = np.ones(N_all, dtype=bool)
     is_train[indices_test] = False
     ys_train = ys[is_train]
