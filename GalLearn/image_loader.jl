@@ -346,7 +346,7 @@ module image_loader
                 string(res) * 
                 "x" * 
                 string(res) * 
-                "_3proj"
+                "_3proj_wsat"
 
             # Sample type
             if Nfiles !== nothing
