@@ -254,6 +254,14 @@ module image_loader
             # then
             # run through all of them.
             Nfiles = length(good_files)
+        else
+            good_indices = StatsBase.sample(
+                1:length(good_files),
+                Nfiles,
+                replace=false
+            )
+            good_files = good_files[good_indices]
+            good_paths = good_paths[good_indices]
         end
 
         if tgt_type == "2d"
