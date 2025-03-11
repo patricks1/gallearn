@@ -6,6 +6,7 @@ module image_loader
     using ProgressBars
     #import ImageFiltering
     import Images
+    import StatsBase
 
     sat_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
         "ugrband_massmocks_final"
