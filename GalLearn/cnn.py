@@ -196,10 +196,9 @@ class Net(nn.Module):
         return None
 
     def init_optimizer(self):
-        self.optimizer = torch.optim.SGD(
+        self.optimizer = torch.optim.Adam(
                 self.parameters(), 
                 lr=self.lr, 
-                momentum=self.momentum
             )
         return None
 
@@ -839,7 +838,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         net_type = 'ResNet'
 
         # Things wandb will track
-        lr = 5.e-2 # learning rate
+        lr = 5.e-4 # learning rate
         momentum = 0.5
         activation_module = nn.ReLU
         dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
