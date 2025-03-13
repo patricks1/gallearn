@@ -428,8 +428,7 @@ class ResNet(nn.Module):
         # Head
         self.head = nn.Sequential(
             nn.Dropout1d(0.5),
-            nn.Linear(
-                    0.5 * out_channels_list[3] * ResBlock.expansion,
+            nn.LazyLinear(
                     100 
                 ),
             nn.BatchNorm1d(100),
