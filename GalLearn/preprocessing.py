@@ -35,7 +35,7 @@ def load_data(fname):
 def std_asinh(X):
     import torch
     X = X.detach().clone()
-    X = torch.asinh(X)
+    X = torch.asinh(1.e-5 * X)
     return std_scale(X)
 
 def min_max_scale(X):

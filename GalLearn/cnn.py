@@ -427,7 +427,7 @@ class ResNet(nn.Module):
 
         # Head
         self.head = nn.Sequential(
-            nn.Dropout1d(0.5),
+            nn.Dropout1d(0.2),
             nn.LazyLinear(
                     256, 
                 ),
