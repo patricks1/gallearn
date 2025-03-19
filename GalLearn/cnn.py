@@ -845,7 +845,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         lr = 5.e-4 # learning rate
         momentum = 0.5
         activation_module = nn.ReLU
-        dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
+        #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
+        dataset = 'ellipses.h5'
         scaling_function = preprocessing.std_asinh
         if net_type == 'original':
             kernel_size = 40 
