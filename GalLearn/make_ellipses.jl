@@ -44,9 +44,12 @@ function save_ellipses_to_h5(filename, X, ys)
     push!(PyCall.pyimport("sys")."path", PyCall.pwd())
     paths = PyCall.pyimport("paths")
     data_path = paths.data
+    nothings = zeros(size(ys)[1])
     HDF5.h5open(joinpath(data_path, filename), "w") do file
         HDF5.write(file, "X", X)
 	HDF5.write(file, "ys_sorted", ys)
+	HDF5.write(file, "obs_sorted", nothings)
+	HDF5.write(file, "file_names", nothings)
     end
 end
 
