@@ -429,9 +429,17 @@ class ResNet(nn.Module):
         self.head = nn.Sequential(
             nn.Dropout1d(0.2),
             nn.LazyLinear(
-                    256, 
+                    400, 
                 ),
             nn.BatchNorm1d(256),
+            self.activation_module(),
+
+            nn.Linear(400, 300),
+            nn.BatchNorm1d(128),
+            self.activation_module(),
+
+            nn.Linear(400, 256),
+            nn.BatchNorm1d(128),
             self.activation_module(),
 
             nn.Linear(256, 128),
