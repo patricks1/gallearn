@@ -431,15 +431,15 @@ class ResNet(nn.Module):
             nn.LazyLinear(
                     400, 
                 ),
-            nn.BatchNorm1d(256),
+            nn.BatchNorm1d(400),
             self.activation_module(),
 
             nn.Linear(400, 300),
-            nn.BatchNorm1d(128),
+            nn.BatchNorm1d(300),
             self.activation_module(),
 
             nn.Linear(300, 256),
-            nn.BatchNorm1d(128),
+            nn.BatchNorm1d(256),
             self.activation_module(),
 
             nn.Linear(256, 128),
