@@ -438,7 +438,7 @@ class ResNet(nn.Module):
             nn.BatchNorm1d(128),
             self.activation_module(),
 
-            nn.Linear(400, 256),
+            nn.Linear(300, 256),
             nn.BatchNorm1d(128),
             self.activation_module(),
 
