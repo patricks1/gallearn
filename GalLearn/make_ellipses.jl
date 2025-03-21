@@ -54,11 +54,15 @@ function save_ellipses_to_h5(filename, X, ys)
 end
 
 # Parameters
-num_ellipses = 2997
+#num_ellipses = 2997
+num_ellipses = 50
 img_size = (256, 256)  # Adjust as needed
 
 # Generate ellipses
 X, ys = generate_ellipses(num_ellipses, img_size)
 
+X = repeat(X, 60)
+ys = repeat(ys, 60)
+
 # Save to HDF5
-save_ellipses_to_h5("ellipses.h5", X, ys)
+save_ellipses_to_h5("ellipses_50.h5", X, ys)
