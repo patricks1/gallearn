@@ -613,6 +613,79 @@ class ResNet(nn.Module):
         )
         return None
 
+class BottleNeck(nn.Module):
+    # Scale factor of the number of output channels
+    expansion = 4
+
+    def __init__(self, in_channels, out_channels, 
+                 stride=1, is_first_block=False):
+        """
+        Args: 
+            in_channels: number of input channels
+            out_channels: number of output channels
+            stride: stride using in (a) 3x3 convolution and 
+                    (b) 1x1 convolution used for downsampling for skip 
+                    connection
+            is_first_block: whether it is the first residual block of the layer
+        """
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels=in_channels,
+                               out_channels=out_channels,
+                               kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        
+        self.conv2 = nn.Conv2d(in_channels=out_channels,
+                               out_channels=out_channels,
+                               kernel_size=3, stride=stride, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        self.conv3 = nn.Conv2d(in_channels=out_channels,
+                               out_channels=out_channels*self.expansion,
+                               kernel_size=1, stride=1, padding=0)
+        self.bn3 = nn.BatchNorm2d(out_channels*self.expansion)
+
+        self.relu = nn.ReLU()
+
+        # Skip connection goes through 1x1 convolution with stride=2 for 
+        # the first blocks of conv3_x, conv4_x, and conv5_x layers for matching
+        # spatial dimension of feature maps and number of channels in order to 
+        # perform the add operations.
+        self.downsample = None
+        if is_first_block:
+            self.downsample = nn.Sequential(
+                nn.Conv2d(
+                        in_channels=in_channels,
+                        out_channels=out_channels*self.expansion,
+                        kernel_size=1,
+                        stride=stride,
+                        padding=0
+                    ),
+                nn.BatchNorm2d(out_channels*self.expansion)
+            )
+        return None
+
+    def forward(self, x):
+        """
+        Args:
+            x: input
+        Returns:
+            Residual block output
+        """
+        identity = x.clone()
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.relu(self.bn2(self.conv2(x)))
+
+        x = self.conv3(x)
+        x = self.bn3(x)
+
+        if self.downsample:
+            identity = self.downsample(identity)
+
+        x += identity
+        x = self.relu(x)
+
+        return x
+
 class BasicResBlock(nn.Module):
     # Scale factor of the number of output channels
     expansion = 1
@@ -915,7 +988,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     lr,
                     momentum,
                     run_name,
-                    BasicResBlock,
+                    BottleNeck,
                     n_blocks_list,
                     dataset,
                     scaling_function,
