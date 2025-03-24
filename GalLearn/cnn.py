@@ -934,7 +934,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             N_groups = 4
             p_fc_dropout = 0.
         elif net_type == 'ResNet':
-            n_blocks_list = [2, 2, 2, 2]
+            n_blocks_list = [3, 4, 6, 3]
         else:
             raise Exception('Unexpected `net_type`.')
 
@@ -995,7 +995,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     lr,
                     momentum,
                     run_name,
-                    BottleNeck,
+                    BasicResBlock,
                     n_blocks_list,
                     dataset,
                     scaling_function,
