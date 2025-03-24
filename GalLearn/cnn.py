@@ -449,10 +449,9 @@ class ResNet(nn.Module):
         return None
 
     def init_optimizer(self):
-        self.optimizer = torch.optim.SGD(
+        self.optimizer = torch.optim.Adam(
                 self.parameters(), 
                 lr=self.lr, 
-                momentum=self.momentum
             )
         return None
 
@@ -1008,6 +1007,10 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
         must_continue = True
     
+    #scheduler = torch.optim.lr_scheduler.ReducedLROnPlateau(
+    #    model.optimizer
+    #)
+
     ###########################################################################
     # Load the data
     ###########################################################################
