@@ -926,7 +926,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         momentum = 0.5
         activation_module = nn.ReLU
         #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
-        dataset = 'ellipses_10.h5'
+        dataset = 'ellipses_50.h5'
         scaling_function = preprocessing.std_asinh
         if net_type == 'original':
             kernel_size = 40 
@@ -995,7 +995,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     lr,
                     momentum,
                     run_name,
-                    BasicResBlock,
+                    BottleNeck,
                     n_blocks_list,
                     dataset,
                     scaling_function,
