@@ -617,8 +617,14 @@ class BottleNeck(nn.Module):
     # Scale factor of the number of output channels
     expansion = 4
 
-    def __init__(self, in_channels, out_channels, 
-                 stride=1, is_first_block=False):
+    def __init__(
+                self,
+                in_channels,
+                out_channels, 
+                activation_module,
+                stride=1,
+                is_first_block=False
+            ):
         """
         Args: 
             in_channels: number of input channels
@@ -629,6 +635,10 @@ class BottleNeck(nn.Module):
             is_first_block: whether it is the first residual block of the layer
         """
         super().__init__()
+
+        self.activation_module = activation_module
+        self.activation_function = activation_module()
+
         self.conv1 = nn.Conv2d(in_channels=in_channels,
                                out_channels=out_channels,
                                kernel_size=1, stride=1, padding=0)
@@ -643,8 +653,6 @@ class BottleNeck(nn.Module):
                                out_channels=out_channels*self.expansion,
                                kernel_size=1, stride=1, padding=0)
         self.bn3 = nn.BatchNorm2d(out_channels*self.expansion)
-
-        self.relu = nn.ReLU()
 
         # Skip connection goes through 1x1 convolution with stride=2 for 
         # the first blocks of conv3_x, conv4_x, and conv5_x layers for matching
@@ -672,8 +680,8 @@ class BottleNeck(nn.Module):
             Residual block output
         """
         identity = x.clone()
-        x = self.relu(self.bn1(self.conv1(x)))
-        x = self.relu(self.bn2(self.conv2(x)))
+        x = self.activation_function(self.bn1(self.conv1(x)))
+        x = self.activation_function(self.bn2(self.conv2(x)))
 
         x = self.conv3(x)
         x = self.bn3(x)
@@ -682,7 +690,7 @@ class BottleNeck(nn.Module):
             identity = self.downsample(identity)
 
         x += identity
-        x = self.relu(x)
+        x = self.activation_function(x)
 
         return x
 
