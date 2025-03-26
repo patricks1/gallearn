@@ -449,10 +449,9 @@ class ResNet(nn.Module):
         return None
 
     def init_optimizer(self):
-        self.optimizer = torch.optim.SGD(
+        self.optimizer = torch.optim.Adam(
                 self.parameters(), 
                 lr=self.lr, 
-                momentum=self.momentum
             )
         return None
 
@@ -612,6 +611,87 @@ class ResNet(nn.Module):
             checkpoints[self.last_epoch]['optimizer_state_dict']
         )
         return None
+
+class BottleNeck(nn.Module):
+    # Scale factor of the number of output channels
+    expansion = 4
+
+    def __init__(
+                self,
+                in_channels,
+                out_channels, 
+                activation_module,
+                stride=1,
+                is_first_block=False
+            ):
+        """
+        Args: 
+            in_channels: number of input channels
+            out_channels: number of output channels
+            stride: stride using in (a) 3x3 convolution and 
+                    (b) 1x1 convolution used for downsampling for skip 
+                    connection
+            is_first_block: whether it is the first residual block of the layer
+        """
+        super().__init__()
+
+        self.activation_module = activation_module
+        self.activation_function = activation_module()
+
+        self.conv1 = nn.Conv2d(in_channels=in_channels,
+                               out_channels=out_channels,
+                               kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        
+        self.conv2 = nn.Conv2d(in_channels=out_channels,
+                               out_channels=out_channels,
+                               kernel_size=3, stride=stride, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        self.conv3 = nn.Conv2d(in_channels=out_channels,
+                               out_channels=out_channels*self.expansion,
+                               kernel_size=1, stride=1, padding=0)
+        self.bn3 = nn.BatchNorm2d(out_channels*self.expansion)
+
+        # Skip connection goes through 1x1 convolution with stride=2 for 
+        # the first blocks of conv3_x, conv4_x, and conv5_x layers for matching
+        # spatial dimension of feature maps and number of channels in order to 
+        # perform the add operations.
+        self.downsample = None
+        if is_first_block:
+            self.downsample = nn.Sequential(
+                nn.Conv2d(
+                        in_channels=in_channels,
+                        out_channels=out_channels*self.expansion,
+                        kernel_size=1,
+                        stride=stride,
+                        padding=0
+                    ),
+                nn.BatchNorm2d(out_channels*self.expansion)
+            )
+        return None
+
+    def forward(self, x):
+        """
+        Args:
+            x: input
+        Returns:
+            Residual block output
+        """
+        identity = x.clone()
+        x = self.activation_function(self.bn1(self.conv1(x)))
+        x = self.activation_function(self.bn2(self.conv2(x)))
+
+        x = self.conv3(x)
+        x = self.bn3(x)
+
+        if self.downsample:
+            identity = self.downsample(identity)
+
+        x += identity
+        x = self.activation_function(x)
+
+        return x
 
 class BasicResBlock(nn.Module):
     # Scale factor of the number of output channels
@@ -846,7 +926,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         momentum = 0.5
         activation_module = nn.ReLU
         #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
-        dataset = 'ellipses.h5'
+        dataset = 'ellipses_50.h5'
         scaling_function = preprocessing.std_asinh
         if net_type == 'original':
             kernel_size = 40 
@@ -854,7 +934,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             N_groups = 4
             p_fc_dropout = 0.
         elif net_type == 'ResNet':
-            n_blocks_list = [2, 2, 2, 2]
+            n_blocks_list = [3, 4, 6, 3]
         else:
             raise Exception('Unexpected `net_type`.')
 
@@ -915,7 +995,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     lr,
                     momentum,
                     run_name,
-                    BasicResBlock,
+                    BottleNeck,
                     n_blocks_list,
                     dataset,
                     scaling_function,
@@ -927,6 +1007,10 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
         must_continue = True
     
+    #scheduler = torch.optim.lr_scheduler.ReducedLROnPlateau(
+    #    model.optimizer
+    #)
+
     ###########################################################################
     # Load the data
     ###########################################################################
