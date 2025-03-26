@@ -935,7 +935,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             N_groups = 4
             p_fc_dropout = 0.
         elif net_type == 'ResNet':
-            n_blocks_list = [3, 4, 6, 3]
+            n_blocks_list = [2, 2, 2, 2]
         else:
             raise Exception('Unexpected `net_type`.')
 
@@ -996,7 +996,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     lr,
                     momentum,
                     run_name,
-                    BottleNeck,
+                    BasicResBlock,
                     n_blocks_list,
                     dataset,
                     scaling_function,
@@ -1008,20 +1008,6 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
         must_continue = True
     
-    # Learning rate scheduler that will make the new lr = `factor` * lr when 
-    # it's been
-    # `patience` epochs since the MSE less decreased by less than `threshold`.
-    # I determined `threshold` by figuring I want the sqrt(MSE) to drop to 
-    # ~0.045 when the sqrt(MSE) is 0.05. 
-    scheduler = torch.optim.lr_scheduler.ReducedLROnPlateau(
-        model.optimizer,
-        'min',
-        factor=0.1,
-        patience=4,
-        threshold=5.e-5,
-        threshold_mode='abs'
-    )
-
     ###########################################################################
     # Load the data
     ###########################################################################
@@ -1058,6 +1044,20 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         if wandb_mode == 'y':
             wandb.config['architecture'] = repr(model)
 
+    # Learning rate scheduler that will make the new lr = `factor` * lr when 
+    # it's been
+    # `patience` epochs since the MSE less decreased by less than `threshold`.
+    # I determined `threshold` by figuring I want the sqrt(MSE) to drop to 
+    # ~0.045 when the sqrt(MSE) is 0.05. 
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        model.optimizer,
+        'min',
+        factor=0.1,
+        patience=4,
+        threshold=5.e-5,
+        threshold_mode='abs'
+    )
+
     print(model)
     
     ###########################################################################
@@ -1090,7 +1090,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             wandb.log({'training loss': train_loss,
                        'test loss': test_loss})
         model.save_state(epoch, train_loss, test_loss)
-        scheduler.step(train_loss)
+        #scheduler.step(train_loss)
 
     return model 
 
