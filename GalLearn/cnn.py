@@ -1090,7 +1090,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             wandb.log({'training loss': train_loss,
                        'test loss': test_loss})
         model.save_state(epoch, train_loss, test_loss)
-        #scheduler.step(train_loss)
+        scheduler.step(train_loss)
 
     return model 
 
