@@ -825,6 +825,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             loss = loss_function(output, target)
             loss.backward()
             model.optimizer.step()
+
             # Store results
             sum_losses += loss
             N_optimized += len(data)
@@ -1007,9 +1008,19 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
         must_continue = True
     
-    #scheduler = torch.optim.lr_scheduler.ReducedLROnPlateau(
-    #    model.optimizer
-    #)
+    # Learning rate scheduler that will make the new lr = `factor` * lr when 
+    # it's been
+    # `patience` epochs since the MSE less decreased by less than `threshold`.
+    # I determined `threshold` by figuring I want the sqrt(MSE) to drop to 
+    # ~0.045 when the sqrt(MSE) is 0.05. 
+    scheduler = torch.optim.lr_scheduler.ReducedLROnPlateau(
+        model.optimizer,
+        'min',
+        factor=0.1,
+        patience=4,
+        threshold=5.e-5,
+        threshold_mode='abs'
+    )
 
     ###########################################################################
     # Load the data
@@ -1079,6 +1090,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             wandb.log({'training loss': train_loss,
                        'test loss': test_loss})
         model.save_state(epoch, train_loss, test_loss)
+        scheduler.step(train_loss)
 
     return model 
 
