@@ -98,6 +98,13 @@ def load_net(run_name):
             if key not in args_dict:
                 args_dict[key] = None
         args_dict['run_name'] = run_name
+        #######################################################################
+        # VERY important!
+        # ---------------
+        # The following line currently makes it so the only ResNet's that will
+        # load properly are those with BasicResBlock's. This is a problem for
+        # future-Patrick.
+        #######################################################################
         args_dict['ResBlock'] = BasicResBlock
         model = ResNet(**args_dict)
     model.init_optimizer()
@@ -359,6 +366,11 @@ class ResNet(nn.Module):
             run_name + '_state.tar'
         )
 
+        if dataset is None:
+            # Making the default dataset ellipses_50 for now for networks that
+            # I saved without any dataset specification.
+            dataset = 'ellipses_50.h5'
+
         self.last_epoch = 0
 
         self.activation_module = activation_module
@@ -564,6 +576,7 @@ class ResNet(nn.Module):
             'out_channels_list': self.out_channels_list,
             'N_img_channels': self.N_img_channels,
             'net_type': 'ResNet'
+            'dataset': self.dataset,
         }
         with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
                   'wb') as f:
