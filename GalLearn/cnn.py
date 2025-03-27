@@ -358,6 +358,7 @@ class ResNet(nn.Module):
         '''
         import paths
         import os
+        import preprocessing
 
         super(ResNet, self).__init__()
 
@@ -370,6 +371,10 @@ class ResNet(nn.Module):
             # Making the default dataset ellipses_50 for now for networks that
             # I saved without any dataset specification.
             dataset = 'ellipses_50.h5'
+        if scaling_function is None:
+            # Making the default scaling function std_asinh. This will probably
+            # never change.
+            scaling_function = preprocessing.std_asinh
 
         self.last_epoch = 0
 
