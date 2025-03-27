@@ -884,7 +884,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         ))
         return test_loss 
 
-    N_epochs = 100 
+    N_epochs = 40
     N_batches = 60
     loss_function = torch.nn.MSELoss()
 
@@ -923,7 +923,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         net_type = 'ResNet'
 
         # Things wandb will track
-        lr = 5.e-4 # learning rate
+        lr = 5.e-5 # learning rate
         momentum = 0.5
         activation_module = nn.ReLU
         #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
@@ -1052,9 +1052,9 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         model.optimizer,
         'min',
-        factor=0.1,
-        patience=4,
-        threshold=5.e-5,
+        factor=0.5,
+        patience=7,
+        threshold=3.e-4,
         threshold_mode='abs'
     )
 
@@ -1087,8 +1087,11 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         train_loss = train(epoch)
         test_loss = test()
         if wandb_mode in ['y', 'r']:
-            wandb.log({'training loss': train_loss,
-                       'test loss': test_loss})
+            wandb.log({
+                'training loss': train_loss,
+                'test loss': test_loss,
+                'learning rate': model.optimizer.param_groups[0]['lr']
+            })
         model.save_state(epoch, train_loss, test_loss)
         scheduler.step(train_loss)
 
