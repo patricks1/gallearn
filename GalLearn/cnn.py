@@ -623,7 +623,7 @@ class ResNet(nn.Module):
         import numpy as np
         checkpoints = torch.load(self.state_path, weights_only=True)
         epochs = np.array(list(checkpoints.keys()))
-        self.last_epoch = epochs.max()
+        self.last_epoch = epochs.max() 
         self.load_state_dict(checkpoints[self.last_epoch]['model_state_dict'])
         self.optimizer.load_state_dict(
             checkpoints[self.last_epoch]['optimizer_state_dict']
@@ -941,7 +941,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         net_type = 'ResNet'
 
         # Things wandb will track
-        lr = 5.e-5 # learning rate
+        lr = 3.e-5 # learning rate
         momentum = 0.5
         activation_module = nn.ReLU
         #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
@@ -1070,14 +1070,14 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         model.optimizer,
         'min',
-        factor=0.5,
+        factor=0.2,
         patience=7,
         threshold=3.e-4,
         threshold_mode='abs'
     )
 
     print(model)
-    
+     
     ###########################################################################
     # Make the DataLoaders.
     ###########################################################################
