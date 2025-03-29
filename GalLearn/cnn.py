@@ -101,11 +101,12 @@ def load_net(run_name):
         #######################################################################
         # VERY important!
         # ---------------
-        # The following line currently makes it so the only ResNet's that will
-        # load properly are those with BasicResBlock's. This is a problem for
+        # The following line currently makes it so only ResNets with the block
+        # type below will
+        # load properly. This is a problem for
         # future-Patrick.
         #######################################################################
-        args_dict['ResBlock'] = BasicResBlock
+        args_dict['ResBlock'] = BottleNeck 
         model = ResNet(**args_dict)
     model.init_optimizer()
     model.load()
@@ -453,7 +454,7 @@ class ResNet(nn.Module):
             nn.BatchNorm1d(1024),
             self.activation_module(),
 
-            n.Linear(1024, 256),
+            nn.Linear(1024, 256),
             nn.BatchNorm1d(256),
             self.activation_module(),
 
