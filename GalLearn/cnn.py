@@ -445,9 +445,15 @@ class ResNet(nn.Module):
         # Head
         self.head = nn.Sequential(
             nn.Dropout1d(0.2),
-            nn.LazyLinear(
-                    256, 
-                ),
+            nn.LazyLinear(1536),
+            nn.BatchNorm1d(1536),
+            self.activation_module(),
+
+            nn.Linear(1536, 1024),
+            nn.BatchNorm1d(1024),
+            self.activation_module(),
+
+            n.Linear(1024, 256),
             nn.BatchNorm1d(256),
             self.activation_module(),
 
@@ -581,6 +587,7 @@ class ResNet(nn.Module):
             'out_channels_list': self.out_channels_list,
             'N_img_channels': self.N_img_channels,
             'net_type': 'ResNet',
+            #'ResBock': self
             'dataset': self.dataset,
         }
         with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
@@ -953,7 +960,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             N_groups = 4
             p_fc_dropout = 0.
         elif net_type == 'ResNet':
-            n_blocks_list = [2, 2, 2, 2]
+            n_blocks_list = [3, 4, 6, 3]
         else:
             raise Exception('Unexpected `net_type`.')
 
@@ -1014,7 +1021,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     lr,
                     momentum,
                     run_name,
-                    BasicResBlock,
+                    BottleNeck,
                     n_blocks_list,
                     dataset,
                     scaling_function,
