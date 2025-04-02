@@ -445,7 +445,7 @@ class ResNet(nn.Module):
 
         # Head
         self.head = nn.Sequential(
-            #nn.Dropout1d(0.2),
+            nn.Dropout1d(0.2),
             nn.LazyLinear(1536),
             nn.BatchNorm1d(1536),
             self.activation_module(),
@@ -952,8 +952,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         lr = 3.e-5 # learning rate
         momentum = 0.5
         activation_module = nn.ReLU
-        #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
-        dataset = 'ellipses_50.h5'
+        dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
+        #dataset = 'ellipses_50.h5'
         scaling_function = preprocessing.std_asinh
         if net_type == 'original':
             kernel_size = 40 
@@ -962,6 +962,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             p_fc_dropout = 0.
         elif net_type == 'ResNet':
             n_blocks_list = [3, 4, 6, 3]
+            resblock = BottleNeck
         else:
             raise Exception('Unexpected `net_type`.')
 
@@ -1022,7 +1023,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     lr,
                     momentum,
                     run_name,
-                    BottleNeck,
+                    resblock,
                     n_blocks_list,
                     dataset,
                     scaling_function,
