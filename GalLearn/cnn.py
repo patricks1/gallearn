@@ -98,7 +98,15 @@ def load_net(run_name):
             if key not in args_dict:
                 args_dict[key] = None
         args_dict['run_name'] = run_name
-        args_dict['ResBlock'] = BasicResBlock
+        #######################################################################
+        # VERY important!
+        # ---------------
+        # The following line currently makes it so only ResNets with the block
+        # type below will
+        # load properly. This is a problem for
+        # future-Patrick.
+        #######################################################################
+        args_dict['ResBlock'] = BottleNeck 
         model = ResNet(**args_dict)
     model.init_optimizer()
     model.load()
@@ -351,6 +359,7 @@ class ResNet(nn.Module):
         '''
         import paths
         import os
+        import preprocessing
 
         super(ResNet, self).__init__()
 
@@ -358,6 +367,15 @@ class ResNet(nn.Module):
             paths.data, 
             run_name + '_state.tar'
         )
+
+        if dataset is None:
+            # Making the default dataset ellipses_50 for now for networks that
+            # I saved without any dataset specification.
+            dataset = 'ellipses_50.h5'
+        if scaling_function is None:
+            # Making the default scaling function std_asinh. This will probably
+            # never change.
+            scaling_function = preprocessing.std_asinh
 
         self.last_epoch = 0
 
@@ -428,17 +446,15 @@ class ResNet(nn.Module):
         # Head
         self.head = nn.Sequential(
             nn.Dropout1d(0.2),
-            nn.LazyLinear(
-                    400, 
-                ),
-            nn.BatchNorm1d(400),
+            nn.LazyLinear(1536),
+            nn.BatchNorm1d(1536),
             self.activation_module(),
 
-            nn.Linear(400, 300),
-            nn.BatchNorm1d(300),
+            nn.Linear(1536, 1024),
+            nn.BatchNorm1d(1024),
             self.activation_module(),
 
-            nn.Linear(300, 256),
+            nn.Linear(1024, 256),
             nn.BatchNorm1d(256),
             self.activation_module(),
 
@@ -457,10 +473,9 @@ class ResNet(nn.Module):
         return None
 
     def init_optimizer(self):
-        self.optimizer = torch.optim.SGD(
+        self.optimizer = torch.optim.Adam(
                 self.parameters(), 
                 lr=self.lr, 
-                momentum=self.momentum
             )
         return None
 
@@ -572,7 +587,9 @@ class ResNet(nn.Module):
             'n_blocks_list': self.n_blocks_list,
             'out_channels_list': self.out_channels_list,
             'N_img_channels': self.N_img_channels,
-            'net_type': 'ResNet'
+            'net_type': 'ResNet',
+            #'ResBock': self
+            'dataset': self.dataset,
         }
         with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
                   'wb') as f:
@@ -614,12 +631,93 @@ class ResNet(nn.Module):
         import numpy as np
         checkpoints = torch.load(self.state_path, weights_only=True)
         epochs = np.array(list(checkpoints.keys()))
-        self.last_epoch = epochs.max()
+        self.last_epoch = epochs.max() 
         self.load_state_dict(checkpoints[self.last_epoch]['model_state_dict'])
         self.optimizer.load_state_dict(
             checkpoints[self.last_epoch]['optimizer_state_dict']
         )
         return None
+
+class BottleNeck(nn.Module):
+    # Scale factor of the number of output channels
+    expansion = 4
+
+    def __init__(
+                self,
+                in_channels,
+                out_channels, 
+                activation_module,
+                stride=1,
+                is_first_block=False
+            ):
+        """
+        Args: 
+            in_channels: number of input channels
+            out_channels: number of output channels
+            stride: stride using in (a) 3x3 convolution and 
+                    (b) 1x1 convolution used for downsampling for skip 
+                    connection
+            is_first_block: whether it is the first residual block of the layer
+        """
+        super().__init__()
+
+        self.activation_module = activation_module
+        self.activation_function = activation_module()
+
+        self.conv1 = nn.Conv2d(in_channels=in_channels,
+                               out_channels=out_channels,
+                               kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        
+        self.conv2 = nn.Conv2d(in_channels=out_channels,
+                               out_channels=out_channels,
+                               kernel_size=3, stride=stride, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        self.conv3 = nn.Conv2d(in_channels=out_channels,
+                               out_channels=out_channels*self.expansion,
+                               kernel_size=1, stride=1, padding=0)
+        self.bn3 = nn.BatchNorm2d(out_channels*self.expansion)
+
+        # Skip connection goes through 1x1 convolution with stride=2 for 
+        # the first blocks of conv3_x, conv4_x, and conv5_x layers for matching
+        # spatial dimension of feature maps and number of channels in order to 
+        # perform the add operations.
+        self.downsample = None
+        if is_first_block:
+            self.downsample = nn.Sequential(
+                nn.Conv2d(
+                        in_channels=in_channels,
+                        out_channels=out_channels*self.expansion,
+                        kernel_size=1,
+                        stride=stride,
+                        padding=0
+                    ),
+                nn.BatchNorm2d(out_channels*self.expansion)
+            )
+        return None
+
+    def forward(self, x):
+        """
+        Args:
+            x: input
+        Returns:
+            Residual block output
+        """
+        identity = x.clone()
+        x = self.activation_function(self.bn1(self.conv1(x)))
+        x = self.activation_function(self.bn2(self.conv2(x)))
+
+        x = self.conv3(x)
+        x = self.bn3(x)
+
+        if self.downsample:
+            identity = self.downsample(identity)
+
+        x += identity
+        x = self.activation_function(x)
+
+        return x
 
 class BasicResBlock(nn.Module):
     # Scale factor of the number of output channels
@@ -753,6 +851,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             loss = loss_function(output, target)
             loss.backward()
             model.optimizer.step()
+
             # Store results
             sum_losses += loss
             N_optimized += len(data)
@@ -811,7 +910,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         ))
         return test_loss 
 
-    N_epochs = 100 
+    N_epochs = 40
     N_batches = 60
     loss_function = torch.nn.MSELoss()
 
@@ -850,11 +949,11 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         net_type = 'ResNet'
 
         # Things wandb will track
-        lr = 5.e-4 # learning rate
+        lr = 3.e-5 # learning rate
         momentum = 0.5
         activation_module = nn.ReLU
-        #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
-        dataset = 'ellipses_10.h5'
+        dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
+        #dataset = 'ellipses_50.h5'
         scaling_function = preprocessing.std_asinh
         if net_type == 'original':
             kernel_size = 40 
@@ -863,6 +962,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             p_fc_dropout = 0.
         elif net_type == 'ResNet':
             n_blocks_list = [3, 4, 6, 3]
+            resblock = BottleNeck
         else:
             raise Exception('Unexpected `net_type`.')
 
@@ -923,7 +1023,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     lr,
                     momentum,
                     run_name,
-                    BasicResBlock,
+                    resblock,
                     n_blocks_list,
                     dataset,
                     scaling_function,
@@ -971,8 +1071,22 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         if wandb_mode == 'y':
             wandb.config['architecture'] = repr(model)
 
+    # Learning rate scheduler that will make the new lr = `factor` * lr when 
+    # it's been
+    # `patience` epochs since the MSE less decreased by less than `threshold`.
+    # I determined `threshold` by figuring I want the sqrt(MSE) to drop to 
+    # ~0.045 when the sqrt(MSE) is 0.05. 
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        model.optimizer,
+        'min',
+        factor=0.2,
+        patience=7,
+        threshold=3.e-4,
+        threshold_mode='abs'
+    )
+
     print(model)
-    
+     
     ###########################################################################
     # Make the DataLoaders.
     ###########################################################################
@@ -1000,9 +1114,13 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         train_loss = train(epoch)
         test_loss = test()
         if wandb_mode in ['y', 'r']:
-            wandb.log({'training loss': train_loss,
-                       'test loss': test_loss})
+            wandb.log({
+                'training loss': train_loss,
+                'test loss': test_loss,
+                'learning rate': model.optimizer.param_groups[0]['lr']
+            })
         model.save_state(epoch, train_loss, test_loss)
+        scheduler.step(train_loss)
 
     return model 
 
