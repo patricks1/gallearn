@@ -52,7 +52,7 @@ def save_wandb_id(wandb):
 def load_wandb_id(run_name):
     import paths
     import os
-    with open(os.path.join(paths.data, run_name + '_id.txt'), 'r') as f:
+    with open(os.path.join(paths.data, run_name, 'id.txt'), 'r') as f:
         wandb_id = f.read()
     return wandb_id
 
@@ -365,8 +365,8 @@ class ResNet(nn.Module):
         # For the first block of the second layer, do not downsample and use 
         # stride=1.
         self.conv2_x = self.CreateLayer(
-            resblock,
-            n_blocks_list[0], 
+            self.resblock,
+            self.n_blocks_list[0], 
             in_channels,
             out_channels_list[0],
             stride=1
@@ -377,22 +377,22 @@ class ResNet(nn.Module):
         # By default, resblock.expansion = 4 for ResNet-50, 101, 152, 
         # resblock.expansion = 1 for ResNet-18, 34.
         self.conv3_x = self.CreateLayer(
-            resblock, n_blocks_list[1], 
-            out_channels_list[0]*resblock.expansion,
+            self.resblock, self.n_blocks_list[1], 
+            out_channels_list[0]*self.resblock.expansion,
             out_channels_list[1],
             stride=2
         )
         self.conv4_x = self.CreateLayer(
-            resblock,
-            n_blocks_list[2],
-            out_channels_list[1]*resblock.expansion,
+            self.resblock,
+            self.n_blocks_list[2],
+            out_channels_list[1]*self.resblock.expansion,
             out_channels_list[2],
             stride=2
         )
         self.conv5_x = self.CreateLayer(
-            resblock,
-            n_blocks_list[3], 
-            out_channels_list[2]*resblock.expansion,
+            self.resblock,
+            self.n_blocks_list[3], 
+            out_channels_list[2]*self.resblock.expansion,
             out_channels_list[3],
             stride=2
         )
@@ -547,7 +547,6 @@ class ResNet(nn.Module):
             'lr': self.lr,
             'momentum': self.momentum,
             'n_blocks_list': self.n_blocks_list,
-            'out_channels_list': self.out_channels_list,
             'N_img_channels': self.N_img_channels,
             'net_type': 'ResNet',
             'resblock': self.resblock,
@@ -587,7 +586,6 @@ class ResNet(nn.Module):
         self.momentum = args_dict['momentum']
         self.lr = args_dict['lr']
         self.n_blocks_list = args_dict['n_blocks_list']
-        self.out_channels_list = args_dict['out_channels_list']
         self.N_img_channels = args_dict['N_img_channels']
         self.dataset = args_dict['dataset']
         self.resblock = args_dict['resblock']
@@ -629,11 +627,13 @@ class ResNet(nn.Module):
     def load(self):
         import numpy as np
         import re
+        import os
 
         states = os.listdir(self.states_dir)
         last_state_fname = max(states)
         # Get epoch number from file name by finding all numerals
-        self.last_epoch = int(re.findall(r'\d+', last_state_fname))
+        last_epoch = int(re.findall(r'\d+', last_state_fname)[0])
+        self.last_epoch = last_epoch
 
         checkpoint = torch.load(
             os.path.join(self.states_dir, last_state_fname),
@@ -918,7 +918,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         ))
         return test_loss 
 
-    N_epochs = 40
+    N_epochs = 150 
     N_batches = 60
     loss_function = torch.nn.MSELoss()
 
@@ -959,8 +959,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         momentum = 0.5
         #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
         dataset = 'ellipses.h5'
-        n_blocks_list = [2, 2, 2, 2]
-        resblock = BasicResBlock
+        n_blocks_list = [3, 4, 6, 3]
+        resblock = BottleNeck
 
         # Other things
         N_out_channels = 1
