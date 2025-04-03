@@ -52,7 +52,7 @@ def save_wandb_id(wandb):
 def load_wandb_id(run_name):
     import paths
     import os
-    with open(os.path.join(paths.data, run_name + '_id.txt'), 'r') as f:
+    with open(os.path.join(paths.data, run_name, 'id.txt'), 'r') as f:
         wandb_id = f.read()
     return wandb_id
 
@@ -632,7 +632,8 @@ class ResNet(nn.Module):
         states = os.listdir(self.states_dir)
         last_state_fname = max(states)
         # Get epoch number from file name by finding all numerals
-        self.last_epoch = int(re.findall(r'\d+', last_state_fname))
+        last_epoch = int(re.findall(r'\d+', last_state_fname)[0])
+        self.last_epoch = last_epoch
 
         checkpoint = torch.load(
             os.path.join(self.states_dir, last_state_fname),
