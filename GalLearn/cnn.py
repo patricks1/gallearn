@@ -957,10 +957,10 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         # Things wandb will track
         lr = 3.e-5 # learning rate
         momentum = 0.5
-        dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
-        #dataset = 'ellipses_50.h5'
-        n_blocks_list = [3, 8, 36, 3]
-        resblock = BottleNeck
+        #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
+        dataset = 'ellipses_50.h5'
+        n_blocks_list = [2, 2, 2, 2]
+        resblock = BasicResBlock
 
         # Other things
         N_out_channels = 1
