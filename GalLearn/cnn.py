@@ -330,15 +330,13 @@ class Net(nn.Module):
 class ResNet(nn.Module):
     def __init__(
                 self,
-                activation_module,
-                N_out_channels,
-                lr,
-                momentum,
                 run_name,
-                ResBlock,
-                n_blocks_list,
-                dataset,
-                scaling_function,
+                N_out_channels=None,
+                lr=None,
+                momentum=None,
+                resblock=None,
+                n_blocks_list=None,
+                dataset=None,
                 out_channels_list=[64, 128, 256, 512],
                 N_img_channels=1
             ):
@@ -347,7 +345,7 @@ class ResNet(nn.Module):
 
         Parameters
         ----------
-            ResBlock: residual block type, BasicResBlock for ResNet-18, 34 or 
+            resblock: residual block type, BasicResBlock for ResNet-18, 34 or 
                       BottleNeck for ResNet-50, 101, 152
             n_class: number of classes for image classifcation (used in
                 classfication head)
@@ -363,6 +361,8 @@ class ResNet(nn.Module):
 
         super(ResNet, self).__init__()
 
+        self.run_name = run_name
+
         self.run_dir = os.path.join(paths.data, run_name)
         self.states_dir = os.path.join(self.run_dir, 'states')
         if not os.path.isdir(self.run_dir):
@@ -372,31 +372,35 @@ class ResNet(nn.Module):
         else:
             self.need_to_load = True
 
+        if self.need_to_load and (
+                    N_out_channels is not None
+                    or lr is not None
+                    or momentum is not None
+                    or resblock is not None
+                    or n_blocks_list is not None
+                    or dataset is not None
+                ):
+            raise Exception(
+                'Run already exists but the user specified one or more'
+                ' initialization arguments.'
+            )
 
-        if dataset is None:
-            # Making the default dataset ellipses_50 for now for networks that
-            # I saved without any dataset specification.
+        if self.need_to_load:
+            self.load_args()
+        else:
+            self.N_out_channels = N_out_channels
+            self.momentum = momentum
+            self.lr = lr
+            self.n_blocks_list = n_blocks_list
+            self.out_channels_list = out_channels_list
+            self.N_img_channels = N_img_channels
+            self.dataset = dataset
 
-            # Getting rid of default for now
-            pass
-            #dataset = 'ellipses_50.h5'
-        if scaling_function is None:
-            # Making the default scaling function std_asinh. This will probably
-            # never change.
-            scaling_function = preprocessing.std_asinh
+            self.last_epoch = 0
 
-        self.last_epoch = 0
+        self.scaling_function = preprocessing.std_asinh
+        self.activation_module = nn.ReLU
 
-        self.activation_module = activation_module
-        self.N_out_channels = N_out_channels
-        self.momentum = momentum
-        self.lr = lr
-        self.run_name = run_name
-        self.n_blocks_list = n_blocks_list
-        self.out_channels_list = out_channels_list
-        self.N_img_channels = N_img_channels
-        self.scaling_function = scaling_function
-        self.dataset = dataset
         self.features = {}
 
         #----------------------------------------------------------------------
@@ -416,7 +420,7 @@ class ResNet(nn.Module):
         # For the first block of the second layer, do not downsample and use 
         # stride=1.
         self.conv2_x = self.CreateLayer(
-            ResBlock,
+            resblock,
             n_blocks_list[0], 
             in_channels,
             out_channels_list[0],
@@ -425,25 +429,25 @@ class ResNet(nn.Module):
         
         # For the first blocks of conv3_x - conv5_x layers, perform 
         # downsampling using stride=2.
-        # By default, ResBlock.expansion = 4 for ResNet-50, 101, 152, 
-        # ResBlock.expansion = 1 for ResNet-18, 34.
+        # By default, resblock.expansion = 4 for ResNet-50, 101, 152, 
+        # resblock.expansion = 1 for ResNet-18, 34.
         self.conv3_x = self.CreateLayer(
-            ResBlock, n_blocks_list[1], 
-            out_channels_list[0]*ResBlock.expansion,
+            resblock, n_blocks_list[1], 
+            out_channels_list[0]*resblock.expansion,
             out_channels_list[1],
             stride=2
         )
         self.conv4_x = self.CreateLayer(
-            ResBlock,
+            resblock,
             n_blocks_list[2],
-            out_channels_list[1]*ResBlock.expansion,
+            out_channels_list[1]*resblock.expansion,
             out_channels_list[2],
             stride=2
         )
         self.conv5_x = self.CreateLayer(
-            ResBlock,
+            resblock,
             n_blocks_list[3], 
-            out_channels_list[2]*ResBlock.expansion,
+            out_channels_list[2]*resblock.expansion,
             out_channels_list[3],
             stride=2
         )
@@ -481,6 +485,7 @@ class ResNet(nn.Module):
         if self.need_to_load:
             self.init_optimizer()
             self.load()
+            self.need_to_load = False
 
         return None
 
@@ -513,7 +518,7 @@ class ResNet(nn.Module):
 
     def CreateLayer(
                 self,
-                ResBlock,
+                resblock,
                 n_blocks,
                 in_channels,
                 out_channels,
@@ -522,7 +527,7 @@ class ResNet(nn.Module):
         """
         Create a layer with specified type and number of residual blocks.
         Args: 
-            ResBlock: residual block type, BasicResBlock for ResNet-18, 34 or 
+            resblock: residual block type, BasicResBlock for ResNet-18, 34 or 
                       BottleNeck for ResNet-50, 101, 152
             n_blocks: number of residual blocks
             in_channels: number of input channels
@@ -538,7 +543,7 @@ class ResNet(nn.Module):
             if i == 0:
                 # Downsample the feature map using input stride for the first
                 # block of the layer.
-                layer.append(ResBlock(
+                layer.append(resblock(
                     in_channels,
                     out_channels, 
                     self.activation_module,
@@ -549,11 +554,11 @@ class ResNet(nn.Module):
                 # Keep the feature map size same for the rest three blocks of 
                 # the layer.
                 # by setting stride=1 and is_first_block=False.
-                # By default, ResBlock.expansion = 4 for ResNet-50, 101, 152, 
-                # ResBlock.expansion = 1 for ResNet-18, 34.
+                # By default, resblock.expansion = 4 for ResNet-50, 101, 152, 
+                # resblock.expansion = 1 for ResNet-18, 34.
                 layer.append(
-                    ResBlock(
-                        out_channels*ResBlock.expansion,
+                    resblock(
+                        out_channels*resblock.expansion,
                         out_channels,
                         self.activation_module
                     )
@@ -600,12 +605,48 @@ class ResNet(nn.Module):
             'out_channels_list': self.out_channels_list,
             'N_img_channels': self.N_img_channels,
             'net_type': 'ResNet',
-            #'ResBock': self
+            'resblock': self.resblock
             'dataset': self.dataset,
         }
-        with open(os.path.join(paths.data, self.run_name, 'args' + '.pkl'), 
+        with open(os.path.join(paths.data, self.run_name, 'args.pkl'), 
                   'wb') as f:
             pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
+        return None
+
+    def load_args(self):
+        import pickle
+        import paths
+        import os
+        with open(os.path.join(self.run_dir, 'args.pkl'), 
+                  'rb') as f:
+            args_dict = pickle.load(f)
+        print(args_dict)
+        if 'net_type' not in args_dict:
+            net_type = 'original'
+        else:
+            net_type = args_dict['net_type']
+            del args_dict['net_type']
+        args = []
+        for key in [
+                    'dataset',
+                    'N_out_channels',
+                    'lr',
+                    'momentum',
+                    'n_blocks_list'
+                ]:
+            if key not in args_dict:
+                args_dict[key] = None
+        args_dict['run_name'] = run_name
+
+        self.N_out_channels = args_dict['N_out_channels']
+        self.momentum = args_dict['momentum']
+        self.lr = args_dict['lr']
+        self.n_blocks_list = args_dict['n_blocks_list']
+        self.out_channels_list = args_dict['out_channels_list']
+        self.N_img_channels = args_dict['N_img_channels']
+        self.dataset = args_dict['dataset']
+        self.resblock = args_dict['resblock']
+
         return None
 
     def save_state(self, epoch, train_loss, test_loss):
