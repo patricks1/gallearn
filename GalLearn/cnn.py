@@ -332,6 +332,7 @@ class ResNet(nn.Module):
         if self.need_to_load:
             self.load_args()
         else:
+            self.resblock = resblock
             self.N_out_channels = N_out_channels
             self.momentum = momentum
             self.lr = lr
@@ -549,7 +550,7 @@ class ResNet(nn.Module):
             'out_channels_list': self.out_channels_list,
             'N_img_channels': self.N_img_channels,
             'net_type': 'ResNet',
-            'resblock': self.resblock
+            'resblock': self.resblock,
             'dataset': self.dataset,
         }
         with open(os.path.join(paths.data, self.run_name, 'args.pkl'), 
