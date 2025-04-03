@@ -56,62 +56,6 @@ def load_wandb_id(run_name):
         wandb_id = f.read()
     return wandb_id
 
-def load_net(run_name):
-    import pickle
-    import paths
-    import os
-    with open(os.path.join(paths.data, run_name + '_args' + '.pkl'), 
-              'rb') as f:
-        args_dict = pickle.load(f)
-    print(args_dict)
-    if 'net_type' not in args_dict:
-        net_type = 'original'
-    else:
-        net_type = args_dict['net_type']
-        del args_dict['net_type']
-    args = []
-    for key in [
-                'dataset',
-                'scaling_function',
-                'activation_module',
-                'N_out_channels',
-                'lr',
-                'momentum'
-            ]:
-        if key not in args_dict:
-            args_dict[key] = None
-    if net_type == 'original':
-        for key in [
-                    'kernel_size',
-                    'conv_channels',
-                    'N_groups',
-                    'p_fc_dropout',
-                ]:
-            if key not in args_dict:
-                args_dict[key] = None
-        args_dict['run_name'] = run_name
-        model = Net(**args_dict)
-    elif net_type == 'ResNet':
-        for key in [
-                    'n_blocks_list'
-                ]:
-            if key not in args_dict:
-                args_dict[key] = None
-        args_dict['run_name'] = run_name
-        #######################################################################
-        # VERY important!
-        # ---------------
-        # The following line currently makes it so only ResNets with the block
-        # type below will
-        # load properly. This is a problem for
-        # future-Patrick.
-        #######################################################################
-        args_dict['ResBlock'] = BottleNeck 
-        model = ResNet(**args_dict)
-    model.init_optimizer()
-    model.load()
-    return model
-
 def find_closest_N_groups(N_channels, N_groups):
     # Get all divisors of N_channels
     divisors = [i for i in range(1, N_channels + 1) if N_channels % i == 0]
@@ -983,10 +927,10 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     if wandb_mode == 'n' and run_name is None:
         run_name = datetime.datetime.today().strftime('%Y%m%d%H%M')
     must_continue = False
-    if run_name is not None and os.path.isfile(
-                os.path.join(paths.data, run_name + '_state.tar')
+    if run_name is not None and os.path.isdir(
+                os.path.join(paths.data, run_name)
             ):
-        model = load_net(run_name)
+        model = ResNet(run_name).to(device)
         if wandb_mode == 'r':
             run_id = load_wandb_id(run_name)
             wandb.init(
@@ -1009,25 +953,13 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     else:
         # If the state file doesn't exist
 
-        net_type = 'ResNet'
-
         # Things wandb will track
         lr = 3.e-5 # learning rate
         momentum = 0.5
-        activation_module = nn.ReLU
         dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
         #dataset = 'ellipses_50.h5'
-        scaling_function = preprocessing.std_asinh
-        if net_type == 'original':
-            kernel_size = 40 
-            conv_channels = [50, 25, 10, 3, 1]
-            N_groups = 4
-            p_fc_dropout = 0.
-        elif net_type == 'ResNet':
-            n_blocks_list = [3, 8, 36, 3]
-            resblock = BottleNeck
-        else:
-            raise Exception('Unexpected `net_type`.')
+        n_blocks_list = [3, 8, 36, 3]
+        resblock = BottleNeck
 
         # Other things
         N_out_channels = 1
@@ -1041,59 +973,27 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 config={
                     "learning_rate": lr,
                     'momentum': momentum,
-                    'activation_func': activation_module,
-                    'scaling_function': scaling_function,
                     "dataset": dataset,
                     'batches': N_batches,
                     'N_fc_layers': 1,
+                    'n_blocks_list': n_blocks_list
                 }
             )
-            if net_type == 'original':
-                wandb.config.update({    
-                    'conv_channels': conv_channels,
-                    'N_groups': N_groups,
-                    'p_fc_dropout': p_fc_dropout
-                })
-            if net_type == 'ResNet':
-                wandb.config.update({
-                    'n_blocks_list': n_blocks_list
-                })
-            else:
-                raise Exception('Unexpected `net_type`.')
             run_name = wandb.run.name
             save_wandb_id(wandb)
 
         # Define the model if we didn't rebuild one from a argument and
         # state files.
-        if net_type == 'original':
-            model = Net(
-                    activation_module,
-                    kernel_size,
-                    conv_channels,
-                    N_groups,
-                    p_fc_dropout,
-                    N_out_channels,
-                    lr,
-                    momentum,
-                    run_name,
-                    dataset,
-                    scaling_function
-                ).to(device)
-        elif net_type == 'ResNet':
-            model = ResNet(
-                    activation_module,
-                    N_out_channels,
-                    lr,
-                    momentum,
-                    run_name,
-                    resblock,
-                    n_blocks_list,
-                    dataset,
-                    scaling_function,
-                    out_channels_list=[64, 128, 256, 512],
-                ).to(device)
-        else:
-            raise Exception('Unexpected `net_type`.')
+        model = ResNet(
+                run_name,
+                N_out_channels,
+                lr,
+                momentum,
+                resblock,
+                n_blocks_list,
+                dataset,
+                out_channels_list=[64, 128, 256, 512],
+            ).to(device)
         model.save_args()
 
         must_continue = True
