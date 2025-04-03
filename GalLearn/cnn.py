@@ -918,7 +918,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         ))
         return test_loss 
 
-    N_epochs = 40
+    N_epochs = 150 
     N_batches = 60
     loss_function = torch.nn.MSELoss()
 
@@ -959,8 +959,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         momentum = 0.5
         #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
         dataset = 'ellipses.h5'
-        n_blocks_list = [2, 2, 2, 2]
-        resblock = BasicResBlock
+        n_blocks_list = [3, 4, 6, 3]
+        resblock = BottleNeck
 
         # Other things
         N_out_channels = 1
