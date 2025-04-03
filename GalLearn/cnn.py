@@ -981,7 +981,6 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 }
             )
             run_name = wandb.run.name
-            save_wandb_id(wandb)
 
         # Define the model if we didn't rebuild one from a argument and
         # state files.
@@ -996,6 +995,10 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 out_channels_list=[64, 128, 256, 512],
             ).to(device)
         model.save_args()
+        if wandb_mode == 'y':
+            # Must wait until after we initialize the model to save the id
+            # because the folder doesn't exist until after the model is built.
+            save_wandb_id(wandb)
 
         must_continue = True
     
