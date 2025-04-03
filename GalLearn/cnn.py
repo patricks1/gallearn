@@ -365,7 +365,7 @@ class ResNet(nn.Module):
         # For the first block of the second layer, do not downsample and use 
         # stride=1.
         self.conv2_x = self.CreateLayer(
-            resblock,
+            self.resblock,
             self.n_blocks_list[0], 
             in_channels,
             out_channels_list[0],
@@ -377,22 +377,22 @@ class ResNet(nn.Module):
         # By default, resblock.expansion = 4 for ResNet-50, 101, 152, 
         # resblock.expansion = 1 for ResNet-18, 34.
         self.conv3_x = self.CreateLayer(
-            resblock, self.n_blocks_list[1], 
-            out_channels_list[0]*resblock.expansion,
+            self.resblock, self.n_blocks_list[1], 
+            out_channels_list[0]*self.resblock.expansion,
             out_channels_list[1],
             stride=2
         )
         self.conv4_x = self.CreateLayer(
-            resblock,
+            self.resblock,
             self.n_blocks_list[2],
-            out_channels_list[1]*resblock.expansion,
+            out_channels_list[1]*self.resblock.expansion,
             out_channels_list[2],
             stride=2
         )
         self.conv5_x = self.CreateLayer(
-            resblock,
+            self.resblock,
             self.n_blocks_list[3], 
-            out_channels_list[2]*resblock.expansion,
+            out_channels_list[2]*self.resblock.expansion,
             out_channels_list[3],
             stride=2
         )
