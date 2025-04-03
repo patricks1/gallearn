@@ -627,6 +627,7 @@ class ResNet(nn.Module):
     def load(self):
         import numpy as np
         import re
+        import os
 
         states = os.listdir(self.states_dir)
         last_state_fname = max(states)
