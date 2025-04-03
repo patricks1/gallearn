@@ -366,7 +366,7 @@ class ResNet(nn.Module):
         # stride=1.
         self.conv2_x = self.CreateLayer(
             resblock,
-            n_blocks_list[0], 
+            self.n_blocks_list[0], 
             in_channels,
             out_channels_list[0],
             stride=1
@@ -377,21 +377,21 @@ class ResNet(nn.Module):
         # By default, resblock.expansion = 4 for ResNet-50, 101, 152, 
         # resblock.expansion = 1 for ResNet-18, 34.
         self.conv3_x = self.CreateLayer(
-            resblock, n_blocks_list[1], 
+            resblock, self.n_blocks_list[1], 
             out_channels_list[0]*resblock.expansion,
             out_channels_list[1],
             stride=2
         )
         self.conv4_x = self.CreateLayer(
             resblock,
-            n_blocks_list[2],
+            self.n_blocks_list[2],
             out_channels_list[1]*resblock.expansion,
             out_channels_list[2],
             stride=2
         )
         self.conv5_x = self.CreateLayer(
             resblock,
-            n_blocks_list[3], 
+            self.n_blocks_list[3], 
             out_channels_list[2]*resblock.expansion,
             out_channels_list[3],
             stride=2
@@ -547,7 +547,6 @@ class ResNet(nn.Module):
             'lr': self.lr,
             'momentum': self.momentum,
             'n_blocks_list': self.n_blocks_list,
-            'out_channels_list': self.out_channels_list,
             'N_img_channels': self.N_img_channels,
             'net_type': 'ResNet',
             'resblock': self.resblock,
@@ -587,7 +586,6 @@ class ResNet(nn.Module):
         self.momentum = args_dict['momentum']
         self.lr = args_dict['lr']
         self.n_blocks_list = args_dict['n_blocks_list']
-        self.out_channels_list = args_dict['out_channels_list']
         self.N_img_channels = args_dict['N_img_channels']
         self.dataset = args_dict['dataset']
         self.resblock = args_dict['resblock']
