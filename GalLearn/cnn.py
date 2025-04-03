@@ -45,7 +45,7 @@ def load_fr_julia(Nfiles):
 def save_wandb_id(wandb):
     import paths
     import os
-    with open(os.path.join(paths.data, wandb.run.name + '_id.txt'), 'w') as f:
+    with open(os.path.join(paths.data, wandb.run.name, 'id.txt'), 'w') as f:
         f.write(wandb.run.id)
     return None
 
@@ -363,15 +363,23 @@ class ResNet(nn.Module):
 
         super(ResNet, self).__init__()
 
-        self.state_path = os.path.join(
-            paths.data, 
-            run_name + '_state.tar'
-        )
+        self.run_dir = os.path.join(paths.data, run_name)
+        self.states_dir = os.path.join(self.run_dir, 'states')
+        if not os.path.isdir(self.run_dir):
+            os.mkdir(self.run_dir)
+            os.mkdir(self.states_dir)
+            self.need_to_load = False
+        else:
+            self.need_to_load = True
+
 
         if dataset is None:
             # Making the default dataset ellipses_50 for now for networks that
             # I saved without any dataset specification.
-            dataset = 'ellipses_50.h5'
+
+            # Getting rid of default for now
+            pass
+            #dataset = 'ellipses_50.h5'
         if scaling_function is None:
             # Making the default scaling function std_asinh. This will probably
             # never change.
@@ -469,6 +477,10 @@ class ResNet(nn.Module):
             nn.Linear(64, self.N_out_channels),
             nn.Sigmoid()
         )
+
+        if self.need_to_load:
+            self.init_optimizer()
+            self.load()
 
         return None
 
@@ -591,7 +603,7 @@ class ResNet(nn.Module):
             #'ResBock': self
             'dataset': self.dataset,
         }
-        with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
+        with open(os.path.join(paths.data, self.run_name, 'args' + '.pkl'), 
                   'wb') as f:
             pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
         return None
@@ -603,18 +615,19 @@ class ResNet(nn.Module):
 
         start = time.time()
 
-        if os.path.isfile(self.state_path):
-            checkpoints = torch.load(self.state_path, weights_only=True)
-        else:
-            checkpoints = {}
-
-        checkpoints[epoch] = {
+        checkpoint = {
             'train_loss': train_loss,
             'test_loss': test_loss,
             'model_state_dict': self.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict()
         }
-        torch.save(checkpoints, self.state_path)
+        torch.save(
+            checkpoint, 
+            os.path.join(
+                    self.states_dir,
+                    'epoch{0:03}_state.tar'.format(epoch)
+                )
+        )
 
         end = time.time()
         elapsed = end - start
@@ -629,12 +642,21 @@ class ResNet(nn.Module):
 
     def load(self):
         import numpy as np
-        checkpoints = torch.load(self.state_path, weights_only=True)
-        epochs = np.array(list(checkpoints.keys()))
-        self.last_epoch = epochs.max() 
-        self.load_state_dict(checkpoints[self.last_epoch]['model_state_dict'])
+        import re
+
+        states = os.listdir(self.states_dir)
+        last_state_fname = max(states)
+        # Get epoch number from file name by finding all numerals
+        self.last_epoch = int(re.findall(r'\d+', last_state_fname))
+
+        checkpoint = torch.load(
+            os.path.join(self.states_dir, last_state_fname),
+            weights_only=True
+        )
+
+        self.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(
-            checkpoints[self.last_epoch]['optimizer_state_dict']
+            checkpoint['optimizer_state_dict']
         )
         return None
 
