@@ -45,7 +45,7 @@ def load_fr_julia(Nfiles):
 def save_wandb_id(wandb):
     import paths
     import os
-    with open(os.path.join(paths.data, wandb.run.name + '_id.txt'), 'w') as f:
+    with open(os.path.join(paths.data, wandb.run.name, 'id.txt'), 'w') as f:
         f.write(wandb.run.id)
     return None
 
@@ -55,62 +55,6 @@ def load_wandb_id(run_name):
     with open(os.path.join(paths.data, run_name + '_id.txt'), 'r') as f:
         wandb_id = f.read()
     return wandb_id
-
-def load_net(run_name):
-    import pickle
-    import paths
-    import os
-    with open(os.path.join(paths.data, run_name + '_args' + '.pkl'), 
-              'rb') as f:
-        args_dict = pickle.load(f)
-    print(args_dict)
-    if 'net_type' not in args_dict:
-        net_type = 'original'
-    else:
-        net_type = args_dict['net_type']
-        del args_dict['net_type']
-    args = []
-    for key in [
-                'dataset',
-                'scaling_function',
-                'activation_module',
-                'N_out_channels',
-                'lr',
-                'momentum'
-            ]:
-        if key not in args_dict:
-            args_dict[key] = None
-    if net_type == 'original':
-        for key in [
-                    'kernel_size',
-                    'conv_channels',
-                    'N_groups',
-                    'p_fc_dropout',
-                ]:
-            if key not in args_dict:
-                args_dict[key] = None
-        args_dict['run_name'] = run_name
-        model = Net(**args_dict)
-    elif net_type == 'ResNet':
-        for key in [
-                    'n_blocks_list'
-                ]:
-            if key not in args_dict:
-                args_dict[key] = None
-        args_dict['run_name'] = run_name
-        #######################################################################
-        # VERY important!
-        # ---------------
-        # The following line currently makes it so only ResNets with the block
-        # type below will
-        # load properly. This is a problem for
-        # future-Patrick.
-        #######################################################################
-        args_dict['ResBlock'] = BottleNeck 
-        model = ResNet(**args_dict)
-    model.init_optimizer()
-    model.load()
-    return model
 
 def find_closest_N_groups(N_channels, N_groups):
     # Get all divisors of N_channels
@@ -330,15 +274,13 @@ class Net(nn.Module):
 class ResNet(nn.Module):
     def __init__(
                 self,
-                activation_module,
-                N_out_channels,
-                lr,
-                momentum,
                 run_name,
-                ResBlock,
-                n_blocks_list,
-                dataset,
-                scaling_function,
+                N_out_channels=None,
+                lr=None,
+                momentum=None,
+                resblock=None,
+                n_blocks_list=None,
+                dataset=None,
                 out_channels_list=[64, 128, 256, 512],
                 N_img_channels=1
             ):
@@ -347,7 +289,7 @@ class ResNet(nn.Module):
 
         Parameters
         ----------
-            ResBlock: residual block type, BasicResBlock for ResNet-18, 34 or 
+            resblock: residual block type, BasicResBlock for ResNet-18, 34 or 
                       BottleNeck for ResNet-50, 101, 152
             n_class: number of classes for image classifcation (used in
                 classfication head)
@@ -363,32 +305,47 @@ class ResNet(nn.Module):
 
         super(ResNet, self).__init__()
 
-        self.state_path = os.path.join(
-            paths.data, 
-            run_name + '_state.tar'
-        )
-
-        if dataset is None:
-            # Making the default dataset ellipses_50 for now for networks that
-            # I saved without any dataset specification.
-            dataset = 'ellipses_50.h5'
-        if scaling_function is None:
-            # Making the default scaling function std_asinh. This will probably
-            # never change.
-            scaling_function = preprocessing.std_asinh
-
-        self.last_epoch = 0
-
-        self.activation_module = activation_module
-        self.N_out_channels = N_out_channels
-        self.momentum = momentum
-        self.lr = lr
         self.run_name = run_name
-        self.n_blocks_list = n_blocks_list
-        self.out_channels_list = out_channels_list
-        self.N_img_channels = N_img_channels
-        self.scaling_function = scaling_function
-        self.dataset = dataset
+
+        self.run_dir = os.path.join(paths.data, run_name)
+        self.states_dir = os.path.join(self.run_dir, 'states')
+        if not os.path.isdir(self.run_dir):
+            os.mkdir(self.run_dir)
+            os.mkdir(self.states_dir)
+            self.need_to_load = False
+        else:
+            self.need_to_load = True
+
+        if self.need_to_load and (
+                    N_out_channels is not None
+                    or lr is not None
+                    or momentum is not None
+                    or resblock is not None
+                    or n_blocks_list is not None
+                    or dataset is not None
+                ):
+            raise Exception(
+                'Run already exists but the user specified one or more'
+                ' initialization arguments.'
+            )
+
+        if self.need_to_load:
+            self.load_args()
+        else:
+            self.resblock = resblock
+            self.N_out_channels = N_out_channels
+            self.momentum = momentum
+            self.lr = lr
+            self.n_blocks_list = n_blocks_list
+            self.out_channels_list = out_channels_list
+            self.N_img_channels = N_img_channels
+            self.dataset = dataset
+
+            self.last_epoch = 0
+
+        self.scaling_function = preprocessing.std_asinh
+        self.activation_module = nn.ReLU
+
         self.features = {}
 
         #----------------------------------------------------------------------
@@ -408,7 +365,7 @@ class ResNet(nn.Module):
         # For the first block of the second layer, do not downsample and use 
         # stride=1.
         self.conv2_x = self.CreateLayer(
-            ResBlock,
+            resblock,
             n_blocks_list[0], 
             in_channels,
             out_channels_list[0],
@@ -417,25 +374,25 @@ class ResNet(nn.Module):
         
         # For the first blocks of conv3_x - conv5_x layers, perform 
         # downsampling using stride=2.
-        # By default, ResBlock.expansion = 4 for ResNet-50, 101, 152, 
-        # ResBlock.expansion = 1 for ResNet-18, 34.
+        # By default, resblock.expansion = 4 for ResNet-50, 101, 152, 
+        # resblock.expansion = 1 for ResNet-18, 34.
         self.conv3_x = self.CreateLayer(
-            ResBlock, n_blocks_list[1], 
-            out_channels_list[0]*ResBlock.expansion,
+            resblock, n_blocks_list[1], 
+            out_channels_list[0]*resblock.expansion,
             out_channels_list[1],
             stride=2
         )
         self.conv4_x = self.CreateLayer(
-            ResBlock,
+            resblock,
             n_blocks_list[2],
-            out_channels_list[1]*ResBlock.expansion,
+            out_channels_list[1]*resblock.expansion,
             out_channels_list[2],
             stride=2
         )
         self.conv5_x = self.CreateLayer(
-            ResBlock,
+            resblock,
             n_blocks_list[3], 
-            out_channels_list[2]*ResBlock.expansion,
+            out_channels_list[2]*resblock.expansion,
             out_channels_list[3],
             stride=2
         )
@@ -470,6 +427,11 @@ class ResNet(nn.Module):
             nn.Sigmoid()
         )
 
+        if self.need_to_load:
+            self.init_optimizer()
+            self.load()
+            self.need_to_load = False
+
         return None
 
     def init_optimizer(self):
@@ -501,7 +463,7 @@ class ResNet(nn.Module):
 
     def CreateLayer(
                 self,
-                ResBlock,
+                resblock,
                 n_blocks,
                 in_channels,
                 out_channels,
@@ -510,7 +472,7 @@ class ResNet(nn.Module):
         """
         Create a layer with specified type and number of residual blocks.
         Args: 
-            ResBlock: residual block type, BasicResBlock for ResNet-18, 34 or 
+            resblock: residual block type, BasicResBlock for ResNet-18, 34 or 
                       BottleNeck for ResNet-50, 101, 152
             n_blocks: number of residual blocks
             in_channels: number of input channels
@@ -526,7 +488,7 @@ class ResNet(nn.Module):
             if i == 0:
                 # Downsample the feature map using input stride for the first
                 # block of the layer.
-                layer.append(ResBlock(
+                layer.append(resblock(
                     in_channels,
                     out_channels, 
                     self.activation_module,
@@ -537,11 +499,11 @@ class ResNet(nn.Module):
                 # Keep the feature map size same for the rest three blocks of 
                 # the layer.
                 # by setting stride=1 and is_first_block=False.
-                # By default, ResBlock.expansion = 4 for ResNet-50, 101, 152, 
-                # ResBlock.expansion = 1 for ResNet-18, 34.
+                # By default, resblock.expansion = 4 for ResNet-50, 101, 152, 
+                # resblock.expansion = 1 for ResNet-18, 34.
                 layer.append(
-                    ResBlock(
-                        out_channels*ResBlock.expansion,
+                    resblock(
+                        out_channels*resblock.expansion,
                         out_channels,
                         self.activation_module
                     )
@@ -588,12 +550,48 @@ class ResNet(nn.Module):
             'out_channels_list': self.out_channels_list,
             'N_img_channels': self.N_img_channels,
             'net_type': 'ResNet',
-            #'ResBock': self
+            'resblock': self.resblock,
             'dataset': self.dataset,
         }
-        with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
+        with open(os.path.join(paths.data, self.run_name, 'args.pkl'), 
                   'wb') as f:
             pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
+        return None
+
+    def load_args(self):
+        import pickle
+        import paths
+        import os
+        with open(os.path.join(self.run_dir, 'args.pkl'), 
+                  'rb') as f:
+            args_dict = pickle.load(f)
+        print(args_dict)
+        if 'net_type' not in args_dict:
+            net_type = 'original'
+        else:
+            net_type = args_dict['net_type']
+            del args_dict['net_type']
+        args = []
+        for key in [
+                    'dataset',
+                    'N_out_channels',
+                    'lr',
+                    'momentum',
+                    'n_blocks_list'
+                ]:
+            if key not in args_dict:
+                args_dict[key] = None
+        args_dict['run_name'] = run_name
+
+        self.N_out_channels = args_dict['N_out_channels']
+        self.momentum = args_dict['momentum']
+        self.lr = args_dict['lr']
+        self.n_blocks_list = args_dict['n_blocks_list']
+        self.out_channels_list = args_dict['out_channels_list']
+        self.N_img_channels = args_dict['N_img_channels']
+        self.dataset = args_dict['dataset']
+        self.resblock = args_dict['resblock']
+
         return None
 
     def save_state(self, epoch, train_loss, test_loss):
@@ -603,18 +601,19 @@ class ResNet(nn.Module):
 
         start = time.time()
 
-        if os.path.isfile(self.state_path):
-            checkpoints = torch.load(self.state_path, weights_only=True)
-        else:
-            checkpoints = {}
-
-        checkpoints[epoch] = {
+        checkpoint = {
             'train_loss': train_loss,
             'test_loss': test_loss,
             'model_state_dict': self.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict()
         }
-        torch.save(checkpoints, self.state_path)
+        torch.save(
+            checkpoint, 
+            os.path.join(
+                    self.states_dir,
+                    'epoch{0:03}_state.tar'.format(epoch)
+                )
+        )
 
         end = time.time()
         elapsed = end - start
@@ -629,12 +628,21 @@ class ResNet(nn.Module):
 
     def load(self):
         import numpy as np
-        checkpoints = torch.load(self.state_path, weights_only=True)
-        epochs = np.array(list(checkpoints.keys()))
-        self.last_epoch = epochs.max() 
-        self.load_state_dict(checkpoints[self.last_epoch]['model_state_dict'])
+        import re
+
+        states = os.listdir(self.states_dir)
+        last_state_fname = max(states)
+        # Get epoch number from file name by finding all numerals
+        self.last_epoch = int(re.findall(r'\d+', last_state_fname))
+
+        checkpoint = torch.load(
+            os.path.join(self.states_dir, last_state_fname),
+            weights_only=True
+        )
+
+        self.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(
-            checkpoints[self.last_epoch]['optimizer_state_dict']
+            checkpoint['optimizer_state_dict']
         )
         return None
 
@@ -920,10 +928,10 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     if wandb_mode == 'n' and run_name is None:
         run_name = datetime.datetime.today().strftime('%Y%m%d%H%M')
     must_continue = False
-    if run_name is not None and os.path.isfile(
-                os.path.join(paths.data, run_name + '_state.tar')
+    if run_name is not None and os.path.isdir(
+                os.path.join(paths.data, run_name)
             ):
-        model = load_net(run_name)
+        model = ResNet(run_name).to(device)
         if wandb_mode == 'r':
             run_id = load_wandb_id(run_name)
             wandb.init(
@@ -946,25 +954,13 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     else:
         # If the state file doesn't exist
 
-        net_type = 'ResNet'
-
         # Things wandb will track
         lr = 3.e-5 # learning rate
         momentum = 0.5
-        activation_module = nn.ReLU
         #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
         dataset = 'ellipses.h5'
-        scaling_function = preprocessing.std_asinh
-        if net_type == 'original':
-            kernel_size = 40 
-            conv_channels = [50, 25, 10, 3, 1]
-            N_groups = 4
-            p_fc_dropout = 0.
-        elif net_type == 'ResNet':
-            n_blocks_list = [3, 8, 36, 3]
-            resblock = BottleNeck
-        else:
-            raise Exception('Unexpected `net_type`.')
+        n_blocks_list = [2, 2, 2, 2]
+        resblock = BasicResBlock
 
         # Other things
         N_out_channels = 1
@@ -978,60 +974,31 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 config={
                     "learning_rate": lr,
                     'momentum': momentum,
-                    'activation_func': activation_module,
-                    'scaling_function': scaling_function,
                     "dataset": dataset,
                     'batches': N_batches,
                     'N_fc_layers': 1,
+                    'n_blocks_list': n_blocks_list
                 }
             )
-            if net_type == 'original':
-                wandb.config.update({    
-                    'conv_channels': conv_channels,
-                    'N_groups': N_groups,
-                    'p_fc_dropout': p_fc_dropout
-                })
-            if net_type == 'ResNet':
-                wandb.config.update({
-                    'n_blocks_list': n_blocks_list
-                })
-            else:
-                raise Exception('Unexpected `net_type`.')
             run_name = wandb.run.name
-            save_wandb_id(wandb)
 
         # Define the model if we didn't rebuild one from a argument and
         # state files.
-        if net_type == 'original':
-            model = Net(
-                    activation_module,
-                    kernel_size,
-                    conv_channels,
-                    N_groups,
-                    p_fc_dropout,
-                    N_out_channels,
-                    lr,
-                    momentum,
-                    run_name,
-                    dataset,
-                    scaling_function
-                ).to(device)
-        elif net_type == 'ResNet':
-            model = ResNet(
-                    activation_module,
-                    N_out_channels,
-                    lr,
-                    momentum,
-                    run_name,
-                    resblock,
-                    n_blocks_list,
-                    dataset,
-                    scaling_function,
-                    out_channels_list=[64, 128, 256, 512],
-                ).to(device)
-        else:
-            raise Exception('Unexpected `net_type`.')
+        model = ResNet(
+                run_name,
+                N_out_channels,
+                lr,
+                momentum,
+                resblock,
+                n_blocks_list,
+                dataset,
+                out_channels_list=[64, 128, 256, 512],
+            ).to(device)
         model.save_args()
+        if wandb_mode == 'y':
+            # Must wait until after we initialize the model to save the id
+            # because the folder doesn't exist until after the model is built.
+            save_wandb_id(wandb)
 
         must_continue = True
     
