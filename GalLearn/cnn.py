@@ -958,7 +958,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         lr = 3.e-5 # learning rate
         momentum = 0.5
         #dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
-        dataset = 'ellipses_50.h5'
+        dataset = 'ellipses.h5'
         n_blocks_list = [2, 2, 2, 2]
         resblock = BasicResBlock
 
