@@ -51,6 +51,18 @@ def min_max_scale(X):
         )
     return X
 
+def min_max_scale_255(X):
+    '''
+    Min-max scale the data from 0 to 255.
+    '''
+    X = X.detach().clone()
+    for i in range(X.shape[1]):
+        X[:, i] = 255. * (
+            (X[:, i] - X[:, i].min()) 
+            / (X[:, i].max() - X[:, i].min()) 
+        )
+    return X
+
 def new_min_max_scale(X):
     '''
     Min-max scale the data from 0 to 255. Scaling is done for all galaxies at
