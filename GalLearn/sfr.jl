@@ -23,7 +23,8 @@ end
 
 
 function get_sfrs(host_ids)
-    sfrs_gals = Float64[]
+    sfr_gals = Float64[]
+    Mstar_gals = Float64[]
     for id in ProgressBars.ProgressBar(host_ids)
         id = Int(id)
         id_str = string(id)
@@ -44,17 +45,26 @@ function get_sfrs(host_ids)
             end
             sfr = sum(sfrs)
             #Printf.@printf("SFR: %.2f Msun / yr", sfr)
-            push!(sfrs_gals, sfr) 
+            push!(sfr_gals, sfr) 
+            push!(Mstar_gals, Mstar)
         end
     end
     Plots.histogram(
-        log10.(sfrs_gals),
+        log10.(sfr_gals),
         #yscale=:log10,
         ylabel="N_gal",
         xlabel="log(SFR / [Msun / yr])",
         legend=false
     )
     Plots.savefig("hist.png") 
+
+    Plots.scatter(
+        log10.(Mstar_gals),
+        log10.(sfr_gals),
+        ylabel="log(SFR / [Msun / yr])",
+        xlabel="log(Mstar / Msun)",
+    )
+    Plots.savefig("scatter.png")
 end
 
 
