@@ -4,6 +4,7 @@ import Plots
 import Printf
 import ProgressBars
 
+ENV["GKSwstype"] = "100"
 direc = "/DFS-L/DATA/cosmo/jgmoren1/FIREbox/FB15N1024/"
 
 function get_hosts()
@@ -49,6 +50,7 @@ function get_sfrs(host_ids)
             push!(Mstar_gals, Mstar)
         end
     end
+
     Plots.histogram(
         log10.(sfr_gals),
         #yscale=:log10,
@@ -63,6 +65,7 @@ function get_sfrs(host_ids)
         log10.(sfr_gals),
         ylabel="log(SFR / [Msun / yr])",
         xlabel="log(Mstar / Msun)",
+        legend=false
     )
     Plots.savefig("scatter.png")
 end
