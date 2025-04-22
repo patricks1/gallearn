@@ -4,7 +4,7 @@ using Printf
 using DataFrames
 using ProgressBars
 
-direc = "/DFS-L/DATA/cosmo/jgmoren1/FIREBox/FB15N1024/"
+direc = "/DFS-L/DATA/cosmo/jgmoren1/FIREbox/FB15N1024/"
 
 function get_N_structures(obj_num)
     obj_num = string(obj_num)
