@@ -8,16 +8,23 @@ module image_loader
     import Images
     import StatsBase
 
+    #sat_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
+    #    "ugrband_massmocks_final"
     sat_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
-        "ugrband_massmocks_final"
+        "band_ugr"
+    #host_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
+    #    "ugrband_massmocks_final"
     host_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
-        "ugrband_massmocks_final"
+        "band_ugr"
     gallearn_dir = "/export/nfs0home/pstaudt/projects/gal-learn/GalLearn"
     tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
     tgt_2d_host_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
-        "AstroPhot_Host_Sersic-Copy1.csv"
+        "AstroPhot_NewHost_bandr_Rerun_Sersic.csv"
+    # Need to use AllMeasure sattelite file because the other file only has
+    # g-band data, and we need r-band.
     tgt_2d_sat_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
-        "AstroPhot_Sate_Sersic-Copy1.csv"
+        "DataWithMockImagesWithBadExtinction/" *
+        "AstroPhot_Sate_Sersic_AllMeasure.csv"
     output_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn"
 
     function process_file(
@@ -26,7 +33,7 @@ module image_loader
                 iX,
                 X,
                 shapeXimgs,
-                obs_sorted,
+                ids_X,
                 fnames_sorted,
                 gallearn_dir,
                 all_bands,
@@ -51,7 +58,7 @@ module image_loader
                 if all_bands
                     bands = ["g", "u", "r"]
                 else
-                    bands = ["g"]
+                    bands = ["r"]
                 end
                 for (i, band) in enumerate(bands)
                     band = "band_" * band
@@ -84,7 +91,7 @@ module image_loader
                     end
                     # Make X one row smaller than we were expecting, since 
                     # we're
-                    # skipping an image and `obs_sorted` will be shorter.
+                    # skipping an image and `ids_X` will be shorter.
                     X = X[1 : end - 1, :, :, :]
                     shapeXimgs = size(X)[end - 1 : end]
                     # Go to the next projection without addint 1 to iX
@@ -93,8 +100,8 @@ module image_loader
 
                 # Save this file's position. 
                 underscores = findall(isequal('_'), fname)
-                push!(obs_sorted, fname[1 : underscores[2] - 1])
-                push!(orientations, proj)
+                push!(ids_X, fname[1 : underscores[2] - 1])
+                push!(orientations, replace(proj, "/" => ""))
                 push!(fnames_sorted, fname)
 
                 #if shapeXimgs < shape_band
@@ -157,32 +164,59 @@ module image_loader
 
     function read_2d_tgt()
         function csv_read(tgt_path)
+            # Header for host file is
+            #     galaxyID
+            #     FOV
+            #     pixel
+            #     view
+            #     band
+            #     b_a
+            #     PA
+            #     n
+            #     Re
+            #     Ie
+            # Header for the satellite file is 
+            #     galaxyID
+            #     FOV
+            #     pixel
+            #     view
+            #     band
+            #     b_a
+            #     PA
+            #     n
+            #     Re
+            #     Ie
+            #     Mstar_ahf_cat
+            #     flag
             dat = CSV.read(
                 tgt_path,
                 DataFrame,
-                header=[
-                    "galaxyID",
-                    "FOV",
-                    "pixel",
-                    "view",
-                    "band",
-                    "b_a_ave",
-                    "PA",
-                    "n",
-                    "Re",
-                    "Ie"
-                ]
+                header=1
             )
             return dat
         end
         host_dat = csv_read(tgt_2d_host_path)
         sat_dat = csv_read(tgt_2d_sat_path)
+        # Remove the Mstar_ahf_cat and flag columns from sat_dat because those
+        # columns aren't in host_dat, and we need to combine the two.
+        DataFrames.select!(sat_dat, DataFrames.Not([:Mstar_ahf_cat, :flag]))
         dat = vcat(host_dat, sat_dat)
 
         dat.galaxyID .= "object_" .* string.(dat.galaxyID)
         DataFrames.rename!(dat, :galaxyID => :Simulation)
-        xydat = dat[dat.view .== "projection_xy", :]
-        return xydat 
+
+        dat = dat[dat.band .== "band_r", :]
+
+        # I had originally removed all but the xy projection to simplify things
+        # but I either forgot to go back and fix this or didn't realize that
+        # this made it so the CNN would try to fit the other 2 projections to
+        # the xy axis ratio. This may be why the network was performing poorly,
+        # or at least why it performed worse when I added more data. However, I
+        # can't remember if the performance got worse when I added sattelites
+        # or projections.
+        #dat = dat[dat.view .== "projection_xy", :]
+
+        return dat
     end
 
     function read_3d_tgt()
@@ -275,7 +309,7 @@ module image_loader
         N_proj = 3 # Number of projections
         global X = zeros(Nfiles * 3, Nbands, res, res) 
         shapeXimgs = size(X)[end - 1 : end]
-        obs_sorted = String[]
+        ids_X = String[]
         fnames_sorted = String[]
         orientations = String[]
 
@@ -290,7 +324,7 @@ module image_loader
                 iX,
                 X,
                 shapeXimgs,
-                obs_sorted,
+                ids_X,
                 fnames_sorted,
                 gallearn_dir,
                 all_bands,
@@ -311,31 +345,36 @@ module image_loader
                 (logX .- minimum(logX)) ./ (maximum(logX) .- minimum(logX))
             )
         end
-        return obs_sorted, X, fnames_sorted, ys
+
+        id_mask = falses(length(ids_X), size(ys)[1])
+        orientation_mask = copy(id_mask)
+        for i in 1:length(ids_X)
+            id_mask[i, :] .= ys[!, "Simulation"] .== ids_X[i]
+            orientation_mask .= ys[!, "view"] .== orientations[1]
+        end
+        
+        mask = id_mask .& orientation_mask
+        indices = findfirst.(eachrow(mask))
+        ys = ys[indices, :]
+
+        return ids_X, X, fnames_sorted, ys, orientations, indices
     end
 
     function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
-        obs_sorted, X, files, ys = load_images(
+        ids_X, X, files, y_df = load_images(
             Nfiles=Nfiles,
             res=res,
             tgt_type=tgt_type
         )
 
-        indices = [
-            findfirst(x -> x == val, ys.Simulation) for val in obs_sorted
-        ]
-        ys_sorted = ys[
-            indices,
-            :
-        ]
 
         if tgt_type == "3d"
-            ys_sorted = Array(ys_sorted[:, ["b/a", "c/a"]])
+            ys = Array(y_df[:, ["b/a", "c/a"]])
         elseif tgt_type == "2d"
-            ys_sorted = Array(ys_sorted[:, "b_a_ave"])
-            println("`ys` type: " * string(typeof(ys_sorted)))
-            ys_sorted = reshape(ys_sorted, (size(ys_sorted)..., 1))
-            println("`ys` shape: " * string(size(ys_sorted)))
+            ys = Array(y_df[:, "b_a_ave"])
+            println("`ys` type: " * string(typeof(ys)))
+            ys = reshape(ys, (size(ys)..., 1))
+            println("`ys` shape: " * string(size(ys)))
         else
             throw(ArgumentError("`tgt_type` should be \"2d\" or \"3d\"."))
         end
@@ -361,9 +400,9 @@ module image_loader
             h5open(joinpath(output_dir, fname), "w") do f
                 for (label, data) in [
                             ["X", X],
-                            ["obs_sorted", obs_sorted],
+                            ["obs_sorted", ids_X],
                             ["file_names", files],
-                            ["ys_sorted", ys_sorted]
+                            ["ys_sorted", ys]
                         ]
                     println(
                         "Trying to save " 
@@ -375,7 +414,7 @@ module image_loader
             end
         end
 
-        return obs_sorted, ys, ys_sorted, X, files
+        return ids_X, y_df, ys, X, files
     end
 
 end # module image_loader
