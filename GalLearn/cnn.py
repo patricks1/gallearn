@@ -282,7 +282,7 @@ class ResNet(nn.Module):
                 n_blocks_list=None,
                 dataset=None,
                 out_channels_list=[64, 128, 256, 512],
-                N_img_channels=1
+                N_img_channels=None
             ):
         '''
         Adapted from https://github.com/freshtechyy/resnet.git
@@ -323,6 +323,7 @@ class ResNet(nn.Module):
                     or resblock is not None
                     or n_blocks_list is not None
                     or dataset is not None
+                    or N_img_channels is not None
                 ):
             raise Exception(
                 'Run already exists but the user specified one or more'
@@ -994,6 +995,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 n_blocks_list,
                 dataset,
                 out_channels_list=[64, 128, 256, 512],
+                N_img_channels=3
             ).to(device)
         model.save_args()
         if wandb_mode == 'y':

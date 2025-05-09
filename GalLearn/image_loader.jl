@@ -226,7 +226,7 @@ end
 
 function read_sfr_tgt()
     y_df = CSV.read(joinpath(tgt_sfr_dir, "sfrs.csv"), DataFrame)
-    y_df.galaxyID .= "object_" .* string.(y_df.id)
+    y_df.id .= "object_" .* string.(y_df.id)
     DataFrames.rename!(y_df, :id => :Simulation)
     return y_df
 end
