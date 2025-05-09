@@ -955,12 +955,12 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         # If the state file doesn't exist
 
         # Things wandb will track
-        lr = 3.e-5 # learning rate
+        lr = 3.e-4 # learning rate
         momentum = 0.5
         dataset = 'gallearn_data_256x256_3proj_wsat_2d_tgt.h5'
         #dataset = 'ellipses.h5'
         n_blocks_list = [2, 2, 2, 2]
-        resblock = BasicResBlock
+        resblock = BasicResBlock 
 
         # Other things
         N_out_channels = 1
@@ -1087,7 +1087,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 'learning rate': model.optimizer.param_groups[0]['lr']
             })
         model.save_state(epoch, train_loss, test_loss)
-        scheduler.step(train_loss)
+        #scheduler.step(train_loss)
 
     return model 
 
