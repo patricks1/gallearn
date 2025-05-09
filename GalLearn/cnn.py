@@ -928,6 +928,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     if wandb_mode == 'n' and run_name is None:
         run_name = datetime.datetime.today().strftime('%Y%m%d%H%M')
     must_continue = False
+    project = 'sfr_gallearn'
     if run_name is not None and os.path.isdir(
                 os.path.join(paths.data, run_name)
             ):
@@ -935,7 +936,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         if wandb_mode == 'r':
             run_id = load_wandb_id(run_name)
             wandb.init(
-                project='sfr_gallearn',
+                project=project,
                 id=run_id,
                 resume='must'
             )
@@ -968,7 +969,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         if wandb_mode == 'y':
             wandb.init(
                 # Set the wandb project where this run will be logged.
-                project="2d_gallearn",
+                project=project,
 
                 # Track hyperparameters and run metadata.
                 config={

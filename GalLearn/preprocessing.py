@@ -15,6 +15,8 @@ def load_data(fname):
         X = torch.FloatTensor(np.array(f['X'])).permute(3, 2, 0, 1)
         obs_sorted = np.array(f['obs_sorted'], dtype=str)
         file_names = np.array(f['file_names'], dtype=str)
+        ys_sorted = torch.FloatTensor(np.array(f['ys_sorted']))
+        print(ys_sorted)
         ys_sorted = torch.FloatTensor(np.array(f['ys_sorted'])).transpose(1, 0)
     d = {
         'X': X,

@@ -226,6 +226,7 @@ end
 
 function read_sfr_tgt()
     y_df = CSV.read(joinpath(tgt_sfr_dir, "sfrs.csv"), DataFrame)
+    y_df.galaxyID .= "object_" .* string.(y_df.id)
     DataFrames.rename!(y_df, :id => :Simulation)
     return y_df
 end
@@ -269,10 +270,6 @@ function load_images(
         Nbands = 1
     elseif tgt_type == "sfr"
         y_df = read_sfr_tgt()
-        # Change simulation id data from just the integer to `"object_ " * id`
-        DataFrames.transform!(y_df, "Simulation" => DataFrames.ByRow(
-                x -> "object_" * string(x)
-            ) => "Simulation")
         all_bands= true
         Nbands = 3
     else
@@ -399,6 +396,7 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
         println("`ys` shape: " * string(size(ys)))
     elseif tgt_type == "sfr"
         ys = Array(y_df[:, "sfr"])
+        ys = reshape(ys, (size(ys)..., 1))
     else
         throw(ArgumentError(
             "`tgt_type` should be \"2d\", \"3d\", or \"sfr\"."
