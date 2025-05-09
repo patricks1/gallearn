@@ -22,6 +22,17 @@ function get_hosts()
     return host_ids
 end
 
+function get_both()
+    fname = direc * "global_sample_data/global_sample_data_snapshot_1200.hdf5"
+    grp_ids, gal_ids = HDF5.h5open(fname) do file
+        gal_ids = read(file, "galaxyID")
+        return gal_ids
+    end
+
+    println(String("N hosts and satellites: $(length(gal_ids))"))
+
+    return gal_ids
+end
 
 function get_sfrs(host_ids)
     sfr_gals = Float64[]
@@ -70,6 +81,5 @@ function get_sfrs(host_ids)
     Plots.savefig("scatter.png")
 end
 
-
-host_ids = get_hosts()
-get_sfrs(host_ids)
+ids = get_both()
+get_sfrs(ids)

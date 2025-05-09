@@ -20,7 +20,6 @@ function get_hosts()
     return host_ids
 end
 
-
 function test(host_ids)
     id = Int(host_ids[2])
     id_str = string(id)
@@ -59,7 +58,6 @@ function test(host_ids)
     sfr_fr_m = (Mstar - last_Mstar) / (snap_time - last_snap_time) / 1.e9
     Printf.@printf("SFR from mass: %.2f Msun / yr\n", sfr_fr_m)
 end
-
 
 host_ids = get_hosts()
 test(host_ids)
