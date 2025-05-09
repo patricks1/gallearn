@@ -262,23 +262,24 @@ module image_loader
         is_bad = [any(occursin(baddy, f) for baddy in baddies) for f in files]
 
         if tgt_type == "3d"
-            ys = read_3d_tgt()
+            y_df = read_3d_tgt()
             all_bands = true
         elseif tgt_type == "2d"
-            ys = read_2d_tgt()
+            y_df = read_2d_tgt()
             all_bands = false
         else
             throw(ArgumentError("`tgt_type` should be \"2d\" or \"3d\"."))
         end
         
-        # For every file name, create a mask the size of ys.Simulation where a 
+        # For every file name, create a mask the size of y_df.Simulation where 
+        # a 
         # `true`
         # marks the row (if any) where `obj * "_"`
         # occurs in that file name. 
         # If any row in that mask is true (although there should be at most
         # one), the given file is marked with a `true`.
         in_tgt = [
-            any(occursin(obj * "_", f) for obj in ys.Simulation) 
+            any(occursin(obj * "_", f) for obj in y_df.Simulation) 
             for f in files
         ]
 
@@ -346,32 +347,37 @@ module image_loader
             )
         end
 
-        id_mask = falses(length(ids_X), size(ys)[1])
+        id_mask = falses(length(ids_X), size(y_df)[1])
         orientation_mask = copy(id_mask)
         for i in 1:length(ids_X)
-            id_mask[i, :] .= ys[!, "Simulation"] .== ids_X[i]
-            orientation_mask .= ys[!, "view"] .== orientations[1]
+            id_mask[i, :] .= y_df[!, "Simulation"] .== ids_X[i]
+            orientation_mask[i, :] .= y_df[!, "view"] .== orientations[i]
         end
         
         mask = id_mask .& orientation_mask
+        # Ensure there's only one match for every Xi.
+        @assert all(sum(mask[i, :]) == 1 for i in 1:size(mask, 1))
         indices = findfirst.(eachrow(mask))
-        ys = ys[indices, :]
+        y_df = y_df[indices, :]
+        # Ensure the orientations match between X and y_df.
+        @assert all(orientations .== y_df[:, "view"])
+        # Ensure the galaxies match between X and y_df
+        @assert all(ids_X .== y_df[:, "Simulation"])
 
-        return ids_X, X, fnames_sorted, ys, orientations, indices
+        return ids_X, X, fnames_sorted, y_df, orientations, mask
     end
 
     function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
-        ids_X, X, files, y_df = load_images(
+        ids_X, X, files, y_df, orientations_X = load_images(
             Nfiles=Nfiles,
             res=res,
             tgt_type=tgt_type
         )
 
-
         if tgt_type == "3d"
             ys = Array(y_df[:, ["b/a", "c/a"]])
         elseif tgt_type == "2d"
-            ys = Array(y_df[:, "b_a_ave"])
+            ys = Array(y_df[:, "b_a"])
             println("`ys` type: " * string(typeof(ys)))
             ys = reshape(ys, (size(ys)..., 1))
             println("`ys` shape: " * string(size(ys)))
@@ -414,7 +420,7 @@ module image_loader
             end
         end
 
-        return ids_X, y_df, ys, X, files
+        return ids_X, y_df, ys, X, files, orientations_X
     end
 
 end # module image_loader
