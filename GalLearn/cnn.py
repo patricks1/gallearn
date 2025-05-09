@@ -1087,7 +1087,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 'learning rate': model.optimizer.param_groups[0]['lr']
             })
         model.save_state(epoch, train_loss, test_loss)
-        scheduler.step(train_loss)
+        #scheduler.step(train_loss)
 
     return model 
 
