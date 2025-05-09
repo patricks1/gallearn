@@ -18,6 +18,7 @@ host_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
     "band_ugr"
 gallearn_dir = "/export/nfs0home/pstaudt/projects/gal-learn/GalLearn"
 tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
+tgt_sfr_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/"
 tgt_2d_host_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
     "AstroPhot_NewHost_bandr_Rerun_Sersic.csv"
 # Need to use AllMeasure sattelite file because the other file only has
@@ -223,6 +224,12 @@ function read_3d_tgt()
     return ys
 end
 
+function read_sfr_tgt()
+    y_df = CSV.read(joinpath(tgt_sfr_dir, "sfrs.csv"), DataFrame)
+    DataFrames.rename!(y_df, :id => :Simulation)
+    return y_df
+end
+
 function load_images(
             ; Nfiles=nothing,
             logandscale=false,
@@ -260,8 +267,18 @@ function load_images(
         y_df = read_2d_tgt()
         all_bands = false
         Nbands = 1
+    elseif tgt_type == "sfr"
+        y_df = read_sfr_tgt()
+        # Change simulation id data from just the integer to `"object_ " * id`
+        DataFrames.transform!(y_df, "Simulation" => DataFrames.ByRow(
+                x -> "object_" * string(x)
+            ) => "Simulation")
+        all_bands= true
+        Nbands = 3
     else
-        throw(ArgumentError("`tgt_type` should be \"2d\" or \"3d\"."))
+        throw(ArgumentError(
+            "`tgt_type` should be \"2d\", \"3d\", or \"sfr\"."
+        ))
     end
     
     # For every file name, create a mask the size of y_df.Simulation where 
@@ -333,20 +350,33 @@ function load_images(
         )
     end
 
-    id_mask = falses(length(ids_X), size(y_df)[1])
-    orientation_mask = copy(id_mask)
-    for i in 1:length(ids_X)
-        id_mask[i, :] .= y_df[!, "Simulation"] .== ids_X[i]
-        orientation_mask[i, :] .= y_df[!, "view"] .== orientations[i]
+    if tgt_type in ["2d", "3d"]
+        id_mask = falses(length(ids_X), size(y_df)[1])
+        orientation_mask = copy(id_mask)
+        for i in 1:length(ids_X)
+            id_mask[i, :] .= y_df[!, "Simulation"] .== ids_X[i]
+            orientation_mask[i, :] .= y_df[!, "view"] .== orientations[i]
+        end
+        mask = id_mask .& orientation_mask
+    elseif tgt_type == "sfr"
+        mask = falses(length(ids_X), size(y_df)[1])
+        for i in 1:length(ids_X)
+            mask[i, :] .= y_df[!, "Simulation"] .== ids_X[i]
+        end
+    else
+        throw(ArgumentError(
+            "`tgt_type` should be \"2d\", \"3d\", or \"sfr\"."
+        ))
     end
-    
-    mask = id_mask .& orientation_mask
+
     # Ensure there's only one match for every Xi.
     @assert all(sum(mask[i, :]) == 1 for i in 1:size(mask, 1))
     indices = findfirst.(eachrow(mask))
     y_df = y_df[indices, :]
-    # Ensure the orientations match between X and y_df.
-    @assert all(orientations .== y_df[:, "view"])
+    if tgt_type in ["2d", "3d"]
+        # Ensure the orientations match between X and y_df.
+        @assert all(orientations .== y_df[:, "view"])
+    end
     # Ensure the galaxies match between X and y_df
     @assert all(ids_X .== y_df[:, "Simulation"])
 
@@ -367,8 +397,12 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
         println("`ys` type: " * string(typeof(ys)))
         ys = reshape(ys, (size(ys)..., 1))
         println("`ys` shape: " * string(size(ys)))
+    elseif tgt_type == "sfr"
+        ys = Array(y_df[:, "sfr"])
     else
-        throw(ArgumentError("`tgt_type` should be \"2d\" or \"3d\"."))
+        throw(ArgumentError(
+            "`tgt_type` should be \"2d\", \"3d\", or \"sfr\"."
+        ))
     end
 
     if save
@@ -384,7 +418,7 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
             fname *= "_" * string(Nfiles) * "gal_subsample"
         end
 
-        # 2d or 3d target data
+        # 2d, 3d, or sfr target data
         fname *= "_" * tgt_type * "_tgt"
 
         fname *= ".h5"

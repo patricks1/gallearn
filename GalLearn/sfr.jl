@@ -63,7 +63,6 @@ function get_sfrs(host_ids)
         id_str = string(id)
         fname = super_direc *
             "objects_1200/particles_within_Rvir_object_" * 
-            #"objects_1200/bound_particle_filters_object_" * 
             id_str * 
             ".hdf5"
         if isfile(fname)
