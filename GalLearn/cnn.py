@@ -935,7 +935,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         if wandb_mode == 'r':
             run_id = load_wandb_id(run_name)
             wandb.init(
-                project='2d_gallearn',
+                project='sfr_gallearn',
                 id=run_id,
                 resume='must'
             )
