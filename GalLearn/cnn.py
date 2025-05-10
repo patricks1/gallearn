@@ -426,6 +426,7 @@ class ResNet(nn.Module):
 
             nn.Linear(64, self.N_out_channels),
             #nn.Sigmoid()
+            nn.ReLU()
         )
 
         if self.need_to_load:
