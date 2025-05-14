@@ -278,13 +278,14 @@ function load_images(
         ))
     end
     
-    # For every file name, create a mask the size of y_df.Simulation where 
+    # For every file name, create an inner mask the size of y_df.Simulation 
+    # where 
     # a 
     # `true`
-    # marks the row (if any) where `obj * "_"`
+    # marks the simulation in y_df (if any) whose name 
     # occurs in that file name. 
-    # If any row in that mask is true (although there should be at most
-    # one), the given file is marked with a `true`.
+    # If any row in that inner mask is true (although there should be at most
+    # one), the given file is marked with a `true` in the `in_tgt` outer mask.
     in_tgt = [
         any(occursin(obj * "_", f) for obj in y_df.Simulation) 
         for f in files
@@ -404,7 +405,6 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
     end
 
     if save
-        # Resolution
         fname = "gallearn_data_" * 
             string(res) * 
             "x" * 
