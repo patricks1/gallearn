@@ -1,8 +1,8 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.11.4"
+julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "9e2c5f0fd55c796fcd0f9a8fc149463eaadd9936"
+project_hash = "9d401ed6b74fa0bc80109ad762254ed621fa8ffb"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -514,6 +514,12 @@ git-tree-sha1 = "432ae2b430a18c58eb7eca9ef8d0f2db90bc749c"
 uuid = "6a3955dd-da59-5b1f-98d4-e7296123deb5"
 version = "0.7.8"
 
+[[deps.IndexedDFs]]
+deps = ["DataFrames"]
+path = "/export/nfs0home/pstaudt/projects/IndexedDFs"
+uuid = "30d8e1a9-d5cd-4a57-ad5f-8276e63f4ed5"
+version = "0.1.0"
+
 [[deps.InlineStrings]]
 deps = ["Parsers"]
 git-tree-sha1 = "9cc2baf75c6d09f9da536ddf58eb2f29dedaf461"
@@ -871,7 +877,7 @@ version = "0.3.27+1"
 [[deps.OpenLibm_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
-version = "0.8.1+4"
+version = "0.8.5+0"
 
 [[deps.OpenMPI_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Hwloc_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "MPIPreferences", "PMIx_jll", "TOML", "Zlib_jll", "libevent_jll", "prrte_jll"]
