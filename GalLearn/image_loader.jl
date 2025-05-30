@@ -396,7 +396,7 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
         ys = reshape(ys, (size(ys)..., 1))
         println("`ys` shape: " * string(size(ys)))
     elseif tgt_type == "sfr"
-        ys = Array(y_df[:, "sfr"])
+        ys = Array(y_df[:, "ssfr"])
         ys = reshape(ys, (size(ys)..., 1))
     else
         throw(ArgumentError(

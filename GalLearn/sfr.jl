@@ -85,7 +85,9 @@ function get_both(; only_files=true)
         existing_files = readdir(direc)
         println("Comparing to expected files.")
         exists = [p in existing_files for p in potential_files]
+
         gal_ids = gal_ids[exists]
+        grp_ids = grp_ids[exists]
     end
 
     return gal_ids, grp_ids
@@ -228,8 +230,6 @@ end
 
 function compare_sats_b4_filtering()
     gal_ids, grp_ids = get_sats()
-    grp_ids = grp_ids
-    gal_ids = gal_ids
     sfr_df = get_sfrs(
         gal_ids,
         grp_ids,
@@ -240,8 +240,6 @@ end
 
 function get_all_sfrs(;save=false)
     gal_ids, grp_ids = get_both()
-    grp_ids = grp_ids[1:50]
-    gal_ids = gal_ids[1:50]
     sfr_df = get_sfrs(gal_ids, grp_ids, make_plots=true)
     if save
         CSV.write("/DFS-L/DATA/cosmo/pstaudt/gallearn/sfrs.csv", sfr_df)
