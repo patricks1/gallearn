@@ -116,7 +116,7 @@ function get_sfrs(
         id=ids,
         grp_id=grp_ids,
         sfr=Any[fill(nothing, length(ids))...],
-        sfr_unfiltered=Any[fill(nothing, length(ids))...],
+        sfr_unfiltered=Any[fill(missing, length(ids))...],
         ssfr=Any[fill(nothing, length(ids))...],
         Mstar=Any[fill(nothing, length(ids))...],
         bound_frac=Float64[fill(1., length(ids))...]
@@ -242,7 +242,7 @@ function get_all_sfrs(;save=false)
     gal_ids, grp_ids = get_both()
     sfr_df = get_sfrs(gal_ids, grp_ids, make_plots=true)
     if save
-        CSV.write("/DFS-L/DATA/cosmo/pstaudt/gallearn/sfrs.csv", sfr_df)
+        CSV.write("/DFS-L/DATA/cosmo/pstaudt/gallearn/sfrs.csv", sfr_df.df)
     end
     return sfr_df
 end
