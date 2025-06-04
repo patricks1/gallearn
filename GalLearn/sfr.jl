@@ -199,18 +199,18 @@ function get_sfrs(
 
     if make_plots
         Plots.histogram(
-            log10.(sfrs_gals),
+            idf.ssfr,
             #yscale=:log10,
             ylabel="N_gal",
-            xlabel="log(SFR / [Msun / yr])",
+            xlabel="SFR / M_stellar [yr^-1])",
             legend=false
         )
         Plots.savefig("hist.png") 
 
         Plots.scatter(
-            log10.(Mstar_gals),
-            log10.(sfrs_gals),
-            ylabel="log(SFR / [Msun / yr])",
+            log10.(idf.Mstar),
+            idf.ssfr,
+            ylabel="SFR / M_stellar [yr^-1])",
             xlabel="log(Mstar / Msun)",
             legend=false
         )
