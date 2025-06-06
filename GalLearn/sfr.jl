@@ -124,7 +124,6 @@ function get_sfrs(
     idf = IndexedDFs.IndexedDF(df, "id")
 
     sfrs_gals = Float64[]
-    Mstar_gals = Float64[]
     missing_files = Int64[]
     zero_bound = Int64[]
 
@@ -154,6 +153,10 @@ function get_sfrs(
                 snap_time = read(file, "time")
                 return sfrs, gas_masses, Mstar, snap_time, gas_ids
             end
+            if Mstar == 0.
+                deleteat!(idf, gal_id)
+                continue # Skip this galaxy.
+            end
             if grp_id != -1
                 # If the galaxy is not a host, filter for only bound particles.
                 bound_ids = get_bound_particles(gal_id)
@@ -177,7 +180,7 @@ function get_sfrs(
                     # now.
                     deleteat!(idf, gal_id)
                     push!(zero_bound, gal_id)
-                    continue # Continue to the next gal
+                    continue # Skip to the next gal.
                 end
                 idf[gal_id, "sfr_unfiltered"] = sum(sfrs)
                 sfrs = sfrs[is_bound]
@@ -186,7 +189,6 @@ function get_sfrs(
             #Printf.@printf("SFR: %.2f Msun / yr", sfr)
             idf[gal_id] = (sfr=sfr, ssfr=sfr/Mstar, Mstar=Mstar)
             push!(sfrs_gals, sfr) 
-            push!(Mstar_gals, Mstar)
         else
             if verbose
                 println("Could not find file " * fname)
