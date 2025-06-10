@@ -37,7 +37,7 @@ def std_asinh(X, stretch=1.e-5, return_distrib=False):
     import torch
     X = X.detach().clone()
     X = torch.asinh(stretch * X)
-    return std_scale(X)
+    return std_scale(X, return_distrib)
 
 def min_max_scale(X):
     '''
