@@ -14,12 +14,14 @@ def load_data(fname):
     with h5py.File(data_path, 'r') as f:
         X = torch.FloatTensor(np.array(f['X'])).permute(3, 2, 0, 1)
         obs_sorted = np.array(f['obs_sorted'], dtype=str)
+        orientations = np.array(f['orientations'], dtype=str)
         file_names = np.array(f['file_names'], dtype=str)
         ys_sorted = torch.FloatTensor(np.array(f['ys_sorted']))
         ys_sorted = torch.FloatTensor(np.array(f['ys_sorted'])).transpose(1, 0)
     d = {
         'X': X,
         'obs_sorted': obs_sorted,
+        'orientations': orientations,
         'file_names': file_names,
         'ys_sorted': ys_sorted
     }
@@ -33,11 +35,11 @@ def load_data(fname):
 
     return d
 
-def std_asinh(X, stretch=1.e-5, return_distrib=False):
+def std_asinh(X, stretch=1.e-5, return_distrib=False, means=None, stds=None):
     import torch
     X = X.detach().clone()
     X = torch.asinh(stretch * X)
-    return std_scale(X, return_distrib)
+    return std_scale(X, return_distrib, means, stds)
 
 def min_max_scale(X):
     '''
@@ -81,11 +83,13 @@ def new_min_max_scale(X):
         )
     return X
 
-def std_scale(X, return_distrib=False):
+def std_scale(X, return_distrib=False, means=None, stds=None):
     import torch
     X = X.detach().clone()
-    means = torch.zeros(X.shape[1])
-    stds = torch.zeros(X.shape[1])
+    if means is None:
+        means = torch.zeros(X.shape[1])
+    if stds is None:
+        stds = torch.zeros(X.shape[1])
     for i in range(X.shape[1]):
         std = X[:, i].std()
         mean = X[:, i].mean()

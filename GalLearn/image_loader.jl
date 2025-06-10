@@ -425,11 +425,12 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
             for (label, data) in [
                         ["X", X],
                         ["obs_sorted", ids_X],
+                        ["orientations", orientations_X],
                         ["file_names", files],
-                        ["ys_sorted", ys]
+                        ["ys_sorted", ys],
                     ]
                 println(
-                    "Trying to save " 
+                    "Saving " 
                     * label 
                     * " of type $(typeof(data))"
                 )
