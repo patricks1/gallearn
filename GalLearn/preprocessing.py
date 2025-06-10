@@ -36,12 +36,8 @@ def load_data(fname):
 def std_asinh(X, stretch=1.e-5, return_distrib=False):
     import torch
     X = X.detach().clone()
-    result = torch.asinh(stretch * X, return_distrib)
-    if return_distrib:
-        means, stds = result[1:2]
-        return std_scale(result[0]), means, stds
-    else:
-        return std_scale(X)
+    X = torch.asinh(stretch * X)
+    return std_scale(X)
 
 def min_max_scale(X):
     '''
