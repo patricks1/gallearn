@@ -1012,7 +1012,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     d = preprocessing.load_data(model.dataset)
     X = d['X'].to(device=device_str)
     X = model.scaling_function(X)[:Nfiles]
-    ys = torch.log10(d['ys_sorted'].to(device=device_str)[:Nfiles])
+    ys = d['ys_sorted'].to(device=device_str)[:Nfiles] * 1.e8
 
     N_all = len(ys) 
     print('{0:0.0f} galaxies in data'.format(N_all))

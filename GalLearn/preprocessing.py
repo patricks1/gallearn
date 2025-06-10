@@ -33,11 +33,15 @@ def load_data(fname):
 
     return d
 
-def std_asinh(X, stretch=1.e-5):
+def std_asinh(X, stretch=1.e-5, return_distrib=False):
     import torch
     X = X.detach().clone()
-    X = torch.asinh(stretch * X)
-    return std_scale(X)
+    result = torch.asinh(stretch * X, return_distrib)
+    if return_distrib:
+        means, stds = result[1:2]
+        return std_scale(result[0]), means, stds
+    else:
+        return std_scale(X)
 
 def min_max_scale(X):
     '''
@@ -81,14 +85,22 @@ def new_min_max_scale(X):
         )
     return X
 
-def std_scale(X):
+def std_scale(X, return_distrib=False):
+    import torch
     X = X.detach().clone()
+    means = torch.zeros(X.shape[1])
+    stds = torch.zeros(X.shape[1])
     for i in range(X.shape[1]):
         std = X[:, i].std()
         mean = X[:, i].mean()
         X[:, i] -= mean
         X[:, i] /= std
-    return X 
+        means[i] = mean
+        stds[i] = std
+    if return_distrib:
+        return X, means, stds
+    else:
+        return X 
 
 def log_min_max_scale(X):
     import torch
@@ -277,6 +289,34 @@ def test(save=False):
     if save:
         plt.savefig('pixel_distribs.png', dpi=200)
     plt.close()
+
+    return None
+
+def plt_ssfr():
+    import paths
+    import os
+    import torch
+    import matplotlib.pyplot as plt
+
+    d = load_data('gallearn_data_128x128_3proj_wsat_sfr_tgt.h5')
+    ssfrs = d['ys_sorted'].flatten()
+    iszero = ssfrs == 0.
+    print(len(ssfrs))
+    print(iszero.sum())
+    new_ys = torch.asinh(ssfrs * 1.e12)
+    print(new_ys.min(), new_ys.max(), torch.median(new_ys))
+    isnan = torch.isnan(ssfrs)
+    print(isnan.sum())
+    print(d['obs_sorted'][isnan])
+    
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.hist(new_ys)
+    ax.set_xlabel('$\dfrac{SFR}{M_\star}\;[10^{-8}\,\mathrm{yr}^{-1}]$')
+    ax.set_yscale('log')
+    plt.tight_layout()
+    plt.show()
 
     return None
 
