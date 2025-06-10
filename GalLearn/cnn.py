@@ -403,7 +403,7 @@ class ResNet(nn.Module):
 
         # Head
         self.head = nn.Sequential(
-            nn.Dropout1d(0.2),
+            nn.Dropout1d(0.5),
             nn.LazyLinear(1536),
             nn.BatchNorm1d(1536),
             self.activation_module(),
@@ -426,7 +426,7 @@ class ResNet(nn.Module):
 
             nn.Linear(64, self.N_out_channels),
             #nn.Sigmoid()
-            nn.ReLU()
+            #nn.ReLU()
         )
 
         if self.need_to_load:
