@@ -403,7 +403,7 @@ class ResNet(nn.Module):
 
         # Head
         self.head = nn.Sequential(
-            nn.Dropout1d(0.5),
+            nn.Dropout1d(0.2),
             nn.LazyLinear(1536),
             nn.BatchNorm1d(1536),
             self.activation_module(),
