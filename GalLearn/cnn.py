@@ -958,7 +958,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         # If the state file doesn't exist
 
         # Things wandb will track
-        lr = 3.e-6 # learning rate
+        lr = 3.e-7 # learning rate
         momentum = 0.5
         dataset = 'gallearn_data_256x256_3proj_wsat_sfr_tgt.h5'
         #dataset = 'ellipses.h5'
