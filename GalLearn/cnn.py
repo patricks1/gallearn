@@ -962,7 +962,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         momentum = 0.5
         dataset = 'gallearn_data_256x256_3proj_wsat_sfr_tgt.h5'
         #dataset = 'ellipses.h5'
-        n_blocks_list = [1,]
+        n_blocks_list = [1, 1, 1, 1]
         resblock = BasicResBlock 
 
         # Other things
