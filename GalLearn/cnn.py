@@ -921,7 +921,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         return test_loss 
 
     N_epochs = 100
-    N_batches = 80
+    N_batches = 100 
     loss_function = torch.nn.MSELoss()
 
     ###########################################################################
@@ -1021,18 +1021,25 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     N_train = N_all - N_test
 
     # Train-test split
-    indices_all = range(N_all)
-    indices_test = np.random.default_rng().choice(
-        indices_all,
-        N_test,
-        replace=False
+    idxs_train, idxs_test = torch.util.data.random_split(
+        torch.range(0, N_all - 1),
+        (N_test, N_train)
     )
-    is_train = np.ones(N_all, dtype=bool)
-    is_train[indices_test] = False
-    ys_train = ys[is_train]
-    ys_test = ys[~is_train]
-    X_train = X[is_train]
-    X_test = X[~is_train]
+    print(idxs_train.device)
+
+    #indices_all = range(N_all)
+    #indices_test = np.random.default_rng().choice(
+    #    indices_all,
+    #    N_test,
+    #    replace=False
+    #)
+    #is_train = torch.ones(N_all, dtype=bool)
+    #is_train[indices_test] = False
+
+    ys_train = ys[idxs_train]
+    ys_test = ys[idxs_test]
+    X_train = X[idxs_train]
+    X_test = X[idxs_test]
     ###########################################################################
 
     if must_continue:
