@@ -127,9 +127,6 @@ function get_sfrs(
     missing_files = Int64[]
     zero_bound = Int64[]
 
-    # Collect the indices of galaxies where there's a problem with the bound
-    # particles.
-
     for (gal_id, grp_id) in ProgressBars.ProgressBar(zip(ids, grp_ids))
         id_str = string(gal_id)
         if verbose
