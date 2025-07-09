@@ -962,7 +962,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         momentum = 0.5
         dataset = 'gallearn_data_256x256_3proj_wsat_sfr_tgt.h5'
         #dataset = 'ellipses.h5'
-        n_blocks_list = [1, 1, 1, 1]
+        n_blocks_list = [1,]
+        out_channels_list=[64,],
         resblock = BasicResBlock 
 
         # Other things
@@ -995,7 +996,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 resblock,
                 n_blocks_list,
                 dataset,
-                out_channels_list=[64, 128, 256, 512],
+                out_channels_list=out_channels_list,
                 N_img_channels=3
             ).to(device)
         model.save_args()
