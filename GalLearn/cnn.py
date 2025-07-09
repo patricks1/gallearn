@@ -1021,11 +1021,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     N_train = N_all - N_test
 
     # Train-test split
-    idxs_train, idxs_test = torch.util.data.random_split(
-        torch.range(0, N_all - 1),
-        (N_test, N_train)
-    )
-    print(idxs_train.device)
+    idxs = torch.randperm(N_all, device=device_str)
+    idxs_train, idxs_test = idxs[:N_train], idxs[N_train:]
 
     #indices_all = range(N_all)
     #indices_test = np.random.default_rng().choice(
@@ -1036,10 +1033,10 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     #is_train = torch.ones(N_all, dtype=bool)
     #is_train[indices_test] = False
 
-    ys_train = ys[idxs_train]
-    ys_test = ys[idxs_test]
-    X_train = X[idxs_train]
-    X_test = X[idxs_test]
+    ys_train = torch.index_select(ys, 0, idxs_train)
+    ys_test = torch.index_select(ys, 0, idxs_test)
+    X_train = torch.index_select(X, 0, idxs_train)
+    X_test = torch.index_select(X, 0, idxs_test)
     ###########################################################################
 
     if must_continue:
