@@ -54,7 +54,7 @@ def get_radii(d):
         index_col='id'
     )
     ids = np.char.replace(d['obs_sorted'], 'object_', '').astype(int)
-    rs = torch.tensor(df.loc[ids, 'Rvir'].values).unsqueeze(1)
+    rs = torch.tensor(df.loc[ids, 'Rvir'].values, dtype=torch.float32).unsqueeze(1)
     return rs 
 
 def save_wandb_id(wandb):
@@ -870,7 +870,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         model.train()
         sum_losses = 0.
         N_optimized = 0
-        for batch_idx, ((images, rs), target) in enumerate(train_loader):
+        for batch_idx, (images, rs, target) in enumerate(train_loader):
             model.optimizer.zero_grad()
             output = model(images.to(device))
             loss = loss_function(output, target)
@@ -912,7 +912,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         test_loss = 0
         correct = 0
         with torch.no_grad():
-            for i, ((images, rs), target) in enumerate(test_loader):
+            for i, (images, rs, target) in enumerate(test_loader):
                 output = model(images.to(device))
                 batch_loss = loss_function(output, target).item()
                 test_loss += batch_loss
@@ -977,8 +977,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         momentum = 0.5
         dataset = 'gallearn_data_256x256_3proj_wsat_sfr_tgt.h5'
         #dataset = 'ellipses.h5'
-        n_blocks_list = [1,]
-        out_channels_list=[64,],
+        n_blocks_list = [1, 1, 1, 1]
+        out_channels_list = [64, 128, 256, 512]
         resblock = BasicResBlock 
 
         # Other things
@@ -1045,8 +1045,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     ys_test = torch.index_select(ys, 0, idxs_test)
     X_train = torch.index_select(X, 0, idxs_train)
     X_test = torch.index_select(X, 0, idxs_test)
-    rs_train = torch.index_select(rs, 0, idx_train)
-    rs_test = torch.index_select(rs, 0, idx_test)
+    rs_train = torch.index_select(rs, 0, idxs_train)
+    rs_test = torch.index_select(rs, 0, idxs_test)
     ###########################################################################
 
     if must_continue:
@@ -1079,13 +1079,13 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     batch_size_train = max(1, int(N_train / N_batches))
     batch_size_test = min(N_batches, N_test)
     train_loader = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset((X_train, rs_train), ys_train),
+        torch.utils.data.TensorDataset(X_train, rs_train, ys_train),
         batch_size=batch_size_train, 
         shuffle=True,
         generator=torch.Generator(device=device_str)
     )
     test_loader = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset((X_test, rs_test), ys_test),
+        torch.utils.data.TensorDataset(X_test, rs_test, ys_test),
         batch_size=batch_size_test, 
         shuffle=True,
         generator=torch.Generator(device=device_str)
