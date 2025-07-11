@@ -368,16 +368,25 @@ class ResNet(nn.Module):
         # Define architecture
         #----------------------------------------------------------------------
         # First layer
-        self.conv1 = nn.Sequential(nn.Conv2d(in_channels=N_img_channels, 
-                                             out_channels=64, kernel_size=7,
-                                             stride=2, padding=3),
-                                   nn.BatchNorm2d(64),
-                                   self.activation_module(),
-                                   nn.MaxPool2d(kernel_size=3,
-                                                stride=2, padding=1))
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=N_img_channels, 
+                out_channels=out_channels_list[0],
+                kernel_size=7,
+                stride=2,
+                padding=3
+            ),
+            nn.BatchNorm2d(out_channels_list[0]),
+            self.activation_module(),
+            nn.MaxPool2d(
+                kernel_size=3,
+                stride=2,
+                padding=1
+            )
+        )
 
         # Create four convoluiontal layers
-        in_channels = 64
+        in_channels = out_channels_list[0] 
         # For the first block of the second layer, do not downsample and use 
         # stride=1.
         self.conv2_x = self.CreateLayer(
@@ -419,11 +428,11 @@ class ResNet(nn.Module):
         # Head
         self.head = nn.Sequential(
             nn.Dropout1d(0.2),
-            nn.LazyLinear(1536),
-            nn.BatchNorm1d(1536),
+            nn.LazyLinear(2048),
+            nn.BatchNorm1d(2048),
             self.activation_module(),
 
-            nn.Linear(1536, 1024),
+            nn.Linear(2048, 1024),
             nn.BatchNorm1d(1024),
             self.activation_module(),
 
