@@ -368,16 +368,25 @@ class ResNet(nn.Module):
         # Define architecture
         #----------------------------------------------------------------------
         # First layer
-        self.conv1 = nn.Sequential(nn.Conv2d(in_channels=N_img_channels, 
-                                             out_channels=64, kernel_size=7,
-                                             stride=2, padding=3),
-                                   nn.BatchNorm2d(64),
-                                   self.activation_module(),
-                                   nn.MaxPool2d(kernel_size=3,
-                                                stride=2, padding=1))
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(
+                in_channels=N_img_channels, 
+                out_channels=out_channels_list[0],
+                kernel_size=7,
+                stride=2,
+                padding=3
+            ),
+            nn.BatchNorm2d(out_channels_list[0]),
+            self.activation_module(),
+            nn.MaxPool2d(
+                kernel_size=3,
+                stride=2,
+                padding=1
+            )
+        )
 
         # Create four convoluiontal layers
-        in_channels = 64
+        in_channels = out_channels_list[0] 
         # For the first block of the second layer, do not downsample and use 
         # stride=1.
         self.conv2_x = self.CreateLayer(
@@ -419,11 +428,11 @@ class ResNet(nn.Module):
         # Head
         self.head = nn.Sequential(
             nn.Dropout1d(0.2),
-            nn.LazyLinear(1536),
-            nn.BatchNorm1d(1536),
+            nn.LazyLinear(2048),
+            nn.BatchNorm1d(2048),
             self.activation_module(),
 
-            nn.Linear(1536, 1024),
+            nn.Linear(2048, 1024),
             nn.BatchNorm1d(1024),
             self.activation_module(),
 
@@ -458,7 +467,7 @@ class ResNet(nn.Module):
             )
         return None
 
-    def forward(self, x):
+    def forward(self, x, rs):
         """
         Args: 
             x: input image
@@ -474,6 +483,7 @@ class ResNet(nn.Module):
         # Head
         x = self.avgpool(x)
         x = x.flatten(start_dim=1)
+        x = torch.cat((x, rs), dim=1)
         x = self.head(x)
 
         return x
@@ -872,7 +882,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         N_optimized = 0
         for batch_idx, (images, rs, target) in enumerate(train_loader):
             model.optimizer.zero_grad()
-            output = model(images.to(device))
+            output = model(images.to(device), rs.to(device))
             loss = loss_function(output, target)
             loss.backward()
             model.optimizer.step()
@@ -913,7 +923,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         correct = 0
         with torch.no_grad():
             for i, (images, rs, target) in enumerate(test_loader):
-                output = model(images.to(device))
+                output = model(images.to(device), rs.to(device))
                 batch_loss = loss_function(output, target).item()
                 test_loss += batch_loss
 
@@ -978,7 +988,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         dataset = 'gallearn_data_256x256_3proj_wsat_sfr_tgt.h5'
         #dataset = 'ellipses.h5'
         n_blocks_list = [1, 1, 1, 1]
-        out_channels_list = [64, 128, 256, 512]
+        out_channels_list = [32, 64, 128, 256]
         resblock = BasicResBlock 
 
         # Other things
@@ -1050,7 +1060,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     ###########################################################################
 
     if must_continue:
-        model(X[:2]) # Run a dummy fwd pass to initialize any lazy layers.
+        model(X[:2], rs[:2]) # Run a dummy fwd pass to initialize any lazy layers.
         model.init_optimizer()
         model.apply(weights_init) # Init model weights.
     
