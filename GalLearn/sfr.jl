@@ -106,6 +106,69 @@ function get_bound_particles(id)
     return particle_ids
 end
 
+function summarize_gals(;save=false)
+    ids, grp_ids = get_both()
+    summary_fields = String[]
+
+    df = DataFrames.DataFrame(
+        id=ids,
+        grp_id=grp_ids,
+    )
+    idf = IndexedDFs.IndexedDF(df, "id")
+
+
+    for (i, (gal_id, grp_id)) in ProgressBars.ProgressBar(
+                enumerate(zip(ids, grp_ids))
+            )
+        id_str = string(gal_id)
+        fname = super_direc *
+            "objects_1200/particles_within_Rvir_object_" * 
+            id_str * 
+            ".hdf5"
+        if isfile(fname)
+            h5open(
+                        fname, 
+                        "r"
+                    ) do file
+                # Use the first file to determine which data fields summarize
+                # the galaxy as a whole as opposed to being an array of
+                # particle values.
+                if i == 1
+                    all_fields = keys(file)
+                    for key in all_fields
+                        if read(file, key) isa Number
+                            push!(summary_fields, key)
+                            # Make the col for the df:
+                            idf[:, key] = Any[fill(nothing, length(ids))...] 
+                            # Add this gal's value to the col:
+                            idf[gal_id, key] = read(file, key)      
+                        end
+                    end
+                else
+                    for key in summary_fields
+                        idf[gal_id, key] = read(file, key)      
+                    end
+                end
+            end
+        else
+            if verbose
+                println("Could not find file " * fname)
+            end
+            # Drop the galaxy
+            deleteat!(idf, gal_id)
+        end
+    end
+    
+    if save
+        CSV.write(
+            "/DFS-L/DATA/cosmo/pstaudt/gallearn/firebox_summary_stats.csv",
+            idf.df 
+        )
+    end
+    
+    return idf
+end
+
 function get_sfrs(
             ids,
             grp_ids;

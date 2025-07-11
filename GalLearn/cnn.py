@@ -42,6 +42,21 @@ def load_fr_julia(Nfiles):
 
     return X, ys
 
+def get_radii(d):
+    import h5py
+    import os
+    import paths
+    import numpy as np
+    import pandas as pd
+
+    df = pd.read_csv(
+        os.path.join(paths.data, 'firebox_summary_stats.csv'),
+        index_col='id'
+    )
+    ids = np.char.replace(d['obs_sorted'], 'object_', '').astype(int)
+    rs = torch.tensor(df.loc[ids, 'Rvir'].values).unsqueeze(1)
+    return rs 
+
 def save_wandb_id(wandb):
     import paths
     import os
@@ -855,16 +870,16 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         model.train()
         sum_losses = 0.
         N_optimized = 0
-        for batch_idx, (data, target) in enumerate(train_loader):
+        for batch_idx, ((images, rs), target) in enumerate(train_loader):
             model.optimizer.zero_grad()
-            output = model(data.to(device))
+            output = model(images.to(device))
             loss = loss_function(output, target)
             loss.backward()
             model.optimizer.step()
 
             # Store results
             sum_losses += loss
-            N_optimized += len(data)
+            N_optimized += len(images)
 
             #if batch_idx % 5 == 0:
             if True:
@@ -897,8 +912,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         test_loss = 0
         correct = 0
         with torch.no_grad():
-            for i, (data, target) in enumerate(test_loader):
-                output = model(data.to(device))
+            for i, ((images, rs), target) in enumerate(test_loader):
+                output = model(images.to(device))
                 batch_loss = loss_function(output, target).item()
                 test_loss += batch_loss
 
@@ -1015,6 +1030,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     X = model.scaling_function(X)[:Nfiles]
     ys = d['ys_sorted'].to(device=device_str)[:Nfiles]
     ys, means, stds = preprocessing.std_asinh(ys, 1.e11, return_distrib=True)
+    rs = get_radii(d).to(device=device_str)
 
     N_all = len(ys) 
     print('{0:0.0f} galaxies in data'.format(N_all))
@@ -1025,19 +1041,12 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     idxs = torch.randperm(N_all, device=device_str)
     idxs_train, idxs_test = idxs[:N_train], idxs[N_train:]
 
-    #indices_all = range(N_all)
-    #indices_test = np.random.default_rng().choice(
-    #    indices_all,
-    #    N_test,
-    #    replace=False
-    #)
-    #is_train = torch.ones(N_all, dtype=bool)
-    #is_train[indices_test] = False
-
     ys_train = torch.index_select(ys, 0, idxs_train)
     ys_test = torch.index_select(ys, 0, idxs_test)
     X_train = torch.index_select(X, 0, idxs_train)
     X_test = torch.index_select(X, 0, idxs_test)
+    rs_train = torch.index_select(rs, 0, idx_train)
+    rs_test = torch.index_select(rs, 0, idx_test)
     ###########################################################################
 
     if must_continue:
@@ -1070,13 +1079,13 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     batch_size_train = max(1, int(N_train / N_batches))
     batch_size_test = min(N_batches, N_test)
     train_loader = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset(X_train, ys_train),
+        torch.utils.data.TensorDataset((X_train, rs_train), ys_train),
         batch_size=batch_size_train, 
         shuffle=True,
         generator=torch.Generator(device=device_str)
     )
     test_loader = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset(X_test, ys_test),
+        torch.utils.data.TensorDataset((X_test, rs_test), ys_test),
         batch_size=batch_size_test, 
         shuffle=True,
         generator=torch.Generator(device=device_str)
