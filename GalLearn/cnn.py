@@ -50,18 +50,35 @@ def get_radii(d):
     import pandas as pd
 
     direc = '/DFS-L/DATA/cosmo/kleinca/data'
-    df_host = pd.read_csv(
+    df_Re_host = pd.read_csv(
         os.path.join(direc, 'AstroPhot_NewHost_bandr_Rerun_Sersic.csv'),
     )
-    df_sat = pd.read_csv(os.path.join(
+    df_Re_sat = pd.read_csv(os.path.join(
         direc, 
         "DataWithMockImagesWithBadExtinction",
         "AstroPhot_Sate_Sersic_AllMeasure.csv"
     ))
-    df = pd.concat([df_host, df_sat], axis=0)
+    df_Re = pd.concat([df_Re_host, df_Re_sat], axis=0)
 
-    ids = np.char.replace(d['obs_sorted'], 'object_', '').astype(int)
-    rs = torch.tensor(df.loc[ids, 'Rvir'].values, dtype=torch.float32).unsqueeze(1)
+    ids_X = np.char.replace(
+        d['obs_sorted'].astype(str),
+        'object_',
+        ''
+    ).astype(int)
+    df_X = pd.DataFrame({'id': ids_X, 'orientation': d['orientations']})
+
+    df = df_X.merge(
+        df_Re,
+        left_on=['id', 'orientation'],
+        right_on=['galaxyID', 'view'],
+        how='left'
+    )
+
+    rs = torch.tensor(
+        df['Re'].values,
+        dtype=torch.float32
+    ).unsqueeze(1)
+
     return rs 
 
 def save_wandb_id(wandb):
