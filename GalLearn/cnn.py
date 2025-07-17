@@ -49,12 +49,12 @@ def get_radii(d):
     import numpy as np
     import pandas as pd
 
-    direc = '/DFS-L/DATA/cosmo/kleinca/data'
-    df_Re_host = pd.read_csv(
-        os.path.join(direc, 'AstroPhot_NewHost_bandr_Rerun_Sersic.csv'),
-    )
+    df_Re_host = pd.read_csv(os.path.join(
+        paths.klein_data,
+        'AstroPhot_NewHost_bandr_Rerun_Sersic.csv'
+    ))
     df_Re_sat = pd.read_csv(os.path.join(
-        direc, 
+        paths.klein_data, 
         "DataWithMockImagesWithBadExtinction",
         "AstroPhot_Sate_Sersic_AllMeasure.csv"
     ))
