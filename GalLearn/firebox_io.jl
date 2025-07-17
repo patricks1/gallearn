@@ -290,6 +290,33 @@ function get_sfrs(
     return idf
 end
 
+function get_avg_sfr(ids, grp_ids)
+    df = DataFrames.DataFrame(
+        id=ids,
+        grp_id=grp_ids,
+        sfr=Any[fill(nothing, length(ids))...],
+        sfr_unfiltered=Any[fill(missing, length(ids))...],
+        ssfr=Any[fill(nothing, length(ids))...],
+        Mstar=Any[fill(nothing, length(ids))...],
+        bound_frac=Float64[fill(1., length(ids))...]
+    )
+    idf = IndexedDFs.IndexedDF(df, "id")
+
+    for (gal_id, grp_id) in ProgressBars.ProgressBar(zip(ids[1], grp_ids[1]))
+        id_str = string(gal_id)
+        path = joinpath(
+            super_direc,
+            "objects_1200",
+            "particles_within_Rvir_object_" * id_str * ".hdf5"
+        )
+        if isfile(path)
+            h5open(path, "r") do file
+                println(keys(file)) 
+            end
+        end
+    end
+end
+
 function compare_sats_b4_filtering()
     gal_ids, grp_ids = get_sats()
     sfr_df = get_sfrs(
