@@ -1,4 +1,4 @@
-module sfr
+module firebox_io 
 
 using HDF5
 import PyCall
@@ -290,7 +290,17 @@ function get_sfrs(
     return idf
 end
 
-function get_avg_sfr(ids, grp_ids)
+function get_avg_sfrs(ids, grp_ids)
+    uci = PyCall.pyimport("UCI_tools")    
+    cosmo = PyCall.pyimport("astropy.cosmology")
+    astropy = PyCall.pyimport("astropy")
+
+    z_1Gyr = cosmo.z_at_value(
+        cosmo.Planck13.lookback_time, 
+        1. * astropy.units.Gyr
+    )[1]
+    a_1Gyr = 1. / (z_1Gyr + 1.)
+
     df = DataFrames.DataFrame(
         id=ids,
         grp_id=grp_ids,
@@ -301,8 +311,9 @@ function get_avg_sfr(ids, grp_ids)
         bound_frac=Float64[fill(1., length(ids))...]
     )
     idf = IndexedDFs.IndexedDF(df, "id")
+    stellar_scale_facs = Float64[]
 
-    for (gal_id, grp_id) in ProgressBars.ProgressBar(zip(ids[1], grp_ids[1]))
+    for (gal_id, grp_id) in ProgressBars.ProgressBar(zip(ids, grp_ids))
         id_str = string(gal_id)
         path = joinpath(
             super_direc,
@@ -311,10 +322,25 @@ function get_avg_sfr(ids, grp_ids)
         )
         if isfile(path)
             h5open(path, "r") do file
-                println(keys(file)) 
+                stellar_scale_facs_gal = read(file, "stellar_tform")
+                is_younger_1Gyr = stellar_scale_facs_gal .>= a_1Gyr
+                stellar_masses = read(file, "stellar_mass")
+                masses_younger_1Gyr = stellar_masses[is_younger_1Gyr]
+                # SFR in M_sun / yr:
+                idf[gal_id, "sfr"] = sum(masses_younger_1Gyr) / 1.e9
+                append!(stellar_scale_facs, read(file, "stellar_tform"))
             end
         end
     end
+
+    #h5open("./scale_facs.h5", "w") do f
+    #    write(f, "scale_facs", stellar_scale_facs)
+    #end
+
+    #Plots.histogram(ages, bins=40)
+    #Plots.savefig("hist.png")
+    
+    return nothing
 end
 
 function compare_sats_b4_filtering()

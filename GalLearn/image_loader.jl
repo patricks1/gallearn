@@ -359,6 +359,9 @@ function load_images(
     elseif tgt_type == "sfr"
         mask = falses(length(ids_X), size(y_df)[1])
         for i in 1:length(ids_X)
+            # For every id_X, generate a vector of booleans, corresponding to
+            # the rows in y_df where the Simulation matches id_X. (There should
+            # only be one match for each id_X.)
             mask[i, :] .= y_df[!, "Simulation"] .== ids_X[i]
         end
     else
