@@ -274,7 +274,7 @@ function load_images(
         all_bands = false
         Nbands = 1
     elseif tgt_type in ("sfr", "avg_sfr")
-        y_df = read_sfr_tgt(sfr_type)
+        y_df = read_sfr_tgt(tgt_type)
         all_bands= true
         Nbands = 3
     else
