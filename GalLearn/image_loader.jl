@@ -273,13 +273,13 @@ function load_images(
         y_df = read_2d_tgt()
         all_bands = false
         Nbands = 1
-    elseif tgt_type == ("sfr", "avg_sfr")
+    elseif tgt_type in ("sfr", "avg_sfr")
         y_df = read_sfr_tgt(sfr_type)
         all_bands= true
         Nbands = 3
     else
         throw(ArgumentError(
-            "`tgt_type` should be \"2d\", \"3d\", or \"sfr\"."
+            "`tgt_type` should be \"2d\", \"3d\", \"sfr\", or \"avg_sfr\"."
         ))
     end
     
