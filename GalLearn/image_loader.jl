@@ -224,8 +224,13 @@ function read_3d_tgt()
     return ys
 end
 
-function read_sfr_tgt()
-    y_df = CSV.read(joinpath(tgt_sfr_dir, "sfrs.csv"), DataFrame)
+function read_sfr_tgt(sfr_type)
+    if sfr_type == "sfr"
+        fname = "sfrs.csv"
+    elseif sfr_type == "avg_sfr"
+        fname = "avg_sfrs.csv"
+    end
+    y_df = CSV.read(joinpath(tgt_sfr_dir, fname), DataFrame)
     y_df.id .= "object_" .* string.(y_df.id)
     DataFrames.rename!(y_df, :id => :Simulation)
     return y_df
@@ -268,8 +273,8 @@ function load_images(
         y_df = read_2d_tgt()
         all_bands = false
         Nbands = 1
-    elseif tgt_type == "sfr"
-        y_df = read_sfr_tgt()
+    elseif tgt_type == ("sfr", "avg_sfr")
+        y_df = read_sfr_tgt(sfr_type)
         all_bands= true
         Nbands = 3
     else

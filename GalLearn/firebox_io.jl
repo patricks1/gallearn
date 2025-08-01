@@ -305,13 +305,12 @@ function get_avg_sfrs(ids, grp_ids)
         id=ids,
         grp_id=grp_ids,
         sfr=Any[fill(nothing, length(ids))...],
-        sfr_unfiltered=Any[fill(missing, length(ids))...],
+        ssfr_unfiltered=Any[fill(missing, length(ids))...],
         ssfr=Any[fill(nothing, length(ids))...],
         Mstar=Any[fill(nothing, length(ids))...],
-        bound_frac=Float64[fill(1., length(ids))...]
+        bound_star_frac=Float64[fill(1., length(ids))...],
     )
     idf = IndexedDFs.IndexedDF(df, "id")
-    stellar_scale_facs = Float64[]
 
     for (gal_id, grp_id) in ProgressBars.ProgressBar(zip(ids, grp_ids))
         id_str = string(gal_id)
@@ -321,26 +320,75 @@ function get_avg_sfrs(ids, grp_ids)
             "particles_within_Rvir_object_" * id_str * ".hdf5"
         )
         if isfile(path)
-            h5open(path, "r") do file
-                stellar_scale_facs_gal = read(file, "stellar_tform")
-                is_younger_1Gyr = stellar_scale_facs_gal .>= a_1Gyr
-                stellar_masses = read(file, "stellar_mass")
-                masses_younger_1Gyr = stellar_masses[is_younger_1Gyr]
-                # SFR in M_sun / yr:
-                idf[gal_id, "sfr"] = sum(masses_younger_1Gyr) / 1.e9
-                append!(stellar_scale_facs, read(file, "stellar_tform"))
+            file_contents = h5open(path, "r") do file
+                if !("stellar_tform" in keys(file))
+                    # If there's no scale factor of stellar formation
+                    # information for this galaxy, skip it and delete it from
+                    # the DataFrame.
+                    return -1
+                end
+                stellar_scale_facs = read(file, "stellar_tform")
+                Mstar = read(file, "Mstar")
+                # Stellar masses in units of M_s
+                stellar_masses = read(file, "stellar_mass") * 1.e10
+                stellar_ids = read(file, "stellar_id")
+                return stellar_scale_facs, Mstar, stellar_masses, stellar_ids
             end
+            if file_contents == -1
+                # If there's no scale factor of stellar formation
+                # information for this galaxy, skip it and delete it from
+                # the DataFrame.
+                deleteat!(idf, gal_id)
+                continue
+                
+            end
+            (
+                stellar_scale_facs,
+                Mstar,
+                stellar_masses,
+                stellar_ids 
+            ) = file_contents
+
+            is_younger_1Gyr = stellar_scale_facs .>= a_1Gyr
+            masses_younger_1Gyr = stellar_masses[is_younger_1Gyr]
+            # SFR in M_sun / yr:
+
+            if grp_id != -1
+                # If the galaxy is not a host, filter for only bound particles.
+                bound_ids = get_bound_particles(gal_id)
+                # Narrow down the bound IDs so the `in.` below is faster.
+                bound_stellar_ids = intersect(stellar_ids, bound_ids)
+                is_bound = in.(stellar_ids, Ref(Set(bound_stellar_ids)))
+                bound_frac = Statistics.mean(is_bound)
+                idf[gal_id, "bound_star_frac"] = bound_frac
+                if sum(is_bound) == 0 
+                    # If there's no overlap between the particle IDs in the
+                    # bound particles file and those in the Rvir file, there's
+                    # probably a problem. We should drop those galaxies for
+                    # now.
+                    deleteat!(idf, gal_id)
+                    continue # Skip to the next gal.
+                end
+                idf[gal_id, "ssfr_unfiltered"] = (
+                    sum(masses_younger_1Gyr) / 1.e9 / Mstar
+                )
+                masses_younger_1Gyr = stellar_masses[
+                    is_bound .& is_younger_1Gyr
+                ]
+            end
+
+            # SFR in units of M_solar / yr
+            sfr = sum(masses_younger_1Gyr) / 1.e9
+            Mstar_fr_particles = sum(stellar_masses)
+
+            idf[gal_id, "Mstar"] = Mstar
+            idf[gal_id, "sfr"] = sfr
+            idf[gal_id, "ssfr"] = sfr / Mstar
+
         end
     end
 
-    #h5open("./scale_facs.h5", "w") do f
-    #    write(f, "scale_facs", stellar_scale_facs)
-    #end
-
-    #Plots.histogram(ages, bins=40)
-    #Plots.savefig("hist.png")
-    
-    return nothing
+    return idf
 end
 
 function compare_sats_b4_filtering()
@@ -350,6 +398,16 @@ function compare_sats_b4_filtering()
         grp_ids,
         make_plots=false,
     )
+    return sfr_df
+end
+
+
+function get_all_avg_sfrs(;save=false)
+    gal_ids, grp_ids = get_both()
+    sfr_df = get_avg_sfrs(gal_ids, grp_ids)
+    if save
+        CSV.write("/DFS-L/DATA/cosmo/pstaudt/gallearn/avg_sfrs.csv", sfr_df.df)
+    end
     return sfr_df
 end
 
