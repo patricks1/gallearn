@@ -361,7 +361,7 @@ function load_images(
             orientation_mask[i, :] .= y_df[!, "view"] .== orientations[i]
         end
         mask = id_mask .& orientation_mask
-    elseif tgt_type == "sfr"
+    elseif tgt_type in ("sfr", "avg_sfr")
         mask = falses(length(ids_X), size(y_df)[1])
         for i in 1:length(ids_X)
             # For every id_X, generate a vector of booleans, corresponding to
@@ -371,7 +371,7 @@ function load_images(
         end
     else
         throw(ArgumentError(
-            "`tgt_type` should be \"2d\", \"3d\", or \"sfr\"."
+            "`tgt_type` should be \"2d\", \"3d\", \"sfr\", or \"avg_sfr\"."
         ))
     end
 
@@ -403,12 +403,12 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
         println("`ys` type: " * string(typeof(ys)))
         ys = reshape(ys, (size(ys)..., 1))
         println("`ys` shape: " * string(size(ys)))
-    elseif tgt_type == "sfr"
+    elseif tgt_type in ("sfr", "avg_sfr")
         ys = Array(y_df[:, "ssfr"])
         ys = reshape(ys, (size(ys)..., 1))
     else
         throw(ArgumentError(
-            "`tgt_type` should be \"2d\", \"3d\", or \"sfr\"."
+            "`tgt_type` should be \"2d\", \"3d\", \"sfr\", or\"avg_sfr\"."
         ))
     end
 
@@ -424,7 +424,7 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
             fname *= "_" * string(Nfiles) * "gal_subsample"
         end
 
-        # 2d, 3d, or sfr target data
+        # 2d, 3d, sfr, or avg_sfr target data
         fname *= "_" * tgt_type * "_tgt"
 
         fname *= ".h5"
