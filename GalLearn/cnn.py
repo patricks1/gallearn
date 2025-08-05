@@ -169,7 +169,7 @@ class Net(nn.Module):
                 i += 1
             self.backbone.add_module(
                 str(i), 
-                activation_module()
+                self.activation_module()
             )
             in_channels = out_channels
             i += 1
