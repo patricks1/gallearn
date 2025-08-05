@@ -105,7 +105,6 @@ def find_closest_N_groups(N_channels, N_groups):
 class Net(nn.Module):
     def __init__(
                 self,
-                activation_module,
                 kernel_size,
                 conv_channels,
                 N_groups,
@@ -129,7 +128,7 @@ class Net(nn.Module):
 
         self.last_epoch = 0
 
-        self.activation_module = activation_module
+        self.activation_module = nn.ReLU
         self.kernel_size = kernel_size
         self.conv_channels = conv_channels
         self.N_groups = N_groups
@@ -145,11 +144,11 @@ class Net(nn.Module):
         #----------------------------------------------------------------------
         # Define architecture
         #----------------------------------------------------------------------
-        self.conv_block = nn.Sequential()
-        in_channels = 1 
+        self.backbone = nn.Sequential()
+        in_channels = 3
         i = 0
         for out_channels in conv_channels:
-            self.conv_block.add_module(
+            self.backbone.add_module(
                 str(i),
                 nn.Conv2d(
                     in_channels=in_channels,
@@ -163,12 +162,12 @@ class Net(nn.Module):
                     out_channels, 
                     self.N_groups
                 )
-                self.conv_block.add_module(
+                self.backbone.add_module(
                     str(i),
                     nn.GroupNorm(closest_N_groups, out_channels)
                 )
                 i += 1
-            self.conv_block.add_module(
+            self.backbone.add_module(
                 str(i), 
                 activation_module()
             )
@@ -176,13 +175,9 @@ class Net(nn.Module):
             i += 1
         if p_fc_dropout is not None and p_fc_dropout > 0.:
             self.dropout = nn.Dropout1d(p_fc_dropout)
-        self.fc_block = nn.Sequential(
+        self.head = nn.Sequential(
             nn.LazyLinear(N_out_channels),
-            activation_module()
         )
-
-        # Dropout for convolutions
-        #self.drop = nn.Dropout2d()
 
         return None
 
@@ -194,29 +189,11 @@ class Net(nn.Module):
         return None
 
     def forward(self, x):
-        x = self.conv_block(x)
-        #x = self.drop(x) # 5
-        #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 6
-
-        #x = self.conv3(x)
-        #x = self.drop(x) # 5
-        #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-        #x = self.activation(x)
-
-        #x = self.conv4(x)
-        #x = self.drop(x) # 5
-        #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-        #x = self.activation(x)
-
-        #x = self.conv5(x)
-        #x = self.drop(x) # 5
-        #x = torch.nn.functional.max_pool2d(x, kernel_size=2) # 2
-        #x = self.activation(x)
-
+        x = self.backbone(x)
         x = x.flatten(start_dim=1) # 8
         if self.p_fc_dropout is not None and self.p_fc_dropout > 0.:
             x = self.dropout(x)
-        x = self.fc_block(x)
+        x = self.head(x)
         
         return x
 
@@ -1029,7 +1006,6 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                     'momentum': momentum,
                     "dataset": dataset,
                     'batches': N_batches,
-                    'N_fc_layers': 1,
                     'n_blocks_list': n_blocks_list
                 }
             )
@@ -1037,17 +1013,30 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
         # Define the model if we didn't rebuild one from a argument and
         # state files.
-        model = ResNet(
-                run_name,
-                N_out_channels,
-                lr,
-                momentum,
-                resblock,
-                n_blocks_list,
-                dataset,
-                out_channels_list=out_channels_list,
-                N_img_channels=3
-            ).to(device)
+        #model = ResNet(
+        #        run_name,
+        #        N_out_channels,
+        #        lr,
+        #        momentum,
+        #        resblock,
+        #        n_blocks_list,
+        #        dataset,
+        #        out_channels_list=out_channels_list,
+        #        N_img_channels=3
+        #    ).to(device)
+        model = Net(
+            kernel_size=3,
+            conv_channels=[8, 16, 32, 64],
+            N_groups=4,
+            p_fc_dropout=0.2,
+            N_out_channels=1,
+            lr=lr,
+            momentum=momentum,
+            run_name=run_name,
+            dataset=dataset,
+            scaling_function=preprocessing.std_asinh
+        )
+
         model.save_args()
         if wandb_mode == 'y':
             # Must wait until after we initialize the model to save the id
