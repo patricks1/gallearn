@@ -188,7 +188,7 @@ class Net(nn.Module):
             )
         return None
 
-    def forward(self, x):
+    def forward(self, x, rs):
         x = self.backbone(x)
         x = x.flatten(start_dim=1) # 8
         if self.p_fc_dropout is not None and self.p_fc_dropout > 0.:
@@ -428,7 +428,7 @@ class ResNet(nn.Module):
 
         # Head
         self.head = nn.Sequential(
-            nn.Dropout1d(0.2),
+            nn.Dropout(0.2),
             nn.LazyLinear(2048),
             nn.BatchNorm1d(2048),
             self.activation_module(),
@@ -1013,29 +1013,29 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
         # Define the model if we didn't rebuild one from a argument and
         # state files.
-        #model = ResNet(
-        #        run_name,
-        #        N_out_channels,
-        #        lr,
-        #        momentum,
-        #        resblock,
-        #        n_blocks_list,
-        #        dataset,
-        #        out_channels_list=out_channels_list,
-        #        N_img_channels=3
-        #    ).to(device)
-        model = Net(
-            kernel_size=3,
-            conv_channels=[8, 16, 32, 64],
-            N_groups=4,
-            p_fc_dropout=0.2,
-            N_out_channels=1,
-            lr=lr,
-            momentum=momentum,
-            run_name=run_name,
-            dataset=dataset,
-            scaling_function=preprocessing.std_asinh
-        )
+        model = ResNet(
+                run_name,
+                N_out_channels,
+                lr,
+                momentum,
+                resblock,
+                n_blocks_list,
+                dataset,
+                out_channels_list=out_channels_list,
+                N_img_channels=3
+            ).to(device)
+        #model = Net(
+        #    kernel_size=3,
+        #    conv_channels=[8, 16, 32, 64],
+        #    N_groups=4,
+        #    p_fc_dropout=0.2,
+        #    N_out_channels=1,
+        #    lr=lr,
+        #    momentum=momentum,
+        #    run_name=run_name,
+        #    dataset=dataset,
+        #    scaling_function=preprocessing.std_asinh
+        #)
 
         model.save_args()
         if wandb_mode == 'y':
