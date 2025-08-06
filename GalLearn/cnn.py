@@ -174,7 +174,7 @@ class Net(nn.Module):
             in_channels = out_channels
             i += 1
         if p_fc_dropout is not None and p_fc_dropout > 0.:
-            self.dropout = nn.Dropout(p_fc_dropout)
+            self.dropout = nn.Dropout(p_fc_dropout, 0.2)
         self.head = nn.Sequential(
             nn.LazyLinear(N_out_channels),
         )
@@ -192,7 +192,7 @@ class Net(nn.Module):
         x = self.backbone(x)
         x = x.flatten(start_dim=1) # 8
         if self.p_fc_dropout is not None and self.p_fc_dropout > 0.:
-            x = self.dropout(x, self.p_fc_dropout)
+            x = self.dropout(x)
         x = torch.cat((x, rs), dim=1)
         x = self.head(x)
         
@@ -1074,7 +1074,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     ###########################################################################
 
     if must_continue:
-        model(X[:2], rs[:2]) # Run a dummy fwd pass to initialize any lazy layers.
+        # Run a dummy fwd pass to initialize any lazy layers.
+        model(X[:2], rs[:2]) 
         model.init_optimizer()
         model.apply(weights_init) # Init model weights.
     
