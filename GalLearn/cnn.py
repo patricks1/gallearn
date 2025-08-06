@@ -108,7 +108,6 @@ class Net(nn.Module):
                 kernel_size,
                 conv_channels,
                 N_groups,
-                p_fc_dropout,
                 N_out_channels,
                 lr,
                 momentum,
@@ -132,7 +131,6 @@ class Net(nn.Module):
         self.kernel_size = kernel_size
         self.conv_channels = conv_channels
         self.N_groups = N_groups
-        self.p_fc_dropout = p_fc_dropout
         self.N_out_channels = N_out_channels
         self.momentum = momentum
         self.lr = lr
@@ -173,8 +171,6 @@ class Net(nn.Module):
             )
             in_channels = out_channels
             i += 1
-        if p_fc_dropout is not None and p_fc_dropout > 0.:
-            self.dropout = nn.Dropout(p_fc_dropout, 0.2)
         self.head = nn.Sequential(
             nn.LazyLinear(N_out_channels),
         )
@@ -191,8 +187,7 @@ class Net(nn.Module):
     def forward(self, x, rs):
         x = self.backbone(x)
         x = x.flatten(start_dim=1) # 8
-        if self.p_fc_dropout is not None and self.p_fc_dropout > 0.:
-            x = self.dropout(x)
+        x = nn.functional.dropout(x, 0.2)
         x = torch.cat((x, rs), dim=1)
         x = self.head(x)
         
@@ -233,7 +228,6 @@ class Net(nn.Module):
             'kernel_size': self.kernel_size,
             'conv_channels': self.conv_channels,
             'N_groups': self.N_groups,
-            'p_fc_dropout': self.p_fc_dropout,
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
             'momentum': self.momentum,
@@ -1029,7 +1023,6 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             kernel_size=3,
             conv_channels=[8, 16, 32, 64],
             N_groups=4,
-            p_fc_dropout=0.2,
             N_out_channels=1,
             lr=lr,
             momentum=momentum,
