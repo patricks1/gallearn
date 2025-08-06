@@ -174,7 +174,7 @@ class Net(nn.Module):
             in_channels = out_channels
             i += 1
         if p_fc_dropout is not None and p_fc_dropout > 0.:
-            self.dropout = nn.Dropout1d(p_fc_dropout)
+            self.dropout = nn.Dropout(p_fc_dropout)
         self.head = nn.Sequential(
             nn.LazyLinear(N_out_channels),
         )
@@ -428,7 +428,6 @@ class ResNet(nn.Module):
 
         # Head
         self.head = nn.Sequential(
-            nn.Dropout(0.2),
             nn.LazyLinear(2048),
             nn.BatchNorm1d(2048),
             self.activation_module(),
@@ -484,6 +483,7 @@ class ResNet(nn.Module):
         # Head
         x = self.avgpool(x)
         x = x.flatten(start_dim=1)
+        x = torch.nn.functional.dropout(x, 0.2)
         x = torch.cat((x, rs), dim=1)
         x = self.head(x)
 
