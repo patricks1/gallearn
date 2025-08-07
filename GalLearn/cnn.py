@@ -139,6 +139,12 @@ class Net(nn.Module):
         self.scaling_function = scaling_function
         self.features = {}
 
+        self.run_dir = os.path.join(paths.data, self.run_name)
+        self.states_dir = os.path.join(self.run_dir, 'states')
+        if not os.path.isdir(self.run_dir):
+            os.mkdir(self.run_dir)
+            os.mkdir(self.states_dir)
+
         #----------------------------------------------------------------------
         # Define architecture
         #----------------------------------------------------------------------
@@ -172,8 +178,27 @@ class Net(nn.Module):
             in_channels = out_channels
             i += 1
         self.head = nn.Sequential(
-            nn.LazyLinear(N_out_channels),
-        )
+            nn.LazyLinear(2048),
+            nn.BatchNorm1d(2048),
+            self.activation_module(),
+
+            nn.Linear(2048, 1024),
+            nn.BatchNorm1d(1024),
+            self.activation_module(),
+
+            nn.Linear(1024, 256),
+            nn.BatchNorm1d(256),
+            self.activation_module(),
+
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            self.activation_module(),
+
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            self.activation_module(),
+
+            nn.Linear(64, self.N_out_channels),
 
         return None
 
