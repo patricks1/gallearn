@@ -187,9 +187,6 @@ class Net(nn.Module):
             # Make all but the last layer of the 4-layer head
             power = np.log2(in_channels) - 1.
             out_channels = int(2. ** power)
-            print('Making head layer with {0:0.0f} output channels'.format(
-                out_channels
-            ))
             # Note that, due to late fusion, `in_channels` may be 1 less than 
             # the actual channels
             # going into the first layer of the head, but it doesn't matter; 
@@ -212,7 +209,6 @@ class Net(nn.Module):
             module_i += 1
             in_channels = out_channels
 
-        print('last layer takes in {0:0.0f} channels.'.format(in_channels))
         self.head.add_module(
             str(module_i),
             nn.Linear(in_channels, self.N_out_channels)
@@ -1024,7 +1020,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
         # Things wandb will track
         #lr = 3.e-5 # learning rate
-        lr = 3.e-2 # learning rate
+        lr = 3.e-1 # learning rate
         momentum = 0.5
         dataset = 'gallearn_data_256x256_3proj_wsat_avg_sfr_tgt.h5'
         #dataset = 'ellipses.h5'
