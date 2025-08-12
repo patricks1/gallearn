@@ -179,7 +179,7 @@ class Net(nn.Module):
             in_channels = out_channels
             i += 1
 
-        #self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
         self.head = nn.Sequential()
         module_i = 0
@@ -229,6 +229,7 @@ class Net(nn.Module):
 
     def forward(self, x, rs):
         x = self.backbone(x)
+        x = self.avgpool(x)
         x = x.flatten(start_dim=1) # 8
         x = nn.functional.dropout(x, 0.2)
         x = torch.cat((x, rs), dim=1)
