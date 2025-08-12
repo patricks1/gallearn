@@ -117,6 +117,7 @@ class Net(nn.Module):
             ):
         import paths
         import os
+        import numpy as np
 
         super(Net, self).__init__()
 
@@ -177,28 +178,44 @@ class Net(nn.Module):
             )
             in_channels = out_channels
             i += 1
-        self.head = nn.Sequential(
-            nn.LazyLinear(2048),
-            nn.BatchNorm1d(2048),
-            self.activation_module(),
 
-            nn.Linear(2048, 1024),
-            nn.BatchNorm1d(1024),
-            self.activation_module(),
+        #self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
-            nn.Linear(1024, 256),
-            nn.BatchNorm1d(256),
-            self.activation_module(),
+        self.head = nn.Sequential()
+        module_i = 0
+        for layer_i in range(3):
+            # Make all but the last layer of the 4-layer head
+            power = np.log2(in_channels) - 1.
+            out_channels = int(2. ** power)
+            print('Making head layer with {0:0.0f} output channels'.format(
+                out_channels
+            ))
+            # Note that, due to late fusion, `in_channels` may be 1 less than 
+            # the actual channels
+            # going into the first layer of the head, but it doesn't matter; 
+            # we're
+            # just using `in_channels` to step down by one power of 2.
+            self.head.add_module(
+                str(module_i), 
+                nn.LazyLinear(out_channels)
+            )
+            module_i += 1
+            self.head.add_module(
+                str(module_i),
+                nn.BatchNorm1d(out_channels)
+            )
+            module_i += 1
+            self.head.add_module(
+                str(module_i),
+                self.activation_module()
+            )
+            module_i += 1
+            in_channels = out_channels
 
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            self.activation_module(),
-
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            self.activation_module(),
-
-            nn.Linear(64, self.N_out_channels),
+        print('last layer takes in {0:0.0f} channels.'.format(in_channels))
+        self.head.add_module(
+            str(module_i),
+            nn.Linear(in_channels, self.N_out_channels)
         )
 
         return None
@@ -1005,7 +1022,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         # If the state file doesn't exist
 
         # Things wandb will track
-        lr = 3.e-5 # learning rate
+        #lr = 3.e-5 # learning rate
+        lr = 3.e-2 # learning rate
         momentum = 0.5
         dataset = 'gallearn_data_256x256_3proj_wsat_avg_sfr_tgt.h5'
         #dataset = 'ellipses.h5'
@@ -1047,7 +1065,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         #    ).to(device)
         model = Net(
             kernel_size=3,
-            conv_channels=[8, 16, 32, 64],
+            conv_channels=[4, 8, 16, 32],
             N_groups=4,
             N_out_channels=1,
             lr=lr,
