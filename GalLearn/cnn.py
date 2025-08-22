@@ -108,7 +108,6 @@ class Net(nn.Module):
                 kernel_size,
                 conv_channels,
                 N_groups,
-                p_fc_dropout,
                 N_out_channels,
                 lr,
                 momentum,
@@ -118,6 +117,7 @@ class Net(nn.Module):
             ):
         import paths
         import os
+        import numpy as np
 
         super(Net, self).__init__()
 
@@ -132,7 +132,6 @@ class Net(nn.Module):
         self.kernel_size = kernel_size
         self.conv_channels = conv_channels
         self.N_groups = N_groups
-        self.p_fc_dropout = p_fc_dropout
         self.N_out_channels = N_out_channels
         self.momentum = momentum
         self.lr = lr
@@ -140,6 +139,12 @@ class Net(nn.Module):
         self.dataset = dataset
         self.scaling_function = scaling_function
         self.features = {}
+
+        self.run_dir = os.path.join(paths.data, self.run_name)
+        self.states_dir = os.path.join(self.run_dir, 'states')
+        if not os.path.isdir(self.run_dir):
+            os.mkdir(self.run_dir)
+            os.mkdir(self.states_dir)
 
         #----------------------------------------------------------------------
         # Define architecture
@@ -169,14 +174,44 @@ class Net(nn.Module):
                 i += 1
             self.backbone.add_module(
                 str(i), 
-                activation_module()
+                self.activation_module()
             )
             in_channels = out_channels
             i += 1
-        if p_fc_dropout is not None and p_fc_dropout > 0.:
-            self.dropout = nn.Dropout1d(p_fc_dropout)
-        self.head = nn.Sequential(
-            nn.LazyLinear(N_out_channels),
+
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+
+        self.head = nn.Sequential()
+        module_i = 0
+        for layer_i in range(3):
+            # Make all but the last layer of the 4-layer head
+            power = np.log2(in_channels) - 1.
+            out_channels = int(2. ** power)
+            # Note that, due to late fusion, `in_channels` may be 1 less than 
+            # the actual channels
+            # going into the first layer of the head, but it doesn't matter; 
+            # we're
+            # just using `in_channels` to step down by one power of 2.
+            self.head.add_module(
+                str(module_i), 
+                nn.LazyLinear(out_channels)
+            )
+            module_i += 1
+            self.head.add_module(
+                str(module_i),
+                nn.BatchNorm1d(out_channels)
+            )
+            module_i += 1
+            self.head.add_module(
+                str(module_i),
+                self.activation_module()
+            )
+            module_i += 1
+            in_channels = out_channels
+
+        self.head.add_module(
+            str(module_i),
+            nn.Linear(in_channels, self.N_out_channels)
         )
 
         return None
@@ -188,11 +223,12 @@ class Net(nn.Module):
             )
         return None
 
-    def forward(self, x):
+    def forward(self, x, rs):
         x = self.backbone(x)
+        x = self.avgpool(x)
         x = x.flatten(start_dim=1) # 8
-        if self.p_fc_dropout is not None and self.p_fc_dropout > 0.:
-            x = self.dropout(x)
+        x = nn.functional.dropout(x, 0.2)
+        x = torch.cat((x, rs), dim=1)
         x = self.head(x)
         
         return x
@@ -232,7 +268,6 @@ class Net(nn.Module):
             'kernel_size': self.kernel_size,
             'conv_channels': self.conv_channels,
             'N_groups': self.N_groups,
-            'p_fc_dropout': self.p_fc_dropout,
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
             'momentum': self.momentum,
@@ -428,7 +463,6 @@ class ResNet(nn.Module):
 
         # Head
         self.head = nn.Sequential(
-            nn.Dropout1d(0.2),
             nn.LazyLinear(2048),
             nn.BatchNorm1d(2048),
             self.activation_module(),
@@ -484,6 +518,7 @@ class ResNet(nn.Module):
         # Head
         x = self.avgpool(x)
         x = x.flatten(start_dim=1)
+        x = torch.nn.functional.dropout(x, 0.2)
         x = torch.cat((x, rs), dim=1)
         x = self.head(x)
 
@@ -984,7 +1019,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         # If the state file doesn't exist
 
         # Things wandb will track
-        lr = 3.e-5 # learning rate
+        #lr = 3.e-5 # learning rate
+        lr = 1.e-3 # learning rate
         momentum = 0.5
         dataset = 'gallearn_data_256x256_3proj_wsat_avg_sfr_tgt.h5'
         #dataset = 'ellipses.h5'
@@ -1026,9 +1062,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         #    ).to(device)
         model = Net(
             kernel_size=3,
-            conv_channels=[8, 16, 32, 64],
+            conv_channels=[4, 8, 16, 32],
             N_groups=4,
-            p_fc_dropout=0.2,
             N_out_channels=1,
             lr=lr,
             momentum=momentum,
@@ -1073,7 +1108,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     ###########################################################################
 
     if must_continue:
-        model(X[:2], rs[:2]) # Run a dummy fwd pass to initialize any lazy layers.
+        # Run a dummy fwd pass to initialize any lazy layers.
+        model(X[:2], rs[:2]) 
         model.init_optimizer()
         model.apply(weights_init) # Init model weights.
     
