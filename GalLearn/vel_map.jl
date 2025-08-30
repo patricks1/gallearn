@@ -17,3 +17,5 @@ function make_vel_map_gal(id)
         end
     end
 end
+
+end # module vel_map
