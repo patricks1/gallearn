@@ -21,7 +21,7 @@ tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
 tgt_sfr_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/"
 tgt_2d_host_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
     "AstroPhot_NewHost_bandr_Rerun_Sersic.csv"
-# Need to use AllMeasure sattelite file because the other file only has
+# Need to use AllMeasure satellite file because the other file only has
 # g-band data, and we need r-band.
 tgt_2d_sat_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
     "DataWithMockImagesWithBadExtinction/" *
