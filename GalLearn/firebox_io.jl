@@ -401,7 +401,6 @@ function compare_sats_b4_filtering()
     return sfr_df
 end
 
-
 function get_all_avg_sfrs(;save=false)
     gal_ids, grp_ids = get_both()
     sfr_df = get_avg_sfrs(gal_ids, grp_ids)
