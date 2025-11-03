@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gallearn"
+dynamic = ["version"]
+authors = [
+  { name = "Patrick Staudt", email = "patrickstaudt1@gmail.com" },
+]
+description = "Code to make predictions from FIREBox with a neural network."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }  # or whatever license you’re using
+keywords = ["astrophysics", "machine learning", "FIREBox", "neural network"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+dependencies = [
+  "numpy",
+  "pandas",
+  "matplotlib",
+  "h5py",
+  "torch",
+  "torchvision",
+]
+
+[project.urls]
+Homepage = "https://github.com/patricks1/gallearn"
+
+[tool.setuptools]
+packages = ["gallearn"]
+
+[tool.setuptools.dynamic]
+version = { attr = "gallearn.__version__.__version__" }
