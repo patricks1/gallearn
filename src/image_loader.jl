@@ -7,26 +7,26 @@ using ProgressBars
 #import ImageFiltering
 import Images
 import StatsBase
+import ConfigParser
+import PyCall
+
+configer = PyCall.pyimport("__main__.myproject.config")
+config = configer.config
 
 #sat_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
 #    "ugrband_massmocks_final"
-sat_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
-    "band_ugr"
+sat_direc = config["gallearn_paths"]["sat_image_dir"]
+
 #host_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
 #    "ugrband_massmocks_final"
-host_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
-    "band_ugr"
-gallearn_dir = "/export/nfs0home/pstaudt/projects/gal-learn/GalLearn"
+host_direc = config["gallearn_paths"]["host_image_dir"]
+
+gallearn_dir = config["gallearn_paths"]["output_dir"]
 tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
 tgt_sfr_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/"
-tgt_2d_host_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
-    "AstroPhot_NewHost_bandr_Rerun_Sersic.csv"
-# Need to use AllMeasure satellite file because the other file only has
-# g-band data, and we need r-band.
-tgt_2d_sat_path = "/DFS-L/DATA/cosmo/kleinca/data/" *
-    "DataWithMockImagesWithBadExtinction/" *
-    "AstroPhot_Sate_Sersic_AllMeasure.csv"
-output_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn"
+tgt_2d_host_path = config["gallearn_paths"]["host_2d_shapes"]
+tgt_2d_sat_path = config["gallearn_paths"]["sat_2d_shapes"]
+output_dir = config["gallearn_paths"]["data_dir"]
 
 function process_file(
             fname,

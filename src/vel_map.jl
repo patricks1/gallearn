@@ -3,9 +3,9 @@ module vel_map
 import HDF5
 import PyCall
 import Plots
+import Printf
 
 ENV["GKSwstype"] = "100"
-
 
 super_dir = "/DFS-L/DATA/cosmo/jgmoren1/FIREbox/FB15N1024/"
 
@@ -63,7 +63,7 @@ function make_vel_map_gal(gal_id)
         stars_pos = hcat(
             stars["stellar_x"],
             stars["stellar_y"],
-            stars["stellar_x"]
+            stars["stellar_z"]
         )
         stars_v = hcat(
             stars["stellar_vx"],
@@ -74,7 +74,7 @@ function make_vel_map_gal(gal_id)
         gas_pos = hcat(
             gas["gas_x"],
             gas["gas_y"],
-            gas["gas_x"]
+            gas["gas_z"]
         )
         gas_v = hcat(
             gas["gas_vx"],
@@ -96,19 +96,35 @@ function make_vel_map_gal(gal_id)
             ("vel_star", stars_v),
             ("a_form_star", stars["stellar_tform"])
         ])
-        Plots.histogram(gas["gas_mass"])
-        Plots.savefig("hist.png")
+        #Plots.histogram(gas["gas_mass"])
+        #Plots.savefig("hist.png")
 
-        zs = 1. ./ stars["stellar_tform"] .- 1.
-        start = time()
-        sfts_Gyr = cosmo.Planck13.lookback_time(zs)
-        elapsed = time() - start
-        minutes = floor(elapsed / 60.)
-        seconds = elapsed - minutes ** 60.
-        print("
+        stars_rs = sqrt.(sum(abs2, stars_pos; dims=2)) |> vec
+        stars_in_fov = stars_rs .<= 34.
+        stars_pos = stars_pos[stars_in_fov, :]
+        stars_v = stars_v[stars_in_fov, :]
+
+        gas_rs = sqrt.(sum(abs2, gas_pos; dims=2)) |> vec
+        gas_in_fov = gas_rs .<= 34.
+        gas_pos = gas_pos[gas_in_fov, :]
+        gas_v = gas_v[gas_in_fov, :]
+                             
+        println("Making the velocity map.")
+        maps = uci.vel_map.plot(
+            stars_pos[:, [2, 1, 3]],
+            stars_v[:, [2, 1, 3]],
+            gas_pos[:, [2, 1, 3]],
+            gas_v[:, [2, 1, 3]],
+            "obj_1",
+            "600",
+            1,
+            1,
+            save_plot=true 
+        )
+
     end
     
-    return host_pos, stars_pos, stars_v, data, sfts_Gyr
+    return host_pos, stars_pos, stars_v, data 
 end
 
 end # module vel_map

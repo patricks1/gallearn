@@ -5,14 +5,20 @@ import math
 def load_data(fname):
     import torch
     import os
-    import paths
     import numpy as np
 
-    data_path = os.path.join(paths.data, fname)
+    from . import config
+
+    data_path = os.path.join(
+        config.config['gallearn_paths']['data_dir'],
+        fname
+    )
 
     start = time.time()
     with h5py.File(data_path, 'r') as f:
-        X = torch.FloatTensor(np.array(f['X'])).permute(3, 2, 0, 1)
+        X = f['X'][()]
+        X = torch.FloatTensor(X)
+        X = X.permute(3, 2, 0, 1)
         obs_sorted = np.array(f['obs_sorted'], dtype=str)
         orientations = np.array(f['orientations'], dtype=str)
         file_names = np.array(f['file_names'], dtype=str)
@@ -293,7 +299,6 @@ def test(save=False):
     return None
 
 def plt_ssfr():
-    import paths
     import os
     import torch
     import matplotlib.pyplot as plt
