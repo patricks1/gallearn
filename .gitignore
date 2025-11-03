@@ -1,0 +1,16 @@
+# Ignore Julia Manifest
+Manifest.toml
+
+#ignore python compile files
+*.pyc
+
+#ignore backup files
+*.bak
+
+#ignore hidden files
+.*
+
+#ignore data folder
+#data/*
+
+__pycache__
