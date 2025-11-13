@@ -1,5 +1,5 @@
 import cnn
-import preprocessing
+from . import preprocessing
 import torch
 import paths
 import os

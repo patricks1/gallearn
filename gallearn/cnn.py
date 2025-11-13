@@ -45,19 +45,17 @@ def load_fr_julia(Nfiles):
 def get_radii(d):
     import h5py
     import os
-    import paths
     import numpy as np
     import pandas as pd
 
-    df_Re_host = pd.read_csv(os.path.join(
-        paths.klein_data,
-        'AstroPhot_NewHost_bandr_Rerun_Sersic.csv'
-    ))
-    df_Re_sat = pd.read_csv(os.path.join(
-        paths.klein_data, 
-        "DataWithMockImagesWithBadExtinction",
-        "AstroPhot_Sate_Sersic_AllMeasure.csv"
-    ))
+    from . import config
+
+    df_Re_host = pd.read_csv(
+        config.config[f'{__package__}_paths']['host_2d_shapes']
+    )
+    df_Re_sat = pd.read_csv(
+        config.config[f'{__package__}_paths']['sat_2d_shapes']
+    )
     df_Re = pd.concat([df_Re_host, df_Re_sat], axis=0)
 
     ids_X = np.char.replace(
@@ -352,7 +350,7 @@ class ResNet(nn.Module):
         '''
         import paths
         import os
-        import preprocessing
+        from . import preprocessing
 
         super(ResNet, self).__init__()
 
@@ -873,7 +871,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             'User must provide a `run_name` if `wandb_mode` is \'r\' for'
             ' resume.'
         )
-    import preprocessing
+    from . import preprocessing
     import random
     import wandb
     import os

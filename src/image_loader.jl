@@ -4,13 +4,11 @@ using HDF5
 using CSV
 using DataFrames
 using ProgressBars
-#import ImageFiltering
 import Images
 import StatsBase
-import ConfigParser
 import PyCall
 
-configer = PyCall.pyimport("__main__.myproject.config")
+configer = PyCall.pyimport("gallearn.config")
 config = configer.config
 
 #sat_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
@@ -21,12 +19,12 @@ sat_direc = config["gallearn_paths"]["sat_image_dir"]
 #    "ugrband_massmocks_final"
 host_direc = config["gallearn_paths"]["host_image_dir"]
 
-gallearn_dir = config["gallearn_paths"]["output_dir"]
+gallearn_dir = config["gallearn_paths"]["data_dir"]
 tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
 tgt_sfr_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/"
 tgt_2d_host_path = config["gallearn_paths"]["host_2d_shapes"]
 tgt_2d_sat_path = config["gallearn_paths"]["sat_2d_shapes"]
-output_dir = config["gallearn_paths"]["data_dir"]
+output_dir = config["gallearn_paths"]["output_dir"]
 
 function process_file(
             fname,
@@ -104,22 +102,6 @@ function process_file(
             push!(ids_X, fname[1 : underscores[2] - 1])
             push!(orientations, replace(proj, "/" => ""))
             push!(fnames_sorted, fname)
-
-            #if shapeXimgs < shape_band
-            #    #pad = (shape_band .- shapeXimgs) ./ 2
-            #    #X = ImageFiltering.padarray(
-            #    #    X, 
-            #    #    Fill(0., (0, 0, Int(pad[1]), Int(pad[2])))
-            #    #)
-            #    X = Images.imresize(X, size(X)[1:2]..., shape_band...)
-            #elseif shape_band < shapeXimgs
-            #    #pad = (shapeXimgs .- shape_band) ./ 2
-            #    #img = ImageFiltering.padarray(
-            #    #    img,
-            #    #    Fill(0., (0, Int(pad[1]), Int(pad[2])))
-            #    #)
-            #    img = Images.imresize(img, Nbands, shapeXimgs...)
-            #end           
 
             if shapeXimgs != shape_band
                 if Nbands > 1
@@ -389,12 +371,35 @@ function load_images(
     return ids_X, X, fnames_sorted, y_df, orientations, mask
 end
 
+#function load_vmap(
+
 function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
+    uci = PyCall.pyimport("uci_tools")
     ids_X, X, files, y_df, orientations_X = load_images(
         Nfiles=Nfiles,
         res=res,
         tgt_type=tgt_type
     )
+    indices = 1:length(ids_X)
+
+    VMAP = zeros(length(idx_x), 1, res, res)
+    orientations = unique(orientations_X)
+    ids = unique(ids_x)
+    for id in ids
+        path = joinpath(
+            config["gallearn_paths"]["vmaps_dir"],
+            "object_$(id)_vmap.hdf5"
+        )
+        HDF5.h5open(path, "r") do file
+            println(keys(file)) 
+        end
+        for orientation in orientations
+            is_id = ids_X .== id
+            is_orient = orientations_X .== orientation
+            i = is_id .& is_orient
+            VMAP[i, 1, :, :] = vmap
+        end
+    end
 
     if tgt_type == "3d"
         ys = Array(y_df[:, ["b/a", "c/a"]])

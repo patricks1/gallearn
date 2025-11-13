@@ -32,7 +32,7 @@ def embeddable_image(data):
 
 def make_embedding(data):
     import umap
-    import preprocessing
+    from . import preprocessing
     import torch
 
     reducer = umap.UMAP(n_neighbors=5)
@@ -44,7 +44,7 @@ def make_embedding(data):
     return embedding
 
 def plt_umap():
-    import preprocessing
+    from . import preprocessing
 
     data = preprocessing.load_data(
         'gallearn_data_128x128_3proj_wsat_sfr_tgt.h5'
@@ -84,7 +84,7 @@ def plt_umap():
     return None
 
 def plt_interactive_umap():
-    import preprocessing
+    from . import preprocessing
     import umap
     import pandas as pd
     import numpy as np
