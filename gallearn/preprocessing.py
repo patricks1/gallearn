@@ -18,6 +18,8 @@ def load_data(fname):
     with h5py.File(data_path, 'r') as f:
         X = f['X'][()]
         X = torch.FloatTensor(X)
+        # I saved the data with Julia, which is transposed to the way Python
+        # expects, so we must permute.
         X = X.permute(3, 2, 0, 1)
         obs_sorted = np.array(f['obs_sorted'], dtype=str)
         orientations = np.array(f['orientations'], dtype=str)

@@ -1,6 +1,7 @@
 from . import (
     cnn,
     config,
+    preprocessing,
 )
 
 from .__version__ import __version__
@@ -10,4 +11,5 @@ from .__version__ import __version__
 __all__ = [
     'cnn',
     'config',
+    'preprocessing'
 ]

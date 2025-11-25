@@ -7,24 +7,25 @@ using ProgressBars
 import Images
 import StatsBase
 import PyCall
+import Plots
+import ..GalLearnConfig
 
-configer = PyCall.pyimport("gallearn.config")
-config = configer.config
+conf = GalLearnConfig.read_config()
 
 #sat_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/satellite/" *
 #    "ugrband_massmocks_final"
-sat_direc = config["gallearn_paths"]["sat_image_dir"]
+sat_direc = conf["gallearn_paths"]["sat_image_dir"]
 
 #host_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
 #    "ugrband_massmocks_final"
-host_direc = config["gallearn_paths"]["host_image_dir"]
+host_direc = conf["gallearn_paths"]["host_image_dir"]
 
-gallearn_dir = config["gallearn_paths"]["data_dir"]
+gallearn_dir = conf["gallearn_paths"]["data_dir"]
 tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
 tgt_sfr_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/"
-tgt_2d_host_path = config["gallearn_paths"]["host_2d_shapes"]
-tgt_2d_sat_path = config["gallearn_paths"]["sat_2d_shapes"]
-output_dir = config["gallearn_paths"]["output_dir"]
+tgt_2d_host_path = conf["gallearn_paths"]["host_2d_shapes"]
+tgt_2d_sat_path = conf["gallearn_paths"]["sat_2d_shapes"]
+output_dir = conf["gallearn_paths"]["output_dir"]
 
 function process_file(
             fname,
@@ -222,7 +223,7 @@ function load_images(
             ; Nfiles=nothing,
             logandscale=false,
             res=256,
-            tgt_type="3d"
+            tgt_type="2d"
         )
     host_fnames = filter(
         f -> isfile(joinpath(host_direc, f)) && endswith(f, ".hdf5"), 
@@ -322,7 +323,6 @@ function load_images(
     end
     # Get rid of the ridiculous OffsetArray indexing
     X = parent(X)
-    println("X shape: $(size(X))")
     if logandscale
         # Turn zeros into the smallest value greater than zero to avoid 
         # -Inf in
@@ -371,7 +371,19 @@ function load_images(
     return ids_X, X, fnames_sorted, y_df, orientations, mask
 end
 
-#function load_vmap(
+function load_vmap(id, res)
+    maps_dir = conf["gallearn_paths"]["vmaps_dir"]
+    path = joinpath(maps_dir, "object_$(id)_vmap.hdf5")
+    vmap = Dict{String, Dict}()
+    HDF5.h5open(path, "r") do file
+        for orientation in keys(file)
+            for data in keys(file[orientation])
+                vmap[orientation] = read(file, orientation)
+            end
+        end
+    end
+    return vmap 
+end
 
 function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
     uci = PyCall.pyimport("uci_tools")
@@ -382,24 +394,25 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
     )
     indices = 1:length(ids_X)
 
-    VMAP = zeros(length(idx_x), 1, res, res)
+    # Add in velocity map.
+    VMAP = zeros(length(ids_X), 1, res, res)
     orientations = unique(orientations_X)
-    ids = unique(ids_x)
-    for id in ids
-        path = joinpath(
-            config["gallearn_paths"]["vmaps_dir"],
-            "object_$(id)_vmap.hdf5"
-        )
-        HDF5.h5open(path, "r") do file
-            println(keys(file)) 
-        end
+    ids_set = unique(ids_X)
+    for id in ids_set
+        id_int = parse(Int, replace(id, "object_" => ""))
+        vmap = load_vmap(id_int, res)
         for orientation in orientations
             is_id = ids_X .== id
             is_orient = orientations_X .== orientation
-            i = is_id .& is_orient
-            VMAP[i, 1, :, :] = vmap
+            is_i = is_id .& is_orient
+            i = findall(is_i)
+            @assert length(i) == 1
+            i = i[1]
+            VMAP[i, 1, :, :] = vmap[orientation]["vmap"]
         end
     end
+    X  = cat(X, VMAP; dims=2)
+    println("X shape: $(size(X))")
 
     if tgt_type == "3d"
         ys = Array(y_df[:, ["b/a", "c/a"]])
@@ -422,7 +435,7 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
             string(res) * 
             "x" * 
             string(res) * 
-            "_3proj_wsat"
+            "_3proj_wsat_wvmap"
 
         # Sample type
         if Nfiles !== nothing
