@@ -80,16 +80,26 @@ def get_radii(d):
     return rs 
 
 def save_wandb_id(wandb):
-    import paths
+    from . import config
     import os
-    with open(os.path.join(paths.data, wandb.run.name, 'id.txt'), 'w') as f:
+    with open(
+            os.path.join(
+                config.config[f'{__package__}_paths']['data_dir'],
+                wandb.run.name,
+                'id.txt'),
+            'w') as f:
         f.write(wandb.run.id)
     return None
 
 def load_wandb_id(run_name):
-    import paths
+    from . import config
     import os
-    with open(os.path.join(paths.data, run_name, 'id.txt'), 'r') as f:
+    with open(
+            os.path.join(
+                config.config[f'{__package__}_paths']['data_dir'],
+                run_name,
+                'id.txt'),
+            'r') as f:
         wandb_id = f.read()
     return wandb_id
 
@@ -113,14 +123,14 @@ class Net(nn.Module):
                 dataset,
                 scaling_function
             ):
-        import paths
+        from . import config
         import os
         import numpy as np
 
         super(Net, self).__init__()
 
         self.state_path = os.path.join(
-            paths.data, 
+            config.config[f'{__package__}_paths']['data_dir'],
             run_name + '_state.tar'
         )
 
@@ -138,7 +148,7 @@ class Net(nn.Module):
         self.scaling_function = scaling_function
         self.features = {}
 
-        self.run_dir = os.path.join(paths.data, self.run_name)
+        self.run_dir = os.path.join(config.config[f'{__package__}_paths']['data_dir'], self.run_name)
         self.states_dir = os.path.join(self.run_dir, 'states')
         if not os.path.isdir(self.run_dir):
             os.mkdir(self.run_dir)
@@ -259,7 +269,7 @@ class Net(nn.Module):
 
     def save_args(self):
         import pickle
-        import paths
+        from . import config
         import os
         args = {
             'activation_module': self.activation_module,
@@ -273,7 +283,7 @@ class Net(nn.Module):
             'dataset': self.dataset,
             'scaling_function': self.scaling_function
         }
-        with open(os.path.join(paths.data, self.run_name + '_args' + '.pkl'), 
+        with open(os.path.join(config.config[f'{__package__}_paths']['data_dir'], self.run_name + '_args' + '.pkl'), 
                   'wb') as f:
             pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
         return None
@@ -348,7 +358,7 @@ class ResNet(nn.Module):
                 - conv5_x
             N_img_channels: the number of channels of input image
         '''
-        import paths
+        from . import config
         import os
         from . import preprocessing
 
@@ -356,7 +366,7 @@ class ResNet(nn.Module):
 
         self.run_name = run_name
 
-        self.run_dir = os.path.join(paths.data, run_name)
+        self.run_dir = os.path.join(config.config[f'{__package__}_paths']['data_dir'], run_name)
         self.states_dir = os.path.join(self.run_dir, 'states')
         if not os.path.isdir(self.run_dir):
             os.mkdir(self.run_dir)
@@ -600,7 +610,7 @@ class ResNet(nn.Module):
 
     def save_args(self):
         import pickle
-        import paths
+        from . import config
         import os
         args = {
             'activation_module': self.activation_module,
@@ -613,14 +623,13 @@ class ResNet(nn.Module):
             'resblock': self.resblock,
             'dataset': self.dataset,
         }
-        with open(os.path.join(paths.data, self.run_name, 'args.pkl'), 
+        with open(os.path.join(config.config[f'{__package__}_paths']['data_dir'], self.run_name, 'args.pkl'), 
                   'wb') as f:
             pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
         return None
 
     def load_args(self):
         import pickle
-        import paths
         import os
         with open(os.path.join(self.run_dir, 'args.pkl'), 
                   'rb') as f:
@@ -872,10 +881,10 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             ' resume.'
         )
     from . import preprocessing
+    from . import config
     import random
     import wandb
     import os
-    import paths
 
     import numpy as np
     import pandas as pd
@@ -991,7 +1000,10 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     must_continue = False
     project = 'sfr_gallearn'
     if run_name is not None and os.path.isdir(
-                os.path.join(paths.data, run_name)
+                os.path.join(
+                    config.config[f'{__package__}_paths']['data_dir'],
+                    run_name
+                )
             ):
         model = ResNet(run_name).to(device)
         if wandb_mode == 'r':
