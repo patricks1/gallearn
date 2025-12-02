@@ -403,7 +403,7 @@ class ResNet(nn.Module):
 
             self.last_epoch = 0
 
-        self.scaling_function = preprocessing.std_asinh
+        self.scaling_function = preprocessing.sasinh_imgs_sscale_vmaps
         self.activation_module = nn.ReLU
 
         self.features = {}
@@ -1032,7 +1032,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         #lr = 3.e-5 # learning rate
         lr = 1.e-3 # learning rate
         momentum = 0.5
-        dataset = 'gallearn_data_256x256_3proj_wsat_avg_sfr_tgt.h5'
+        dataset = 'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt.h5'
         #dataset = 'ellipses.h5'
         n_blocks_list = [1, 1, 1, 1]
         out_channels_list = [16, 32, 64, 128]
@@ -1059,28 +1059,28 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
         # Define the model if we didn't rebuild one from a argument and
         # state files.
-        #model = ResNet(
-        #        run_name,
-        #        N_out_channels,
-        #        lr,
-        #        momentum,
-        #        resblock,
-        #        n_blocks_list,
-        #        dataset,
-        #        out_channels_list=out_channels_list,
-        #        N_img_channels=3
-        #    ).to(device)
-        model = Net(
-            kernel_size=3,
-            conv_channels=[4, 8, 16, 32],
-            N_groups=4,
-            N_out_channels=1,
-            lr=lr,
-            momentum=momentum,
-            run_name=run_name,
-            dataset=dataset,
-            scaling_function=preprocessing.std_asinh
-        )
+        model = ResNet(
+                run_name,
+                N_out_channels,
+                lr,
+                momentum,
+                resblock,
+                n_blocks_list,
+                dataset,
+                out_channels_list=out_channels_list,
+                N_img_channels=4
+            ).to(device)
+        #model = Net(
+        #    kernel_size=3,
+        #    conv_channels=[4, 8, 16, 32],
+        #    N_groups=4,
+        #    N_out_channels=1,
+        #    lr=lr,
+        #    momentum=momentum,
+        #    run_name=run_name,
+        #    dataset=dataset,
+        #    scaling_function=preprocessing.std_asinh
+        #)
 
         model.save_args()
         if wandb_mode == 'y':

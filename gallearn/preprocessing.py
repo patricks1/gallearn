@@ -43,6 +43,22 @@ def load_data(fname):
 
     return d
 
+def sasinh_imgs_sscale_vmaps(X, stretch=1.e-5):
+    import torch
+    X = X.detach().clone()
+    
+    X_imgs = X[:, :3]
+    X_imgs = std_asinh(X_imgs, stretch)
+
+    X_vmaps = X[:, 3:4]
+    isnan = torch.isnan(X_vmaps)
+    X_vmaps[isnan] = 0.
+    X_vmaps = std_scale(X_vmaps)
+
+    X = torch.cat((X_imgs, X_vmaps), dim=1)
+
+    return X
+
 def std_asinh(X, stretch=1.e-5, return_distrib=False, means=None, stds=None):
     import torch
     X = X.detach().clone()
