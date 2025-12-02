@@ -395,7 +395,6 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
         res=res,
         tgt_type=tgt_type
     )
-
     # Add in velocity map.
     VMAP = zeros(length(ids_X), 1, res, res)
     orientations = unique(orientations_X)
@@ -409,7 +408,10 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
             is_id = ids_X .== id
             indices_0_bound = findall(is_id)
             for data in (ids_X, X, files, y_df, orientations_X)
-                deleteat!(data, indices_0_bound)
+                one_to_end = axes(data, 1)
+                trailing_dims = ntuple(_ -> Colon(), ndims(data) - 1)
+                rows_keep = setdiff(one_to_end, indices_0_bound)
+                data = data[rows_keep, trailing_dims...]
             end
         else
             for orientation in orientations
