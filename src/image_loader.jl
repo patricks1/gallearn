@@ -368,13 +368,16 @@ function load_images(
     # Ensure the galaxies match between X and y_df
     @assert all(ids_X .== y_df[:, "Simulation"])
 
-    return ids_X, X, fnames_sorted, y_df, orientations, mask
+    return ids_X, X, fnames_sorted, y_df, orientations
 end
 
 function load_vmap(id, res)
     maps_dir = conf["gallearn_paths"]["vmaps_dir"]
     path = joinpath(maps_dir, "object_$(id)_vmap.hdf5")
     vmap = Dict{String, Dict}()
+    if !isfile(path)
+        return nothing
+    end
     HDF5.h5open(path, "r") do file
         for orientation in keys(file)
             for data in keys(file[orientation])
@@ -392,7 +395,6 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
         res=res,
         tgt_type=tgt_type
     )
-    indices = 1:length(ids_X)
 
     # Add in velocity map.
     VMAP = zeros(length(ids_X), 1, res, res)
@@ -401,14 +403,24 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
     for id in ids_set
         id_int = parse(Int, replace(id, "object_" => ""))
         vmap = load_vmap(id_int, res)
-        for orientation in orientations
+        if isnothing(vmap)
+            # Delete all rows corresponding to `id` from the data, because
+            # there are no bound star particles.
             is_id = ids_X .== id
-            is_orient = orientations_X .== orientation
-            is_i = is_id .& is_orient
-            i = findall(is_i)
-            @assert length(i) == 1
-            i = i[1]
-            VMAP[i, 1, :, :] = vmap[orientation]["vmap"]
+            indices_0_bound = findall(is_id)
+            for data in (ids_X, X, files, y_df, orientations_X)
+                deleteat!(data, indices_0_bound)
+            end
+        else
+            for orientation in orientations
+                is_id = ids_X .== id
+                is_orient = orientations_X .== orientation
+                is_i = is_id .& is_orient
+                i = findall(is_i)
+                @assert length(i) == 1
+                i = i[1]
+                VMAP[i, 1, :, :] = vmap[orientation]["vmap"]
+            end
         end
     end
     X  = cat(X, VMAP; dims=2)
