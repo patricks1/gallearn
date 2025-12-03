@@ -108,18 +108,21 @@ def ensure_user_config():
         )
         print(f'host_image_dir added to {__package__}_paths')
 
-    if not config.has_option(f'{__package__}_paths', 'vmaps_dir'):
-        config.set(
-            f'{__package__}_paths',
-            'host_image_dir',
-            "/DFS-L/DATA/cosmo/pstaudt/gallearn/vmaps_res256_min_cden1.4e+1"
-        )
-        print(f'vmaps_dir added to {__package__}_paths')
+    ensure_key(
+        config,
+        'vmaps_dir', 
+        "/DFS-L/DATA/cosmo/pstaudt/gallearn/vmaps_res256_min_cden1.4e+1"
+    )
 
     with open(config_path, 'w') as f:
         config.write(f)
     
     return config_path
+
+def ensure_key(config, key, path):
+    if not config.has_option(f'{__package__}_paths', key):
+        config.set(f'{__package__}_paths', key, path)
+        print(f'{key} added to {__package__}_paths')
 
 def load_config():
     '''
