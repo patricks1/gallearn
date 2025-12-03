@@ -1,0 +1,6 @@
+[deps]
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+GalLearn = "dfff7834-18b7-4b70-946a-24bde2fbec96"
+IndexedDataFrames = "30d8e1a9-d5cd-4a57-ad5f-8276e63f4ed5"
+Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
+UCITools = "6d190016-b2d6-499f-b0d4-4be18205686c"
