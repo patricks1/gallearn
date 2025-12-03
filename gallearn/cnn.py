@@ -366,7 +366,10 @@ class ResNet(nn.Module):
 
         self.run_name = run_name
 
-        self.run_dir = os.path.join(config.config[f'{__package__}_paths']['data_dir'], run_name)
+        self.run_dir = os.path.join(
+            config.config[f'{__package__}_paths']['data_dir'],
+            run_name
+        )
         self.states_dir = os.path.join(self.run_dir, 'states')
         if not os.path.isdir(self.run_dir):
             os.mkdir(self.run_dir)
@@ -526,7 +529,7 @@ class ResNet(nn.Module):
         # Head
         x = self.avgpool(x)
         x = x.flatten(start_dim=1)
-        x = torch.nn.functional.dropout(x, 0.2)
+        x = torch.nn.functional.dropout(x, 0.7)
         x = torch.cat((x, rs), dim=1)
         x = self.head(x)
 
@@ -988,7 +991,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         ))
         return test_loss 
 
-    N_epochs = 100
+    N_epochs = 200
     N_batches = 60 
     loss_function = torch.nn.MSELoss()
 
