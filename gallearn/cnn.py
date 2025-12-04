@@ -529,7 +529,7 @@ class ResNet(nn.Module):
         # Head
         x = self.avgpool(x)
         x = x.flatten(start_dim=1)
-        x = torch.nn.functional.dropout(x, 0.9)
+        x = torch.nn.functional.dropout(x, 0.99)
         x = torch.cat((x, rs), dim=1)
         x = self.head(x)
 
