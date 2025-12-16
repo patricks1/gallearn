@@ -20,12 +20,12 @@ sat_direc = conf["gallearn_paths"]["sat_image_dir"]
 #    "ugrband_massmocks_final"
 host_direc = conf["gallearn_paths"]["host_image_dir"]
 
-gallearn_dir = conf["gallearn_paths"]["data_dir"]
+gallearn_dir = conf["gallearn_paths"]["project_data_dir"]
 tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
 tgt_sfr_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/"
 tgt_2d_host_path = conf["gallearn_paths"]["host_2d_shapes"]
 tgt_2d_sat_path = conf["gallearn_paths"]["sat_2d_shapes"]
-output_dir = conf["gallearn_paths"]["output_dir"]
+output_dir = conf["gallearn_paths"]["project_data_dir"]
 
 function process_file(
             fname,

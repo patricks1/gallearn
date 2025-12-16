@@ -84,7 +84,7 @@ def save_wandb_id(wandb):
     import os
     with open(
             os.path.join(
-                config.config[f'{__package__}_paths']['data_dir'],
+                config.config[f'{__package__}_paths']['project_data_dir'],
                 wandb.run.name,
                 'id.txt'),
             'w') as f:
@@ -96,7 +96,7 @@ def load_wandb_id(run_name):
     import os
     with open(
             os.path.join(
-                config.config[f'{__package__}_paths']['data_dir'],
+                config.config[f'{__package__}_paths']['project_data_dir'],
                 run_name,
                 'id.txt'),
             'r') as f:
@@ -130,7 +130,7 @@ class Net(nn.Module):
         super(Net, self).__init__()
 
         self.state_path = os.path.join(
-            config.config[f'{__package__}_paths']['data_dir'],
+            config.config[f'{__package__}_paths']['project_data_dir'],
             run_name + '_state.tar'
         )
 
@@ -148,7 +148,7 @@ class Net(nn.Module):
         self.scaling_function = scaling_function
         self.features = {}
 
-        self.run_dir = os.path.join(config.config[f'{__package__}_paths']['data_dir'], self.run_name)
+        self.run_dir = os.path.join(config.config[f'{__package__}_paths']['project_data_dir'], self.run_name)
         self.states_dir = os.path.join(self.run_dir, 'states')
         if not os.path.isdir(self.run_dir):
             os.mkdir(self.run_dir)
@@ -283,7 +283,7 @@ class Net(nn.Module):
             'dataset': self.dataset,
             'scaling_function': self.scaling_function
         }
-        with open(os.path.join(config.config[f'{__package__}_paths']['data_dir'], self.run_name + '_args' + '.pkl'), 
+        with open(os.path.join(config.config[f'{__package__}_paths']['project_data_dir'], self.run_name + '_args' + '.pkl'), 
                   'wb') as f:
             pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
         return None
@@ -366,7 +366,7 @@ class ResNet(nn.Module):
 
         self.run_name = run_name
 
-        self.run_dir = os.path.join(config.config[f'{__package__}_paths']['data_dir'], run_name)
+        self.run_dir = os.path.join(config.config[f'{__package__}_paths']['project_data_dir'], run_name)
         self.states_dir = os.path.join(self.run_dir, 'states')
         if not os.path.isdir(self.run_dir):
             os.mkdir(self.run_dir)
@@ -623,7 +623,7 @@ class ResNet(nn.Module):
             'resblock': self.resblock,
             'dataset': self.dataset,
         }
-        with open(os.path.join(config.config[f'{__package__}_paths']['data_dir'], self.run_name, 'args.pkl'), 
+        with open(os.path.join(config.config[f'{__package__}_paths']['project_data_dir'], self.run_name, 'args.pkl'), 
                   'wb') as f:
             pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
         return None
@@ -1001,7 +1001,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     project = 'sfr_gallearn'
     if run_name is not None and os.path.isdir(
                 os.path.join(
-                    config.config[f'{__package__}_paths']['data_dir'],
+                    config.config[f'{__package__}_paths']['project_data_dir'],
                     run_name
                 )
             ):

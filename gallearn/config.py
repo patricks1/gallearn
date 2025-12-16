@@ -4,8 +4,10 @@ import configparser
 env_str = os.getenv('CONDA_DEFAULT_ENV', 'base')
 if env_str == 'base':
     env_str = ''
+    env_prefix = ''
 else:
     env_str = '_' + env_str
+    env_prefix = env_str + '_'
 home = os.path.expanduser(os.path.join(
     '~/'
 ))
@@ -35,7 +37,7 @@ def ensure_user_config():
             ' {0}.'
             ' If you want to customize anything in the config file,'
             ' you can do so safely.'
-            .format(config_fname, output_dname)
+            .format(config_fname)
         )
     
     if not config.has_section(f'{__package__}_paths'):
@@ -47,15 +49,6 @@ def ensure_user_config():
             ' group. If you are not, your code will not work with these paths,'
             ' and you must properly configure {config_fname}.\n'
         )
-
-    if not config.has_option(f'{__package__}_paths', 'output_dir'):
-        output_dname = 'output' + env_str
-        output_dir = os.path.join(home, output_dname)
-        config.set(f'{__package__}_paths', 'output_dir', output_dir)
-        if not os.path.isdir(output_dir):
-            os.makedirs(output_dir)
-            print(f'{output_dir} created')
-        print('output_dir added to gallearn_paths')
 
     if not config.has_option(f'{__package__}_paths', 'host_2d_shapes'): 
         config.set(
@@ -76,14 +69,11 @@ def ensure_user_config():
         )
         print(f'sat_2d_shapes added to {__package__}_paths')
 
-    if not config.has_option(f'{__package__}_paths', 'data_dir'):
-        config.set(
-            f'{__package__}_paths',
-            'data_dir',
-            '/DFS-L/DATA/cosmo/pstaudt/gallearn'
-        )
-        print('data_dir added to gallearn_paths')
-
+    ensure_key(
+        config,
+        'project_data_dir', 
+        os.path.join(home, env_previx + 'data'),
+               
     if not config.has_option(f'{__package__}_paths', 'firebox_data_dir'):
         config.set(
             f'{__package__}_paths',
@@ -120,6 +110,14 @@ def ensure_user_config():
         config.write(f)
     
     return config_path
+
+def ensure_key(config, key, path, ensure_exists=False):
+    if not config.has_option(f'{__package__}_paths', key):
+        if ensure_exists and not os.path.isdir(path):
+            os.makedirs(path)
+            print(f'{path} created.')
+        config.set(f'{__package__}_paths', key, path)
+        print(f'{key} added to {__package__}_paths')
 
 def load_config():
     '''
