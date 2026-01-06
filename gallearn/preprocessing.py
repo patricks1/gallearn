@@ -10,7 +10,7 @@ def load_data(fname):
     from . import config
 
     data_path = os.path.join(
-        config.config['gallearn_paths']['data_dir'],
+        config.config['gallearn_paths']['project_data_dir'],
         fname
     )
 
