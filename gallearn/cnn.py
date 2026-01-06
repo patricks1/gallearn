@@ -330,6 +330,19 @@ class Net(nn.Module):
         )
         return None
 
+class BernoulliNet(nn.Modle):
+    def __init__(
+                self,
+                lr,
+                momentum,
+                backbone,
+                dataset,
+                N_img_channels
+            ):
+        super(BernoulliNet, self).__init__()
+    self.scaling_function = 
+
+
 class ResNet(nn.Module):
     def __init__(
                 self,
@@ -366,7 +379,10 @@ class ResNet(nn.Module):
 
         self.run_name = run_name
 
-        self.run_dir = os.path.join(config.config[f'{__package__}_paths']['project_data_dir'], run_name)
+        self.run_dir = os.path.join(
+            config.config[f'{__package__}_paths']['project_data_dir'],
+            run_name
+        )
         self.states_dir = os.path.join(self.run_dir, 'states')
         if not os.path.isdir(self.run_dir):
             os.mkdir(self.run_dir)
