@@ -337,10 +337,28 @@ class BernoulliNet(nn.Modle):
                 momentum,
                 backbone,
                 dataset,
-                N_img_channels
             ):
+        from . import preprocessing
+
         super(BernoulliNet, self).__init__()
-    self.scaling_function = 
+        self.scaling_function = preprocessing.sasinh_imgs_sscale_vmaps
+
+        # Head
+        self.head = nn.Sequential(
+            nn.LazyLinear(256)
+            nn.BatchNorm1d(256)
+            nn.ReLU()
+
+            nn.Linear(256, 128)
+            nn.BatchNorm1d(128)
+            nn.ReLU()
+
+            nn.Linear(128, 64)
+            nn.BatchNorm1d(64)
+            nn.ReLU()
+
+            nn.Linear(64, N_output_tgt
+        )
 
 
 class ResNet(nn.Module):
