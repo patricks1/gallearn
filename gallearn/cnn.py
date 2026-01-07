@@ -360,6 +360,8 @@ class BernoulliNet(nn.Modle):
             nn.Linear(64, N_tgt_channels)
         )
 
+    def forward(self, x, rs):
+        x = self.backbone(x)
 
 class ResNet(nn.Module):
     def __init__(
