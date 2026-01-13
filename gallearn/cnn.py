@@ -330,38 +330,42 @@ class Net(nn.Module):
         )
         return None
 
-class BernoulliNet(nn.Modle):
+class BernoulliNet(nn.Module):
     def __init__(
                 self,
                 lr,
                 momentum,
                 backbone,
                 dataset,
-                N_tgt_channels
             ):
         from . import preprocessing
 
         super(BernoulliNet, self).__init__()
         self.scaling_function = preprocessing.sasinh_imgs_sscale_vmaps
 
-        self.net = nn.Sequential(
-            nn.LazyLinear(256)
-            nn.BatchNorm1d(256)
-            nn.ReLU()
+        self.head = nn.Sequential(
+            nn.LazyLinear(256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
 
-            nn.Linear(256, 128)
-            nn.BatchNorm1d(128)
-            nn.ReLU()
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
 
-            nn.Linear(128, 64)
-            nn.BatchNorm1d(64)
-            nn.ReLU()
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
 
-            nn.Linear(64, N_tgt_channels)
+            nn.Linear(64, 1),
         )
+
+        return None
 
     def forward(self, x, rs):
         x = self.backbone(x)
+        x = nn.functional.AdaptiveAvgPool2d((1, 1))
+        x = self.net(x)
+        return x
 
 class ResNet(nn.Module):
     def __init__(
@@ -502,7 +506,6 @@ class ResNet(nn.Module):
             stride=2
         )
 
-        # Average pooling (used in classification head)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
         # Head

@@ -3,15 +3,15 @@ import configparser
 
 env_str = os.getenv('CONDA_DEFAULT_ENV', 'base')
 if env_str == 'base':
-    env_str = ''
+    env_suffix = ''
     env_prefix = ''
 else:
-    env_str = '_' + env_str
+    env_suffix = '_' + env_str
     env_prefix = env_str + '_'
 home = os.path.expanduser(os.path.join(
     '~/'
 ))
-config_fname = 'config' + env_str + '.ini'
+config_fname = 'config' + env_suffix + '.ini'
 
 def get_path():
     config_path = os.path.join(
@@ -72,7 +72,9 @@ def ensure_user_config():
     ensure_key(
         config,
         'project_data_dir', 
-        os.path.join(home, env_previx + 'data'),
+        os.path.join(home, env_prefix + 'data'),
+        ensure_exists=True
+    )
                
     if not config.has_option(f'{__package__}_paths', 'firebox_data_dir'):
         config.set(
