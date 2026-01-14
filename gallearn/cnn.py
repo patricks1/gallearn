@@ -342,6 +342,7 @@ class BernoulliNet(nn.Module):
 
         super(BernoulliNet, self).__init__()
         self.scaling_function = preprocessing.sasinh_imgs_sscale_vmaps
+        self.backbone = backbone
 
         self.head = nn.Sequential(
             nn.LazyLinear(256),
@@ -363,8 +364,10 @@ class BernoulliNet(nn.Module):
 
     def forward(self, x, rs):
         x = self.backbone(x)
-        x = nn.functional.AdaptiveAvgPool2d((1, 1))
-        x = self.net(x)
+        x = nn.functional.adaptive_avg_pool2d(x, (1, 1))
+        x = x.flatten(start_dim=1)
+        x = torch.cat((x, rs), dim=1)
+        x = self.head(x)
         return x
 
 class ResNet(nn.Module):
