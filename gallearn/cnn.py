@@ -362,6 +362,13 @@ class BernoulliNet(nn.Module):
 
         return None
 
+    def init_optimizer(self):
+        self.optimizer = torch.optim.Adam(
+                self.parameters(), 
+                lr=self.lr, 
+            )
+        return None
+
     def forward(self, x, rs):
         x = self.backbone(x)
         x = nn.functional.adaptive_avg_pool2d(x, (1, 1))
@@ -933,7 +940,6 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     import matplotlib.pyplot as plt
     import matplotlib as mpl
 
-    import torchvision
     import torch.nn as nn
 
     try:
@@ -1005,7 +1011,6 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     def test():
         model.eval()
         test_loss = 0
-        correct = 0
         with torch.no_grad():
             for i, (images, rs, target) in enumerate(test_loader):
                 output = model(images.to(device), rs.to(device))
