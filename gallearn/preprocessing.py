@@ -322,15 +322,17 @@ def plt_ssfr():
     import matplotlib.pyplot as plt
 
     d = load_data('gallearn_data_128x128_3proj_wsat_sfr_tgt.h5')
-    ssfrs = d['ys_sorted'].flatten()
-    iszero = ssfrs == 0.
-    print(len(ssfrs))
-    print(iszero.sum())
-    new_ys = torch.asinh(ssfrs * 1.e12)
+    ssfrs = d['ys_sorted']#.flatten()
+    #iszero = ssfrs == 0.
+    #print(len(ssfrs))
+    #print(iszero.sum())
+    #new_ys = torch.asinh(ssfrs * 1.e12)
+    #new_ys = std_asinh(ssfrs, 1.e11).flatten()
+    new_ys = ssfrs.flatten()
     print(new_ys.min(), new_ys.max(), torch.median(new_ys))
-    isnan = torch.isnan(ssfrs)
-    print(isnan.sum())
-    print(d['obs_sorted'][isnan])
+    #isnan = torch.isnan(ssfrs)
+    #print(isnan.sum())
+    #print(d['obs_sorted'][isnan])
     
 
     fig = plt.figure()

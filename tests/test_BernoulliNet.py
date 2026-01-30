@@ -27,5 +27,8 @@ def test_BernoulliNet():
         dataset='test_data',
         in_channels=X.shape[1]
     )
+
+    X_scaled = classifier.scaling_function(X)
+
     classifier.init_optimizer()
-    y_pred = classifier(X, rs)
+    y_pred = classifier(X_scaled, rs)
