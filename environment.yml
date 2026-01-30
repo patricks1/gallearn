@@ -1,0 +1,23 @@
+name: gallearn
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python==3.10.15
+  - jupyterlab
+  - numpy
+  - scipy
+  - astropy
+  - matplotlib
+  - h5py
+  - ca-certificates
+  - certifi
+  - openssl
+  - progressbar
+  - pytest
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pandas < 3.0.0
+  - cython
+  - wandb

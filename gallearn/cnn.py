@@ -42,6 +42,7 @@ def load_fr_julia(Nfiles):
 
     return X, ys
 
+
 def get_radii(d):
     import h5py
     import os
@@ -79,6 +80,7 @@ def get_radii(d):
 
     return rs 
 
+
 def save_wandb_id(wandb):
     from . import config
     import os
@@ -90,6 +92,7 @@ def save_wandb_id(wandb):
             'w') as f:
         f.write(wandb.run.id)
     return None
+
 
 def load_wandb_id(run_name):
     from . import config
@@ -103,12 +106,14 @@ def load_wandb_id(run_name):
         wandb_id = f.read()
     return wandb_id
 
+
 def find_closest_N_groups(N_channels, N_groups):
     # Get all divisors of N_channels
     divisors = [i for i in range(1, N_channels + 1) if N_channels % i == 0]
     # Find the divisor closest to N_groups
     closest_divisor = min(divisors, key=lambda x: abs(x - N_groups))
     return closest_divisor
+
 
 class Net(nn.Module):
     def __init__(
@@ -330,6 +335,71 @@ class Net(nn.Module):
         )
         return None
 
+
+def _replace_first_conv_in_channels(module, in_channels):
+    """
+    Recursively find the first Conv2d layer in a module and replace it
+    with a new Conv2d that has the specified in_channels.
+    Returns True if a replacement was made, False otherwise.
+    """
+    for name, child in module.named_children():
+        if isinstance(child, nn.Conv2d):
+            new_conv = nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=child.out_channels,
+                kernel_size=child.kernel_size,
+                stride=child.stride,
+                padding=child.padding,
+                dilation=child.dilation,
+                groups=child.groups,
+                bias=child.bias is not None,
+                padding_mode=child.padding_mode,
+            )
+            setattr(module, name, new_conv)
+            return True
+        if _replace_first_conv_in_channels(child, in_channels):
+            return True
+    return False
+
+
+def _make_backbone_feature_extractor(module):
+    """
+    Modify common backbone architectures (ResNet, VGG, etc.) to output
+    feature maps instead of class predictions by removing the final
+    pooling and fully connected layers.
+    """
+    # ResNet-style: has 'fc' and 'avgpool' attributes
+    if hasattr(module, 'fc') and isinstance(module.fc, nn.Linear):
+        module.fc = nn.Identity()
+        # Also need to override forward to skip the flatten call
+        if hasattr(module, 'avgpool'):
+            module.avgpool = nn.Identity()
+
+            # Store original forward and create new one that skips flatten
+            original_forward = module.forward
+
+            def new_forward(x):
+                x = module.conv1(x)
+                x = module.bn1(x)
+                x = module.relu(x)
+                x = module.maxpool(x)
+                x = module.layer1(x)
+                x = module.layer2(x)
+                x = module.layer3(x)
+                x = module.layer4(x)
+                return x
+
+            module.forward = new_forward
+        return True
+    # VGG-style: has 'classifier' attribute
+    if hasattr(module, 'classifier'):
+        module.classifier = nn.Identity()
+        if hasattr(module, 'avgpool'):
+            module.avgpool = nn.Identity()
+        return True
+    return False
+
+
 class BernoulliNet(nn.Module):
     def __init__(
                 self,
@@ -337,12 +407,23 @@ class BernoulliNet(nn.Module):
                 momentum,
                 backbone,
                 dataset,
+                in_channels=None,
             ):
         from . import preprocessing
 
         super(BernoulliNet, self).__init__()
-        self.scaling_function = preprocessing.sasinh_imgs_sscale_vmaps
+        self.lr = lr
+        self.momentum = momentum
         self.backbone = backbone
+        self.dataset = dataset
+
+        _make_backbone_feature_extractor(self.backbone)
+
+        if in_channels is not None:
+            if not _replace_first_conv_in_channels(self.backbone, in_channels):
+                raise ValueError("No Conv2d layer found in backbone")
+
+        self.scaling_function = preprocessing.sasinh_imgs_sscale_vmaps
 
         self.head = nn.Sequential(
             nn.LazyLinear(256),
@@ -364,9 +445,9 @@ class BernoulliNet(nn.Module):
 
     def init_optimizer(self):
         self.optimizer = torch.optim.Adam(
-                self.parameters(), 
-                lr=self.lr, 
-            )
+            self.parameters(), 
+            lr=self.lr, 
+        )
         return None
 
     def forward(self, x, rs):
@@ -376,6 +457,7 @@ class BernoulliNet(nn.Module):
         x = torch.cat((x, rs), dim=1)
         x = self.head(x)
         return x
+
 
 class ResNet(nn.Module):
     def __init__(
@@ -765,6 +847,7 @@ class ResNet(nn.Module):
         )
         return None
 
+
 class BottleNeck(nn.Module):
     # Scale factor of the number of output channels
     expansion = 4
@@ -846,6 +929,7 @@ class BottleNeck(nn.Module):
 
         return x
 
+
 class BasicResBlock(nn.Module):
     # Scale factor of the number of output channels
     expansion = 1
@@ -922,6 +1006,7 @@ class BasicResBlock(nn.Module):
         x = self.activation_function(x)
 
         return x
+
 
 def main(Nfiles=None, wandb_mode='n', run_name=None):
     if wandb_mode == 'r' and run_name is None:
@@ -1225,6 +1310,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         #scheduler.step(train_loss)
 
     return model 
+
 
 if __name__ == '__main__':
     import argparse
