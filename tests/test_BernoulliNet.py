@@ -11,8 +11,7 @@ def test_BernoulliNet():
     '''
     Verify that we can instantiate a BernoulliNet.
     '''
-    from gallearn import cnn
-    from gallearn import preprocessing
+    from gallearn import cnn, preprocessing
 
     data_fname = 'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt.h5'
     data_dict = preprocessing.load_data(data_fname)
