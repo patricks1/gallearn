@@ -1038,7 +1038,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     else:
         device_str = 'cpu'
     device = torch.device(device_str)
-    torch.set_default_device(device_str)
+    # Note: Avoid torch.set_default_device() - it causes issues with MPS on macOS Tahoe
 
     def weights_init(layer_in):
         '''
@@ -1047,7 +1047,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         if isinstance(layer_in, nn.Linear):
             nn.init.kaiming_uniform_(
                 layer_in.weight,
-                generator=torch.Generator(device=device_str)
+                generator=torch.Generator(device='cpu')
             )
             layer_in.bias.data.fill_(0.0)
         return None
@@ -1190,7 +1190,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
             run_name = wandb.run.name
 
         # Define the model if we didn't rebuild one from a argument and
-        # state files.
+        # state files. Model is created on CPU by default so lazy layers can
+        # be initialized before moving to MPS.
         model = ResNet(
                 run_name,
                 N_out_channels,
@@ -1201,7 +1202,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
                 dataset,
                 out_channels_list=out_channels_list,
                 N_img_channels=4
-            ).to(device)
+            )
         #model = Net(
         #    kernel_size=3,
         #    conv_channels=[4, 8, 16, 32],
@@ -1251,9 +1252,11 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
     if must_continue:
         # Run a dummy fwd pass to initialize any lazy layers.
-        model(X[:2], rs[:2]) 
+        # Must run on CPU first because MPS doesn't support lazy layer materialization.
+        model(X[:2].cpu(), rs[:2].cpu())
+        model.apply(weights_init)  # Init model weights while still on CPU.
+        model.to(device)
         model.init_optimizer()
-        model.apply(weights_init) # Init model weights.
     
         if wandb_mode == 'y':
             wandb.config['architecture'] = repr(model)
@@ -1283,13 +1286,13 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         torch.utils.data.TensorDataset(X_train, rs_train, ys_train),
         batch_size=batch_size_train, 
         shuffle=True,
-        generator=torch.Generator(device=device_str)
+        generator=torch.Generator(device='cpu')
     )
     test_loader = torch.utils.data.DataLoader(
         torch.utils.data.TensorDataset(X_test, rs_test, ys_test),
-        batch_size=batch_size_test, 
+        batch_size=batch_size_test,
         shuffle=True,
-        generator=torch.Generator(device=device_str)
+        generator=torch.Generator(device='cpu')
     )
     ###########################################################################
 
