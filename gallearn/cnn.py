@@ -51,13 +51,36 @@ def get_radii(d):
 
     from . import config
 
+    dtype_dict = {'galaxyID': int}
     df_Re_host = pd.read_csv(
-        config.config[f'{__package__}_paths']['host_2d_shapes']
+        config.config[f'{__package__}_paths']['host_2d_shapes'],
+        #dtype=dtype_dict
+    )
+    assert not df_Re_host.duplicated(
+        subset=['galaxyID', 'view', 'band']
+    ).any(), (
+        'The host shapes file has duplicate rows..'
     )
     df_Re_sat = pd.read_csv(
-        config.config[f'{__package__}_paths']['sat_2d_shapes']
+        config.config[f'{__package__}_paths']['sat_2d_shapes'],
+        dtype=dtype_dict
     )
+    assert not df_Re_sat.duplicated(
+        subset=['galaxyID', 'view', 'band']
+    ).any(), 'The satellite shapes file has duplicate rows.'
     df_Re = pd.concat([df_Re_host, df_Re_sat], axis=0)
+    df_Re.rename(
+        columns={'galaxyID': 'id', 'view': 'orientation'},
+        inplace=True
+    )
+    # Need to isolate the r-band, otherwise there will be id-oreintation
+    # duplicates.
+    df_Re = df_Re.loc[df_Re['band'] == 'band_r']
+    assert not df_Re.duplicated(
+        subset=['id', 'orientation']
+    ).any(), (
+        'The combined host + satellite shapes DataFrame has duplicate rows.'
+    )
 
     ids_X = np.char.replace(
         d['obs_sorted'].astype(str),
@@ -69,9 +92,15 @@ def get_radii(d):
     df = df_X.merge(
         df_Re,
         left_on=['id', 'orientation'],
-        right_on=['galaxyID', 'view'],
-        how='left'
+        right_on=['id', 'orientation'],
+        how='left',
+        # There should not be any duplicate rows in either df_X or df_Re.
+        validate='one_to_one'
     )
+
+    # Ensure that the DataFrame from which we'll grab the radii is lined up
+    # exactly with the inputted dictionary.
+    pd.testing.assert_frame_equal(df_X, df[['id', 'orientation']])
 
     rs = torch.tensor(
         df['Re'].values,
@@ -1252,7 +1281,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
 
     if must_continue:
         # Run a dummy fwd pass to initialize any lazy layers.
-        # Must run on CPU first because MPS doesn't support lazy layer materialization.
+        # Must run on CPU first because MPS doesn't support lazy layer
+        # materialization.
         model(X[:2].cpu(), rs[:2].cpu())
         model.apply(weights_init)  # Init model weights while still on CPU.
         model.to(device)

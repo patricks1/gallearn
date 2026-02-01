@@ -48,14 +48,46 @@ def make_sfr_data():
 def make_shapes_data(ids, orientations):
     def sample_df(config_key, ids, orientations):
         key_df = pd.DataFrame({'galaxyID': ids, 'view': orientations})
+        assert not key_df.duplicated().any(), (
+            'You have provided duplicate galaxy-orientation samples.'
+        )
 
         path = pathlib.Path(config.config['gallearn_paths'][config_key])
         fname = path.name
-        df = pd.read_csv(path)
+        dtype_dict = {'galaxyID': int}
+        shapes_df = pd.read_csv(path, dtype=dtype_dict)
 
-        df_sample = df.merge(key_df, on=['galaxyID', 'view'], how='inner')
-        df_sample.to_csv(TEST_DATA_DIR / fname)
-        return df
+        df_not_in_key_df = (
+            shapes_df
+            .merge(
+                key_df,
+                on=['galaxyID', 'view'],
+                # 'left' preserves all rows from `shapes_df`.
+                how='left',
+                # Creates a new `_merge` column that specifies the
+                # DataFrames in which
+                # `merge` found the keys.
+                indicator=True
+            )
+            # Only keep rows that were not in `key_df`.
+            .query("_merge == 'left_only'")
+            # Remove the indicator column.
+            .drop(columns='_merge')
+        )
+        #######################################################################
+        # PLACEHOLDER
+        #######################################################################
+        # Inject a few shapes that are not in the requested id-orientations
+        #######################################################################
+
+
+        df_sample = shapes_df.merge(
+            key_df,
+            on=['galaxyID', 'view'],
+            how='inner'
+        )
+        df_sample.to_csv(TEST_DATA_DIR / fname, index=False)
+        return shapes_df
 
     sample_df('host_2d_shapes', ids, orientations)
     sample_df('sat_2d_shapes', ids, orientations)
