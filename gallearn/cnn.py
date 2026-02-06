@@ -1270,6 +1270,13 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # Train-test split
     idxs = torch.randperm(N_all, device=device_str)
     idxs_train, idxs_test = idxs[:N_train], idxs[N_train:]
+    assert np.array_equal(
+        np.arange(N_all),
+        np.sort(np.concatenate((idxs_train, idxs_test)))
+    ), (
+        'There are indices missing from the train, test split, or there'
+        ' are duplicates.'
+    )
 
     ys_train = torch.index_select(ys, 0, idxs_train)
     ys_test = torch.index_select(ys, 0, idxs_test)
