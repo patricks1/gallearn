@@ -56,8 +56,11 @@ def make_shapes_data(ids, orientations):
         fname = path.name
         dtype_dict = {'galaxyID': int}
         shapes_df = pd.read_csv(path, dtype=dtype_dict)
+        # We can only have one radius per galaxy, so we need to choose the
+        # r band. Otherwise there are duplicates of galaxyID-view.
+        shapes_df = shapes_df.loc[shapes_df['band'] == 'band_r']
 
-        df_not_in_key_df = (
+        df_antikey = (
             shapes_df
             .merge(
                 key_df,
@@ -74,18 +77,18 @@ def make_shapes_data(ids, orientations):
             # Remove the indicator column.
             .drop(columns='_merge')
         )
-        #######################################################################
-        # PLACEHOLDER
-        #######################################################################
-        # Inject a few shapes that are not in the requested id-orientations
-        #######################################################################
-
+        df_extras = df_antikey.sample(5, replace=False)
 
         df_sample = shapes_df.merge(
             key_df,
             on=['galaxyID', 'view'],
-            how='inner'
+            how='inner',
+            validate='one_to_one'
         )
+
+        # Inject a few shapes that are not in the requested id-orientations
+        df_sample = pd.concat((df_sample, df_extras), axis=0)
+
         df_sample.to_csv(TEST_DATA_DIR / fname, index=False)
         return shapes_df
 
