@@ -1,6 +1,7 @@
 import h5py
 import time
 import math
+import torch
 
 def load_data(fname):
     import torch
@@ -16,11 +17,9 @@ def load_data(fname):
 
     start = time.time()
     with h5py.File(data_path, 'r') as f:
-        X = f['X'][()]
-        X = torch.FloatTensor(X)
-        # I saved the data with Julia, which is transposed to the way Python
-        # expects, so we must permute.
-        X = X.permute(3, 2, 0, 1)
+        # Expects (N, C, H, W) layout. Run scripts/transpose_hdf5.py
+        # first if the file is still in Julia order (H, W, C, N).
+        X = torch.FloatTensor(f['X'][()])
         obs_sorted = np.array(f['obs_sorted'], dtype=str)
         orientations = np.array(f['orientations'], dtype=str)
         file_names = np.array(f['file_names'], dtype=str)
@@ -42,6 +41,144 @@ def load_data(fname):
     ))
 
     return d
+
+def load_metadata(fname):
+    '''
+    Load everything except X from the HDF5 file. Returns a tuple
+    (d, N, hdf5_path) where d is a dict with keys 'ys_sorted',
+    'obs_sorted', 'orientations', 'file_names', N is the number of samples,
+    and hdf5_path is the full path to the HDF5 file.
+    '''
+    import os
+    import numpy as np
+
+    from . import config
+
+    hdf5_path = os.path.join(
+        config.config['gallearn_paths']['project_data_dir'],
+        fname
+    )
+
+    with h5py.File(hdf5_path, 'r') as f:
+        N = f['X'].shape[0]
+        obs_sorted = np.array(f['obs_sorted'], dtype=str)
+        orientations = np.array(f['orientations'], dtype=str)
+        file_names = np.array(f['file_names'], dtype=str)
+        ys_sorted = torch.FloatTensor(np.array(f['ys_sorted'])).transpose(1, 0)
+    d = {
+        'obs_sorted': obs_sorted,
+        'orientations': orientations,
+        'file_names': file_names,
+        'ys_sorted': ys_sorted
+    }
+
+    return d, N, hdf5_path
+
+def compute_scaling_stats(hdf5_path, N, stretch=1.e-5, chunk_size=256):
+    '''
+    Compute per-channel mean and std for the transformed X data without
+    loading the full dataset into memory. Uses a two-pass approach over the
+    HDF5 file, reading in chunks.
+
+    The transform matches sasinh_imgs_sscale_vmaps:
+    - Channels 0-2 (images): asinh(stretch * x)
+    - Channel 3 (vmap): replace NaN with 0
+
+    Returns (means, stds) each of shape (4,).
+    '''
+    # Pass 1: compute means
+    channel_sum = torch.zeros(4, dtype=torch.float64)
+    channel_count = torch.zeros(4, dtype=torch.float64)
+
+    with h5py.File(hdf5_path, 'r') as f:
+        X_dset = f['X']
+        for start in range(0, N, chunk_size):
+            end = min(start + chunk_size, N)
+            # HDF5 shape is (N, C, H, W); read a chunk of samples
+            chunk = torch.FloatTensor(X_dset[start:end])
+
+            # Apply transforms
+            chunk[:, :3] = torch.asinh(stretch * chunk[:, :3])
+            vmap = chunk[:, 3:4]
+            vmap[torch.isnan(vmap)] = 0.0
+            chunk[:, 3:4] = vmap
+
+            for c in range(4):
+                vals = chunk[:, c]
+                channel_sum[c] += vals.to(torch.float64).sum()
+                channel_count[c] += vals.numel()
+
+    means = (channel_sum / channel_count).float()
+
+    # Pass 2: compute stds
+    channel_sq_sum = torch.zeros(4, dtype=torch.float64)
+
+    with h5py.File(hdf5_path, 'r') as f:
+        X_dset = f['X']
+        for start in range(0, N, chunk_size):
+            end = min(start + chunk_size, N)
+            chunk = torch.FloatTensor(X_dset[start:end])
+
+            chunk[:, :3] = torch.asinh(stretch * chunk[:, :3])
+            vmap = chunk[:, 3:4]
+            vmap[torch.isnan(vmap)] = 0.0
+            chunk[:, 3:4] = vmap
+
+            for c in range(4):
+                vals = chunk[:, c].to(torch.float64)
+                diff = vals - means[c].to(torch.float64)
+                channel_sq_sum[c] += (diff ** 2).sum()
+
+    stds = (channel_sq_sum / channel_count).sqrt().float()
+
+    return means, stds
+
+
+class LazyGalaxyDataset(torch.utils.data.Dataset):
+    '''
+    A Dataset that reads galaxy images from an HDF5 file on demand, one sample
+    at a time, instead of loading the full dataset into memory.
+    '''
+    def __init__(self, hdf5_path, indices, means, stds, stretch, ys, rs):
+        self.hdf5_path = hdf5_path
+        self.indices = indices
+        self.means = means
+        self.stds = stds
+        self.stretch = stretch
+        self.ys = ys
+        self.rs = rs
+        self._file = None
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        if self._file is None:
+            self._file = h5py.File(self.hdf5_path, 'r')
+        hdf5_idx = self.indices[idx].item()
+        # HDF5 shape is (N, C, H, W); read one sample -> (C, H, W)
+        x = torch.FloatTensor(self._file['X'][hdf5_idx])
+
+        # Apply same transforms as sasinh_imgs_sscale_vmaps with precomputed
+        # stats.
+        x[:3] = torch.asinh(self.stretch * x[:3])
+        x[3][torch.isnan(x[3])] = 0.0
+        for c in range(4):
+            x[c] = (x[c] - self.means[c]) / self.stds[c]
+
+        return x, self.rs[idx], self.ys[idx]
+
+    def __getstate__(self):
+        # Exclude the h5py file handle so the dataset can be
+        # pickled for DataLoader worker processes.
+        state = self.__dict__.copy()
+        state['_file'] = None
+        return state
+
+    def __del__(self):
+        if self._file is not None:
+            self._file.close()
+
 
 def sasinh_imgs_sscale_vmaps(X, stretch=1.e-5):
     import torch

@@ -686,7 +686,7 @@ class ResNet(nn.Module):
         # Head
         x = self.avgpool(x)
         x = x.flatten(start_dim=1)
-        x = torch.nn.functional.dropout(x, 0.99)
+        x = torch.nn.functional.dropout(x, 0.5)
         x = torch.cat((x, rs), dim=1)
         x = self.head(x)
 
@@ -1086,8 +1086,11 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         sum_losses = 0.
         N_optimized = 0
         for batch_idx, (images, rs, target) in enumerate(train_loader):
+            images = images.to(device)
+            rs = rs.to(device)
+            target = target.to(device)
             model.optimizer.zero_grad()
-            output = model(images.to(device), rs.to(device))
+            output = model(images, rs)
             loss = loss_function(output, target)
             loss.backward()
             model.optimizer.step()
@@ -1127,7 +1130,10 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         test_loss = 0
         with torch.no_grad():
             for i, (images, rs, target) in enumerate(test_loader):
-                output = model(images.to(device), rs.to(device))
+                images = images.to(device)
+                rs = rs.to(device)
+                target = target.to(device)
+                output = model(images, rs)
                 batch_loss = loss_function(output, target).item()
                 test_loss += batch_loss
 
@@ -1150,7 +1156,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         return test_loss 
 
     N_epochs = 200
-    N_batches = 60 
+    N_batches = 60
     loss_function = torch.nn.MSELoss()
 
     ###########################################################################
@@ -1193,7 +1199,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         #lr = 3.e-5 # learning rate
         lr = 1.e-3 # learning rate
         momentum = 0.5
-        dataset = 'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt.h5'
+        dataset = 'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
         #dataset = 'ellipses.h5'
         n_blocks_list = [1, 1, 1, 1]
         out_channels_list = [16, 32, 64, 128]
@@ -1255,54 +1261,81 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     ###########################################################################
     # Load the data
     ###########################################################################
-    d = preprocessing.load_data(model.dataset)
-    X = d['X'].to(device=device_str)
-    X = model.scaling_function(X)[:Nfiles]
-    ys = d['ys_sorted'].to(device=device_str)[:Nfiles]
-    ys, means, stds = preprocessing.std_asinh(ys, 1.e11, return_distrib=True)
-    rs = get_radii(d).to(device=device_str)
+    d, N_total, hdf5_path = preprocessing.load_metadata(
+        model.dataset
+    )
+    if Nfiles is None:
+        Nfiles = N_total
+    else:
+        Nfiles = min(Nfiles, N_total)
 
-    N_all = len(ys) 
+    ys = d['ys_sorted'][:Nfiles]
+    ys, means, stds = preprocessing.std_asinh(
+        ys,
+        1.e11,
+        return_distrib=True
+    )
+    rs = get_radii(d)[:Nfiles]
+
+    # Compute normalization stats for X via chunked pass
+    # (never loads the full image tensor into memory).
+    scaling_means, scaling_stds = preprocessing.compute_scaling_stats(
+        hdf5_path,
+        Nfiles
+    )
+
+    N_all = len(ys)
     print('{0:0.0f} galaxies in data'.format(N_all))
     N_test = max(1, int(0.15 * N_all))
     N_train = N_all - N_test
 
     # Train-test split
-    idxs = torch.randperm(N_all, device=device_str)
-    idxs_train, idxs_test = idxs[:N_train], idxs[N_train:]
-    assert np.array_equal(
-        np.arange(N_all),
-        np.sort(np.concatenate((idxs_train, idxs_test)))
-    ), (
-        'There are indices missing from the train, test split, or there'
-        ' are duplicates.'
-    )
+    idxs = torch.randperm(N_all)
+    idxs_train = idxs[:N_train]
+    idxs_test = idxs[N_train:]
 
-    ys_train = torch.index_select(ys, 0, idxs_train)
-    ys_test = torch.index_select(ys, 0, idxs_test)
-    X_train = torch.index_select(X, 0, idxs_train)
-    X_test = torch.index_select(X, 0, idxs_test)
-    rs_train = torch.index_select(rs, 0, idxs_train)
-    rs_test = torch.index_select(rs, 0, idxs_test)
+    stretch = 1.e-5
+    train_dataset = preprocessing.LazyGalaxyDataset(
+        hdf5_path,
+        idxs_train,
+        scaling_means,
+        scaling_stds,
+        stretch,
+        ys[idxs_train],
+        rs[idxs_train]
+    )
+    test_dataset = preprocessing.LazyGalaxyDataset(
+        hdf5_path,
+        idxs_test,
+        scaling_means,
+        scaling_stds,
+        stretch,
+        ys[idxs_test],
+        rs[idxs_test]
+    )
     ###########################################################################
 
     if must_continue:
         # Run a dummy fwd pass to initialize any lazy layers.
-        # Must run on CPU first because MPS doesn't support lazy layer
-        # materialization.
-        model(X[:2].cpu(), rs[:2].cpu())
-        model.apply(weights_init)  # Init model weights while still on CPU.
+        # Must run on CPU first because MPS doesn't support
+        # lazy layer materialization.
+        dummy_0 = train_dataset[0]
+        dummy_1 = train_dataset[1]
+        dummy_X = torch.stack([dummy_0[0], dummy_1[0]])
+        dummy_rs = torch.stack([dummy_0[1], dummy_1[1]])
+        model(dummy_X.cpu(), dummy_rs.cpu())
+        model.apply(weights_init)
         model.to(device)
         model.init_optimizer()
-    
+
         if wandb_mode == 'y':
             wandb.config['architecture'] = repr(model)
 
-    # Learning rate scheduler that will make the new lr = `factor` * lr when 
-    # it's been
-    # `patience` epochs since the MSE less decreased by less than `threshold`.
-    # I determined `threshold` by figuring I want the sqrt(MSE) to drop to 
-    # ~0.045 when the sqrt(MSE) is 0.05. 
+    # Learning rate scheduler that will make the new lr
+    # = `factor` * lr when it's been `patience` epochs since
+    # the MSE decreased by less than `threshold`.
+    # I determined `threshold` by figuring I want the
+    # sqrt(MSE) to drop to ~0.045 when the sqrt(MSE) is 0.05.
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         model.optimizer,
         'min',
@@ -1313,23 +1346,34 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     )
 
     print(model)
-     
+
     ###########################################################################
     # Make the DataLoaders.
     ###########################################################################
-    batch_size_train = max(1, int(N_train / N_batches))
-    batch_size_test = min(N_batches, N_test)
+    # Minimum batch size of 2 so BatchNorm can compute statistics.
+    batch_size_train = max(2, int(N_train / N_batches))
+    batch_size_test = max(2, int(N_test / N_batches))
+    # Workers prefetch batches from HDF5 in parallel
+    # while the GPU trains on the current batch.
+    N_workers = 4
     train_loader = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset(X_train, rs_train, ys_train),
-        batch_size=batch_size_train, 
+        train_dataset,
+        batch_size=batch_size_train,
         shuffle=True,
-        generator=torch.Generator(device='cpu')
+        # Drop the last incomplete batch so BatchNorm
+        # never receives a batch of size 1.
+        drop_last=True,
+        num_workers=N_workers,
+        persistent_workers=N_workers > 0,
+        generator=torch.Generator(device='cpu'),
     )
     test_loader = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset(X_test, rs_test, ys_test),
+        test_dataset,
         batch_size=batch_size_test,
         shuffle=True,
-        generator=torch.Generator(device='cpu')
+        num_workers=N_workers,
+        persistent_workers=N_workers > 0,
+        generator=torch.Generator(device='cpu'),
     )
     ###########################################################################
 
