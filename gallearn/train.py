@@ -11,7 +11,6 @@ import os
 import torch
 import torch.nn as nn
 import torchvision
-import numpy as np
 
 from . import cnn
 from . import config
@@ -28,171 +27,6 @@ def get_device():
     if torch.cuda.is_available():
         return torch.device('cuda')
     return torch.device('cpu')
-
-
-def load_data(dataset_fname, device):
-    """
-    Load raw data for training (no scaling applied).
-
-    Parameters
-    ----------
-    dataset_fname : str
-        Filename of the HDF5 dataset.
-    device : torch.device
-        Device to load tensors onto.
-
-    Returns
-    -------
-    dict with keys: X, rs, labels, and metadata
-    """
-    d = preprocessing.load_data(dataset_fname)
-
-    X = d['X'].to(device)
-    # Note: scaling is applied later using model.scaling_function
-
-    rs = cnn.get_radii(d).to(device)
-
-    # Create binary labels from sSFR
-    # ys_sorted contains the target values (sSFR)
-    # Quenched (0) = sSFR == 0, Star-forming (1) = sSFR > 0
-    ssfr = d['ys_sorted'].to(device)
-    labels = (ssfr > 0).float()
-
-    return {
-        'X': X,
-        'rs': rs,
-        'labels': labels,
-        'obs_sorted': d['obs_sorted'],
-        'orientations': d['orientations'],
-    }
-
-
-def train_test_split(X, rs, labels, test_fraction=0.15, seed=None):
-    """
-    Split data into training and test sets.
-
-    Parameters
-    ----------
-    X : torch.Tensor
-        Image data, shape (N, C, H, W).
-    rs : torch.Tensor
-        Effective radii, shape (N, 1).
-    labels : torch.Tensor
-        Binary labels, shape (N, 1).
-    test_fraction : float
-        Fraction of data to use for testing.
-    seed : int, optional
-        Random seed for reproducibility.
-
-    Returns
-    -------
-    dict with train and test splits, plus the indices used
-    """
-    N = len(labels)
-    N_test = max(1, int(test_fraction * N))
-    N_train = N - N_test
-
-    generator = torch.Generator(device='cpu')
-    if seed is not None:
-        generator.manual_seed(seed)
-
-    idxs = torch.randperm(N, generator=generator)
-    train_idxs = idxs[:N_train]
-    test_idxs = idxs[N_train:]
-
-    # Move indices to same device as data for indexing
-    train_idxs_dev = train_idxs.to(X.device)
-    test_idxs_dev = test_idxs.to(X.device)
-
-    return {
-        'X_train': X[train_idxs_dev],
-        'X_test': X[test_idxs_dev],
-        'rs_train': rs[train_idxs_dev],
-        'rs_test': rs[test_idxs_dev],
-        'labels_train': labels[train_idxs_dev],
-        'labels_test': labels[test_idxs_dev],
-        # Store indices on CPU for checkpoint serialization
-        'train_idxs': train_idxs,
-        'test_idxs': test_idxs,
-    }
-
-
-def apply_split_indices(X, rs, labels, train_idxs, test_idxs):
-    """
-    Apply previously saved split indices to data.
-
-    Parameters
-    ----------
-    X : torch.Tensor
-        Image data.
-    rs : torch.Tensor
-        Effective radii.
-    labels : torch.Tensor
-        Binary labels.
-    train_idxs : torch.Tensor
-        Indices for training set.
-    test_idxs : torch.Tensor
-        Indices for test set.
-
-    Returns
-    -------
-    dict with train and test splits
-    """
-    train_idxs_dev = train_idxs.to(X.device)
-    test_idxs_dev = test_idxs.to(X.device)
-
-    return {
-        'X_train': X[train_idxs_dev],
-        'X_test': X[test_idxs_dev],
-        'rs_train': rs[train_idxs_dev],
-        'rs_test': rs[test_idxs_dev],
-        'labels_train': labels[train_idxs_dev],
-        'labels_test': labels[test_idxs_dev],
-        'train_idxs': train_idxs,
-        'test_idxs': test_idxs,
-    }
-
-
-def create_dataloaders(splits, batch_size):
-    """
-    Create DataLoaders for training and testing.
-
-    Parameters
-    ----------
-    splits : dict
-        Output from train_test_split.
-    batch_size : int
-        Batch size for training.
-
-    Returns
-    -------
-    tuple of (train_loader, test_loader)
-    """
-    train_dataset = torch.utils.data.TensorDataset(
-        splits['X_train'],
-        splits['rs_train'],
-        splits['labels_train']
-    )
-    test_dataset = torch.utils.data.TensorDataset(
-        splits['X_test'],
-        splits['rs_test'],
-        splits['labels_test']
-    )
-
-    # Generators should be on CPU (works with all backends)
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        generator=torch.Generator(device='cpu')
-    )
-    test_loader = torch.utils.data.DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-    )
-
-    return train_loader, test_loader
 
 
 def compute_metrics(outputs, labels):
@@ -223,11 +57,13 @@ def compute_metrics(outputs, labels):
         precision = tp / (tp + fp + 1e-8)
         recall = tp / (tp + fn + 1e-8)
         f1 = 2 * precision * recall / (precision + recall + 1e-8)
+        specificity = tn / (tn + fp + 1e-8)
 
     return {
         'accuracy': accuracy.item(),
         'precision': precision.item(),
         'recall': recall.item(),
+        'specificity': specificity.item(),
         'f1': f1.item(),
     }
 
@@ -321,19 +157,22 @@ def evaluate(model, test_loader, loss_fn, device):
     metrics = compute_metrics(all_outputs, all_labels)
     metrics['loss'] = total_loss / len(test_loader)
 
+    preds = (torch.sigmoid(all_outputs) > 0.5).int()
+    metrics['preds'] = preds.cpu().flatten().tolist()
+    metrics['labels'] = all_labels.cpu().flatten().int().tolist()
+
     return metrics
 
 
 def save_checkpoint(
-    model,
-    epoch,
-    train_metrics,
-    test_metrics,
-    run_dir,
-    train_idxs,
-    test_idxs,
-    train_config,
-):
+        model,
+        epoch,
+        train_metrics,
+        test_metrics,
+        run_dir,
+        train_idxs,
+        test_idxs,
+        train_config):
     """
     Save a training checkpoint.
 
@@ -403,16 +242,15 @@ def weights_init(module):
 
 
 def main(
-    dataset='gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt.h5',
-    run_name=None,
-    n_epochs=100,
-    batch_size=32,
-    lr=1e-4,
-    test_fraction=0.15,
-    seed=42,
-    wandb_mode='n',
-    resume_from=None,
-):
+        dataset='gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt.h5',
+        run_name=None,
+        n_epochs=100,
+        batch_size=32,
+        lr=1e-4,
+        test_fraction=0.15,
+        seed=42,
+        wandb_mode='n',
+        resume_from=None):
     """
     Main training function.
 
@@ -464,17 +302,8 @@ def main(
                     f"Current: {dataset}"
                 )
 
-    if run_name is None:
-        run_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-
-    run_dir = os.path.join(
-        config.config['gallearn_paths']['project_data_dir'],
-        run_name
-    )
-    os.makedirs(run_dir, exist_ok=True)
-    print(f'Run directory: {run_dir}')
-
-    # Initialize wandb if requested
+    # Initialize wandb if requested (before setting run_name
+    # so wandb can generate one).
     if wandb_mode in ('y', 'r'):
         import wandb
         wandb.init(
@@ -483,63 +312,124 @@ def main(
             config=train_config,
             resume='must' if wandb_mode == 'r' else None,
         )
+        if run_name is None:
+            run_name = wandb.run.name
 
-    # Load data (unscaled)
-    print('Loading data...')
-    data = load_data(dataset, device)
-    print(f'Loaded {len(data["X"])} galaxies')
+    if run_name is None:
+        run_name = datetime.datetime.now().strftime(
+            '%Y%m%d_%H%M%S'
+        )
 
-    # Class balance
-    n_star_forming = data['labels'].sum().item()
-    n_quenched = len(data['labels']) - n_star_forming
+    run_dir = os.path.join(
+        config.config['gallearn_paths']['project_data_dir'],
+        run_name
+    )
+    os.makedirs(run_dir, exist_ok=True)
+    print('Run directory: {0}'.format(run_dir))
+
+    # Load metadata (not the full image tensor)
+    print('Loading metadata...')
+    d, N, hdf5_path = preprocessing.load_metadata(dataset)
+    print('{0} galaxies in data'.format(N))
+
+    # Binary labels from sSFR
+    ssfr = d['ys_sorted'][:N]
+    labels = (ssfr > 0).float()
+
+    n_star_forming = labels.sum().item()
+    n_quenched = len(labels) - n_star_forming
     print(
-        f'Class balance: {n_quenched:.0f} quenched, '
-        f'{n_star_forming:.0f} star-forming'
+        'Class balance: {0:.0f} quenched, '
+        '{1:.0f} star-forming'.format(n_quenched, n_star_forming)
     )
 
-    # Create model first so we can use its scaling_function
+    rs = cnn.get_radii(d)[:N]
+
+    # Compute per-channel scaling stats via chunked pass
+    # over HDF5 (never loads the full image tensor).
+    print('Computing scaling stats...')
+    stretch = 1.e-5
+    scaling_means, scaling_stds = (
+        preprocessing.compute_scaling_stats(hdf5_path, N)
+    )
+
+    # Train/test split
+    N_test = max(1, int(test_fraction * N))
+    N_train = N - N_test
+
+    if checkpoint is not None and 'train_idxs' in checkpoint:
+        print('Using train/test split from checkpoint')
+        train_idxs = checkpoint['train_idxs']
+        test_idxs = checkpoint['test_idxs']
+    else:
+        generator = torch.Generator(device='cpu')
+        if seed is not None:
+            generator.manual_seed(seed)
+        idxs = torch.randperm(N, generator=generator)
+        train_idxs = idxs[:N_train]
+        test_idxs = idxs[N_train:]
+
+    print(
+        'Train: {0}, Test: {1}'.format(
+            len(train_idxs), len(test_idxs)
+        )
+    )
+
+    # Create lazy datasets that read from HDF5 on demand
+    train_dataset = preprocessing.LazyGalaxyDataset(
+        hdf5_path,
+        train_idxs,
+        scaling_means,
+        scaling_stds,
+        stretch,
+        labels[train_idxs],
+        rs[train_idxs],
+    )
+    test_dataset = preprocessing.LazyGalaxyDataset(
+        hdf5_path,
+        test_idxs,
+        scaling_means,
+        scaling_stds,
+        stretch,
+        labels[test_idxs],
+        rs[test_idxs],
+    )
+
+    N_workers = 4
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,
+        num_workers=N_workers,
+        persistent_workers=N_workers > 0,
+        generator=torch.Generator(device='cpu'),
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=N_workers,
+        persistent_workers=N_workers > 0,
+        generator=torch.Generator(device='cpu'),
+    )
+
+    # Create model
     backbone = torchvision.models.resnet18()
     model = cnn.BernoulliNet(
         lr=lr,
         momentum=0.9,
         backbone=backbone,
         dataset=dataset,
-        in_channels=data['X'].shape[1],
+        in_channels=4,
     ).to(device)
-
-    # Apply scaling using model's scaling function
-    print(f'Scaling data with {model.scaling_function.__name__}')
-    data['X'] = model.scaling_function(data['X'])
-
-    # Train/test split - use saved indices if resuming
-    if checkpoint is not None and 'train_idxs' in checkpoint:
-        print('Using train/test split from checkpoint')
-        splits = apply_split_indices(
-            data['X'],
-            data['rs'],
-            data['labels'],
-            checkpoint['train_idxs'],
-            checkpoint['test_idxs'],
-        )
-    else:
-        splits = train_test_split(
-            data['X'],
-            data['rs'],
-            data['labels'],
-            test_fraction=test_fraction,
-            seed=seed,
-        )
-    print(f'Train: {len(splits["X_train"])}, Test: {len(splits["X_test"])}')
-
-    # Create data loaders
-    train_loader, test_loader = create_dataloaders(
-        splits, batch_size, device
-    )
 
     # Initialize lazy layers with a forward pass
     with torch.no_grad():
-        sample_X = splits['X_train'][:2]
-        sample_rs = splits['rs_train'][:2]
+        x0, r0, _ = train_dataset[0]
+        x1, r1, _ = train_dataset[1]
+        sample_X = torch.stack([x0, x1]).to(device)
+        sample_rs = torch.stack([r0, r1]).to(device)
         model(sample_X, sample_rs)
 
     model.init_optimizer()
@@ -592,6 +482,12 @@ def main(
 
         if wandb_mode in ('y', 'r'):
             import wandb
+            cm = wandb.plot.confusion_matrix(
+                probs=None,
+                y_true=test_metrics['labels'],
+                preds=test_metrics['preds'],
+                class_names=['quenched', 'star-forming'],
+            )
             wandb.log({
                 'epoch': epoch,
                 'train/loss': train_metrics['loss'],
@@ -601,7 +497,9 @@ def main(
                 'test/accuracy': test_metrics['accuracy'],
                 'test/precision': test_metrics['precision'],
                 'test/recall': test_metrics['recall'],
+                'test/specificity': test_metrics['specificity'],
                 'test/f1': test_metrics['f1'],
+                'test/confusion_matrix': cm,
                 'lr': model.optimizer.param_groups[0]['lr'],
             })
 
@@ -614,8 +512,8 @@ def main(
                 train_metrics,
                 test_metrics,
                 run_dir,
-                splits['train_idxs'],
-                splits['test_idxs'],
+                train_idxs,
+                test_idxs,
                 train_config,
             )
             print(f'  -> New best F1! Saved checkpoint to {path}')
@@ -627,8 +525,8 @@ def main(
         train_metrics,
         test_metrics,
         run_dir,
-        splits['train_idxs'],
-        splits['test_idxs'],
+        train_idxs,
+        test_idxs,
         train_config,
     )
     print(f'\nTraining complete. Best test F1: {best_f1:.3f}')
@@ -647,7 +545,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--dataset',
         type=str,
-        default='gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt.h5',
+        default='gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5',
         help='Dataset filename'
     )
     parser.add_argument(
