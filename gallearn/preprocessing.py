@@ -23,8 +23,10 @@ def load_data(fname):
         obs_sorted = np.array(f['obs_sorted'], dtype=str)
         orientations = np.array(f['orientations'], dtype=str)
         file_names = np.array(f['file_names'], dtype=str)
+        # Expects (N, 1) layout. Run scripts/transpose_hdf5.py first if the
+        # file
+        # still has Julia order (1, N).
         ys_sorted = torch.FloatTensor(np.array(f['ys_sorted']))
-        ys_sorted = torch.FloatTensor(np.array(f['ys_sorted'])).transpose(1, 0)
     d = {
         'X': X,
         'obs_sorted': obs_sorted,
@@ -41,6 +43,7 @@ def load_data(fname):
     ))
 
     return d
+
 
 def load_metadata(fname):
     '''
@@ -64,7 +67,9 @@ def load_metadata(fname):
         obs_sorted = np.array(f['obs_sorted'], dtype=str)
         orientations = np.array(f['orientations'], dtype=str)
         file_names = np.array(f['file_names'], dtype=str)
-        ys_sorted = torch.FloatTensor(np.array(f['ys_sorted'])).transpose(1, 0)
+        ys_sorted = torch.FloatTensor(
+            np.array(f['ys_sorted'])
+        )
     d = {
         'obs_sorted': obs_sorted,
         'orientations': orientations,
@@ -73,6 +78,7 @@ def load_metadata(fname):
     }
 
     return d, N, hdf5_path
+
 
 def compute_scaling_stats(hdf5_path, N, stretch=1.e-5, chunk_size=256):
     '''
@@ -169,8 +175,15 @@ class LazyGalaxyDataset(torch.utils.data.Dataset):
         return x, self.rs[idx], self.ys[idx]
 
     def __getstate__(self):
-        # Exclude the h5py file handle so the dataset can be
-        # pickled for DataLoader worker processes.
+        # h5py file objects cannot be pickled. When num_workers > 0, the
+        # DataLoader pickles this dataset to send it to each worker process
+        # (macOS uses "spawn" rather than "fork"). If anything has called
+        # __getitem__ before the DataLoader spawns workers, _file will be
+        # an open h5py._hl.files.File object and pickling would fail. We
+        # return a copy of the state dict with _file replaced by None so
+        # that pickle sees a plain None instead of an unpicklable h5py
+        # handle. Each worker then re-opens the file lazily on its first
+        # __getitem__ call.
         state = self.__dict__.copy()
         state['_file'] = None
         return state
@@ -196,11 +209,13 @@ def sasinh_imgs_sscale_vmaps(X, stretch=1.e-5):
 
     return X
 
+
 def std_asinh(X, stretch=1.e-5, return_distrib=False, means=None, stds=None):
     import torch
     X = X.detach().clone()
     X = torch.asinh(stretch * X)
     return std_scale(X, return_distrib, means, stds)
+
 
 def min_max_scale(X):
     '''
@@ -215,6 +230,7 @@ def min_max_scale(X):
         )
     return X
 
+
 def min_max_scale_255(X):
     '''
     Min-max scale the data from 0 to 255.
@@ -226,6 +242,7 @@ def min_max_scale_255(X):
             / (X[:, i].max() - X[:, i].min()) 
         )
     return X
+
 
 def new_min_max_scale(X):
     '''
@@ -243,6 +260,7 @@ def new_min_max_scale(X):
             / (X[:, i].max() - X[:, i].min()) 
         )
     return X
+
 
 def std_scale(X, return_distrib=False, means=None, stds=None):
     import torch
@@ -263,6 +281,7 @@ def std_scale(X, return_distrib=False, means=None, stds=None):
     else:
         return X 
 
+
 def log_min_max_scale(X):
     import torch
     logX = torch.log10(X)
@@ -270,6 +289,7 @@ def log_min_max_scale(X):
     logX[iszero] = logX[~iszero].min()
     Xlogminmax = min_max_scale(logX)
     return Xlogminmax
+
 
 def plt_distrib_of_means(ax, X, title=None, all_bands=False):
     import matplotlib.pyplot as plt
@@ -320,6 +340,7 @@ def plt_distrib_of_means(ax, X, title=None, all_bands=False):
     if title is not None:
         print('Added {0:s} to figure.'.format(title.lower()))
     return None
+
 
 def plt_distrib(ax, X, title=None, all_bands=False):
     import torch
@@ -376,6 +397,7 @@ def plt_distrib(ax, X, title=None, all_bands=False):
     if title is not None:
         print('Added {0:s} to figure.'.format(title.lower()))
     return None
+
 
 def test(save=False):
     import torch
@@ -453,6 +475,7 @@ def test(save=False):
 
     return None
 
+
 def plt_ssfr():
     import os
     import torch
@@ -481,6 +504,7 @@ def plt_ssfr():
     plt.show()
 
     return None
+
 
 if __name__ == '__main__':
     test(save=True)

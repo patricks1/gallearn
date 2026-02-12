@@ -13,10 +13,12 @@ TEST_DATA_DIR = pathlib.Path(__file__).parent / 'test_data'
 TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def make_sfr_data():
+def make_sfr_data(seed=42):
     from gallearn import preprocessing
 
-    dataset_fname = 'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt.h5'
+    dataset_fname = (
+        'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
+    )
     test_data_fname = dataset_fname#.replace('data', 'testdata')
 
     with h5py.File(PROJ_DATA_DIR / dataset_fname, 'r') as f_source:
@@ -24,12 +26,14 @@ def make_sfr_data():
         with h5py.File(TEST_DATA_DIR / test_data_fname, 'w') as f_test:
             for i, key in enumerate(keys):
                 if i == 0:
-                    N = f_source[key].shape[-1]
-                    rng = np.random.default_rng(42)
+                    # With the new nchw arranged h5 files, samples are in the
+                    # rows (axis 0)
+                    N = f_source[key].shape[0]
+                    rng = np.random.default_rng(seed)
                     idxs = rng.choice(N, size=10, replace=False)
 
                 source_literal = f_source[key][:]
-                test_literal = source_literal[..., idxs]
+                test_literal = source_literal[idxs]
                 f_test.create_dataset(key, data=test_literal)
 
                 if key == 'obs_sorted':

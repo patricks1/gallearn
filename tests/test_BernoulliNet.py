@@ -13,7 +13,9 @@ def test_BernoulliNet():
     '''
     from gallearn import cnn, preprocessing
 
-    data_fname = 'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt.h5'
+    data_fname = (
+        'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
+    )
     data_dict = preprocessing.load_data(data_fname)
     X = data_dict['X']
     rs = cnn.get_radii(data_dict)
