@@ -49,7 +49,6 @@ Usage
   python scripts/gen_octant_images.py
 """
 
-import argparse
 import pathlib
 
 import h5py
@@ -160,18 +159,6 @@ def scan_image_dirs(host_dir, sat_dir):
 def main():
     import gallearn
 
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        '--objects_subdir',
-        default='objects_1200_original',
-        help=('Subdirectory within firebox_dir that holds per-galaxy'
-              ' particle files. Default: objects_1200_original.'),
-    )
-    args = parser.parse_args()
-
     config_paths = gallearn.config.config['gallearn_paths']
 
     # host_image_dir and sat_image_dir come exclusively from
@@ -182,7 +169,7 @@ def main():
 
     firebox_dir = pathlib.Path(config_paths['firebox_data_dir'])
     output_dir = pathlib.Path(config_paths['aug_angles_image_dir'])
-    objects_dir = firebox_dir / args.objects_subdir
+    objects_dir = firebox_dir / 'objects_1200'
 
     # Scan existing image directories to build the galaxy catalogue.
     # Each entry carries the source file's attributes, FOV, and
