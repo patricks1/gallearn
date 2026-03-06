@@ -190,7 +190,7 @@ def main():
     n_skip = 0
     for i, gal in enumerate(galaxies):
         src_attrs = gal['attrs']
-        gal_id = src_attrs['galaxyID']
+        gal_id = int(src_attrs['galaxyID'])
         fov = gal['fov']
         pixels = gal['pixels']
         fname = gal['fname']
