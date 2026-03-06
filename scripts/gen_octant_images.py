@@ -49,6 +49,7 @@ Usage
   python scripts/gen_octant_images.py
 """
 
+import multiprocessing
 import pathlib
 
 import h5py
@@ -156,14 +157,119 @@ def scan_image_dirs(host_dir, sat_dir):
     return galaxies
 
 
+def process_galaxy(gal, objects_dir, output_dir):
+    """Generate octant images for a single galaxy.  Returns True
+    on success, False on skip/error."""
+    src_attrs = gal['attrs']
+    gal_id = int(src_attrs['galaxyID'])
+    fov = gal['fov']
+    pixels = gal['pixels']
+    fname = gal['fname']
+
+    obj_path = (
+        objects_dir
+        / f'particles_within_Rvir_object_{gal_id}.hdf5'
+    )
+    ahf_path = (
+        objects_dir
+        / f'bound_particle_filters_object_{gal_id}.hdf5'
+    )
+
+    if not obj_path.exists():
+        print(
+            f'{gal_id}: {obj_path.name} not found, skipping.',
+            flush=True,
+        )
+        return False
+
+    ahf_arg = (
+        str(ahf_path) if ahf_path.exists() else None
+    )
+
+    print(
+        f'{gal_id} (FOV={fov}, {pixels}px)',
+        flush=True,
+    )
+
+    try:
+        # load_sim_General defaults to mass_unit='simulation'
+        # and length_unit='simulation', matching the FIREbox
+        # calling convention in Courtney's mockobservation
+        # tutorials.
+        star_sd, gas_sd = gt.load_sim_General(
+            str(obj_path),
+            ahf_path=ahf_arg,
+        )
+    except Exception as exc:
+        print(f'  {gal_id} load error: {exc}', flush=True)
+        return False
+
+    out_path = output_dir / fname
+    try:
+        with h5py.File(out_path, 'w') as f:
+            for label, n in OCTANT_DIRECTIONS.items():
+                R = rotation_matrix_to_z(n)
+                star_rot = rotate_snapdict(star_sd, R)
+                gas_rot = rotate_snapdict(gas_sd, R)
+
+                band_u, band_g, band_r = (
+                    gt.get_mock_observation(
+                        star_rot,
+                        gas_rot,
+                        bands=[1, 2, 3],
+                        FOV=fov,
+                        pixels=pixels,
+                        view='xy',
+                        center='none',
+                        return_type='SB_lum',
+                        QUIET=True,
+                    )
+                )
+
+                grp_name = f'projection_{label}'
+                grp = f.create_group(grp_name)
+                for k, v in src_attrs.items():
+                    grp.attrs[k] = v
+                grp.attrs['projection'] = label
+                grp.create_dataset(
+                    'band_u',
+                    data=np.float32(band_u),
+                )
+                grp.create_dataset(
+                    'band_g',
+                    data=np.float32(band_g),
+                )
+                grp.create_dataset(
+                    'band_r',
+                    data=np.float32(band_r),
+                )
+    except Exception as exc:
+        print(
+            f'  {gal_id} image generation error: {exc}',
+            flush=True,
+        )
+        if out_path.exists():
+            out_path.unlink()
+        return False
+
+    print(f'  Saved {out_path.name}', flush=True)
+    return True
+
+
+def _worker(args):
+    """Unpack arguments for process_galaxy so it works with
+    Pool.map."""
+    return process_galaxy(*args)
+
+
 def main():
     import gallearn
 
     config_paths = gallearn.config.config['gallearn_paths']
 
     # host_image_dir and sat_image_dir come exclusively from
-    # config_<env_name>.ini so that this script always uses the same
-    # directories as image_loader.jl.
+    # config_<env_name>.ini so that this script always uses the
+    # same directories as image_loader.jl.
     host_image_dir = config_paths['host_image_dir']
     sat_image_dir = config_paths['sat_image_dir']
 
@@ -171,9 +277,9 @@ def main():
     output_dir = pathlib.Path(config_paths['aug_angles_image_dir'])
     objects_dir = firebox_dir / 'objects_1200'
 
-    # Scan existing image directories to build the galaxy catalogue.
-    # Each entry carries the source file's attributes, FOV, and
-    # pixel count.
+    # Scan existing image directories to build the galaxy
+    # catalogue.  Each entry carries the source file's attributes,
+    # FOV, and pixel count.
     galaxies = scan_image_dirs(host_image_dir, sat_image_dir)
     n_galaxies = len(galaxies)
     print(
@@ -186,111 +292,22 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    n_done = 0
-    n_skip = 0
-    for i, gal in enumerate(galaxies):
-        src_attrs = gal['attrs']
-        gal_id = int(src_attrs['galaxyID'])
-        fov = gal['fov']
-        pixels = gal['pixels']
-        fname = gal['fname']
+    n_workers = multiprocessing.cpu_count()
+    print(f'Using {n_workers} workers.', flush=True)
 
-        obj_path = (
-            objects_dir
-            / f'particles_within_Rvir_object_{gal_id}.hdf5'
-        )
-        ahf_path = (
-            objects_dir
-            / f'bound_particle_filters_object_{gal_id}.hdf5'
-        )
+    work_args = [
+        (gal, objects_dir, output_dir)
+        for gal in galaxies
+    ]
 
-        if not obj_path.exists():
-            print(
-                f'[{i+1}/{n_galaxies}] {gal_id}:'
-                f' {obj_path.name} not found, skipping.',
-                flush=True,
-            )
-            n_skip += 1
-            continue
+    with multiprocessing.Pool(n_workers) as pool:
+        results = pool.map(_worker, work_args)
 
-        ahf_arg = (
-            str(ahf_path) if ahf_path.exists() else None
-        )
-
-        print(
-            f'[{i+1}/{n_galaxies}] {gal_id}'
-            f' (FOV={fov}, {pixels}px)',
-            flush=True,
-        )
-
-        try:
-            # load_sim_General defaults to mass_unit='simulation'
-            # and length_unit='simulation', matching the FIREbox
-            # calling convention in Courtney's mockobservation
-            # tutorials.
-            star_sd, gas_sd = gt.load_sim_General(
-                str(obj_path),
-                ahf_path=ahf_arg,
-            )
-        except Exception as exc:
-            print(f'  Load error: {exc}', flush=True)
-            n_skip += 1
-            continue
-
-        out_path = output_dir / fname
-        try:
-            with h5py.File(out_path, 'w') as f:
-                for label, n in OCTANT_DIRECTIONS.items():
-                    R = rotation_matrix_to_z(n)
-                    star_rot = rotate_snapdict(star_sd, R)
-                    gas_rot = rotate_snapdict(gas_sd, R)
-
-                    band_u, band_g, band_r = (
-                        gt.get_mock_observation(
-                            star_rot,
-                            gas_rot,
-                            bands=[1, 2, 3],
-                            FOV=fov,
-                            pixels=pixels,
-                            view='xy',
-                            center='none',
-                            return_type='SB_lum',
-                            QUIET=True,
-                        )
-                    )
-
-                    grp_name = f'projection_{label}'
-                    grp = f.create_group(grp_name)
-                    for k, v in src_attrs.items():
-                        grp.attrs[k] = v
-                    grp.attrs['projection'] = label
-                    grp.create_dataset(
-                        'band_u',
-                        data=np.float32(band_u),
-                    )
-                    grp.create_dataset(
-                        'band_g',
-                        data=np.float32(band_g),
-                    )
-                    grp.create_dataset(
-                        'band_r',
-                        data=np.float32(band_r),
-                    )
-        except Exception as exc:
-            print(
-                f'  Image generation error: {exc}',
-                flush=True,
-            )
-            if out_path.exists():
-                out_path.unlink()
-            n_skip += 1
-            continue
-
-        n_done += 1
-        print(f'  Saved {out_path.name}', flush=True)
-
+    n_done = sum(results)
+    n_skip = len(results) - n_done
     print(
-        f'\nDone. {n_done} galaxies processed, {n_skip} skipped.',
+        f'\nDone. {n_done} galaxies processed,'
+        f' {n_skip} skipped.',
         flush=True,
     )
 
