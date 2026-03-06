@@ -150,6 +150,70 @@ def make_image_files():
     return None
 
 
+def make_bound_particle_filters():
+    """Create test bound particle filter files by intersecting
+    the real bound particle IDs with the particle IDs present
+    in the downsampled test particle files."""
+    import gallearn
+
+    firebox_data_dir = pathlib.Path(
+        gallearn.config.config['gallearn_paths'][
+            'firebox_data_dir'
+        ]
+    )
+    test_objects_dir = (
+        TEST_DATA_DIR / 'objects_1200_original'
+    )
+
+    for gal_id in [768, 1271]:
+        src_ahf_path = (
+            firebox_data_dir
+            / 'objects_1200_original'
+            / f'bound_particle_filters_object_{gal_id}.hdf5'
+        )
+        test_particles_path = (
+            test_objects_dir
+            / f'particles_within_Rvir_object_{gal_id}.hdf5'
+        )
+        dst_path = (
+            test_objects_dir
+            / f'bound_particle_filters_object_{gal_id}.hdf5'
+        )
+
+        if not src_ahf_path.exists():
+            print(
+                f'Warning: {src_ahf_path} not found,'
+                f' skipping.'
+            )
+            continue
+
+        with h5py.File(src_ahf_path, 'r') as ahf:
+            bound_ids = ahf['particleIDs'][:]
+            bound_types = ahf['partTypes'][:]
+
+        with h5py.File(test_particles_path, 'r') as p:
+            test_gas_ids = set(p['gas_id'][:].astype(int))
+            test_star_ids = set(
+                p['stellar_id'][:].astype(int)
+            )
+
+        test_ids = test_gas_ids | test_star_ids
+        keep = np.array([
+            int(pid) in test_ids
+            for pid in bound_ids
+        ])
+
+        with h5py.File(dst_path, 'w') as out:
+            out.create_dataset(
+                'particleIDs', data=bound_ids[keep],
+            )
+            out.create_dataset(
+                'partTypes', data=bound_types[keep],
+            )
+
+    return None
+
+
 def make_firebox_data():
     import uci_tools
     import gallearn
@@ -157,7 +221,7 @@ def make_firebox_data():
     firebox_data_dir = pathlib.Path(
         gallearn.config.config['paths']['firebox_data_dir']
     )
-    output_dir = TEST_DATA_DIR / 'objects_1200'
+    output_dir = TEST_DATA_DIR / 'objects_1200_original'
     output_dir.mkdir(parents=False, exist_ok=True)
 
     for fname in [
@@ -165,7 +229,7 @@ def make_firebox_data():
             'particles_within_Rvir_object_1271.hdf5']:
         orig_path = (
             firebox_data_dir
-            / 'objects_1200'
+            / 'objects_1200_original'
             / fname
         )
         output_path = output_dir / fname
@@ -181,3 +245,4 @@ if __name__ == '__main__':
     make_shapes_data(ids, orientations)
     make_image_files()
     make_firebox_data()
+    make_bound_particle_filters()
