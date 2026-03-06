@@ -49,6 +49,8 @@ Usage
   python scripts/gen_octant_images.py
 """
 
+import contextlib
+import io
 import multiprocessing
 import pathlib
 
@@ -186,15 +188,21 @@ def process_galaxy(gal, objects_dir, output_dir):
         str(ahf_path) if ahf_path.exists() else None
     )
 
+    # Redirect stdout to suppress verbose printouts from
+    # mockobservation_tools and its dependencies (e.g. L/M
+    # band calculation messages).
+    devnull = io.StringIO()
+
     try:
         # load_sim_General defaults to mass_unit='simulation'
         # and length_unit='simulation', matching the FIREbox
         # calling convention in Courtney's mockobservation
         # tutorials.
-        star_sd, gas_sd = gt.load_sim_General(
-            str(obj_path),
-            ahf_path=ahf_arg,
-        )
+        with contextlib.redirect_stdout(devnull):
+            star_sd, gas_sd = gt.load_sim_General(
+                str(obj_path),
+                ahf_path=ahf_arg,
+            )
     except Exception as exc:
         return {
             'gal_id': gal_id,
@@ -210,19 +218,20 @@ def process_galaxy(gal, objects_dir, output_dir):
                 star_rot = rotate_snapdict(star_sd, R)
                 gas_rot = rotate_snapdict(gas_sd, R)
 
-                band_u, band_g, band_r = (
-                    gt.get_mock_observation(
-                        star_rot,
-                        gas_rot,
-                        bands=[1, 2, 3],
-                        FOV=fov,
-                        pixels=pixels,
-                        view='xy',
-                        center='none',
-                        return_type='SB_lum',
-                        QUIET=True,
+                with contextlib.redirect_stdout(devnull):
+                    band_u, band_g, band_r = (
+                        gt.get_mock_observation(
+                            star_rot,
+                            gas_rot,
+                            bands=[1, 2, 3],
+                            FOV=fov,
+                            pixels=pixels,
+                            view='xy',
+                            center='none',
+                            return_type='SB_lum',
+                            QUIET=True,
+                        )
                     )
-                )
 
                 grp_name = f'projection_{label}'
                 grp = f.create_group(grp_name)
