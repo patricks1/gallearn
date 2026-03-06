@@ -474,8 +474,9 @@ class BernoulliNet(nn.Module):
 
     def init_optimizer(self):
         self.optimizer = torch.optim.Adam(
-            self.parameters(), 
-            lr=self.lr, 
+            self.parameters(),
+            lr=self.lr,
+            weight_decay=1e-4,
         )
         return None
 

@@ -160,7 +160,7 @@ class LazyGalaxyDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         if self._file is None:
-            self._file = h5py.File(self.hdf5_path, 'r')
+            self._file = h5py.File(self.hdf5_path, 'r', locking=False)
         hdf5_idx = self.indices[idx].item()
         # HDF5 shape is (N, C, H, W); read one sample -> (C, H, W)
         x = torch.FloatTensor(self._file['X'][hdf5_idx])

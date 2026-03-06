@@ -59,12 +59,23 @@ def compute_metrics(outputs, labels):
         f1 = 2 * precision * recall / (precision + recall + 1e-8)
         specificity = tn / (tn + fp + 1e-8)
 
+        # F1 for the quenched (negative) class
+        precision_q = tn / (tn + fn + 1e-8)
+        recall_q = tn / (tn + fp + 1e-8)
+        f1_q = (
+            2 * precision_q * recall_q
+            / (precision_q + recall_q + 1e-8)
+        )
+        macro_f1 = (f1 + f1_q) / 2
+
     return {
         'accuracy': accuracy.item(),
         'precision': precision.item(),
         'recall': recall.item(),
         'specificity': specificity.item(),
         'f1': f1.item(),
+        'f1_quenched': f1_q.item(),
+        'macro_f1': macro_f1.item(),
     }
 
 
@@ -469,7 +480,7 @@ def main(
 
     # Training loop
     print('Starting training...\n')
-    best_f1 = 0.0
+    best_test_loss = float('inf')
 
     for epoch in range(start_epoch, start_epoch + n_epochs):
         train_metrics = train_epoch(model, train_loader, loss_fn, device)
@@ -485,7 +496,7 @@ def main(
             f'Acc: {train_metrics["accuracy"]:.3f} | '
             f'Test Loss: {test_metrics["loss"]:.4f}, '
             f'Acc: {test_metrics["accuracy"]:.3f}, '
-            f'F1: {test_metrics["f1"]:.3f}'
+            f'Macro F1: {test_metrics["macro_f1"]:.3f}'
         )
 
         if wandb_mode in ('y', 'r'):
@@ -513,14 +524,16 @@ def main(
                 'test/recall': test_metrics['recall'],
                 'test/specificity': test_metrics['specificity'],
                 'test/f1': test_metrics['f1'],
+                'test/f1_quenched': test_metrics['f1_quenched'],
+                'test/macro_f1': test_metrics['macro_f1'],
                 'test/confusion_matrix': wandb.Image(fig),
                 'lr': model.optimizer.param_groups[0]['lr'],
             })
             plt.close(fig)
 
-        # Save checkpoint if best F1
-        if test_metrics['f1'] > best_f1:
-            best_f1 = test_metrics['f1']
+        # Save checkpoint if best test loss
+        if test_metrics['loss'] < best_test_loss:
+            best_test_loss = test_metrics['loss']
             path = save_checkpoint(
                 model,
                 epoch,
@@ -531,7 +544,10 @@ def main(
                 test_idxs,
                 train_config,
             )
-            print(f'  -> New best F1! Saved checkpoint to {path}')
+            print(
+                f'  -> New best test loss! Saved checkpoint'
+                f' to {path}'
+            )
 
     # Save final checkpoint
     save_checkpoint(
@@ -544,7 +560,10 @@ def main(
         test_idxs,
         train_config,
     )
-    print(f'\nTraining complete. Best test F1: {best_f1:.3f}')
+    print(
+        f'\nTraining complete. Best test loss:'
+        f' {best_test_loss:.4f}'
+    )
 
     if wandb_mode in ('y', 'r'):
         import wandb
