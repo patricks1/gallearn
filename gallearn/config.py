@@ -119,6 +119,12 @@ def ensure_user_config():
             ):
         changed = True
 
+    if ensure_key(
+            config,
+            'aug_angles_image_dir',
+            '/DFS-L/DATA/cosmo/pstaudt/FIREBox/Images/band_ugr'):
+        changed = True
+
     if changed:
         with open(config_path, 'w') as f:
             config.write(f)
