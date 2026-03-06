@@ -118,6 +118,7 @@ def touch_image_files():
 
 def make_firebox_data():
     import uci_tools
+    import gallearn
 
     firebox_data_dir = pathlib.Path(
         gallearn.config.config['paths']['firebox_data_dir']
