@@ -28,8 +28,9 @@ jobs:
         conda env update --file environment_ci.yml --name base
     - name: Install git pip packages
       run: |
-        pip install --no-build-isolation \
-          git+https://github.com/courtk32/FIRE_studio.git \
+        conda run -n base pip install --no-build-isolation \
+          git+https://github.com/courtk32/FIRE_studio.git
+        conda run -n base pip install --no-build-isolation \
           git+https://github.com/courtk32/mockobservation-tools.git
     - name: Lint with flake8
       run: |
