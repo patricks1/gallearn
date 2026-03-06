@@ -49,7 +49,7 @@ def make_sfr_data(seed=42):
     return ids, orientations
 
 
-def make_shapes_data(ids, orientations):
+def make_shapes_data(ids, orientations, seed=42):
     def sample_df(config_key, ids, orientations):
         key_df = pd.DataFrame({'galaxyID': ids, 'view': orientations})
         assert not key_df.duplicated().any(), (
@@ -81,7 +81,7 @@ def make_shapes_data(ids, orientations):
             # Remove the indicator column.
             .drop(columns='_merge')
         )
-        df_extras = df_antikey.sample(5, replace=False)
+        df_extras = df_antikey.sample(5, replace=False, random_state=seed)
 
         df_sample = shapes_df.merge(
             key_df,
@@ -123,8 +123,8 @@ def make_firebox_data():
     firebox_data_dir = pathlib.Path(
         gallearn.config.config['paths']['firebox_data_dir']
     )
-    output_dir = pathlib.Path('./test_data/objects_1200')
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = TEST_DATA_DIR / 'objects_1200'
+    output_dir.mkdir(parents=False, exist_ok=True)
 
     for fname in [
             'particles_within_Rvir_object_768.hdf5',
