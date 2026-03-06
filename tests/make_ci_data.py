@@ -102,16 +102,50 @@ def make_shapes_data(ids, orientations, seed=42):
     return None
 
 
-def touch_image_files():
-    sat_img_dir = TEST_DATA_DIR / 'sat_band_ugr'
-    sat_img_dir.mkdir(parents=True, exist_ok=True)
-    sat_img_path = sat_img_dir / 'object_1271_sate_ugrband_FOV13_p650.hdf5'
-    sat_img_path.touch()
+def make_image_files():
+    """Create minimal per-galaxy HDF5 image files with attributes
+    matching Courtney's format.  No actual image data is stored;
+    only the projection group attributes are needed for
+    scan_image_dirs and tests."""
+    import gallearn
 
-    host_img_dir = TEST_DATA_DIR / 'host_band_ugr'
-    host_img_dir.mkdir(parents=True, exist_ok=True)
-    host_img_path = host_img_dir / 'object_768_host_ugrband_FOV15_p750.hdf5'
-    host_img_path.touch()
+    config_paths = gallearn.config.config['gallearn_paths']
+    host_image_dir = pathlib.Path(
+        config_paths['host_image_dir']
+    )
+    sat_image_dir = pathlib.Path(
+        config_paths['sat_image_dir']
+    )
+
+    # Copy attributes from the real image files for the two test
+    # galaxies.  Only attributes are needed; image data is omitted.
+    test_files = [
+        (
+            host_image_dir
+            / 'object_768_host_ugrband_FOV15_p750.hdf5',
+            TEST_DATA_DIR / 'host_band_ugr',
+        ),
+        (
+            sat_image_dir
+            / 'object_1271_sate_ugrband_FOV13_p650.hdf5',
+            TEST_DATA_DIR / 'sat_band_ugr',
+        ),
+    ]
+
+    for src_path, dst_dir in test_files:
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        dst_path = dst_dir / src_path.name
+        with h5py.File(src_path, 'r') as src:
+            grp_name = list(src.keys())[0]
+            attrs = dict(src[grp_name].attrs)
+        with h5py.File(dst_path, 'w') as dst:
+            for proj in ['xy', 'yz', 'zx']:
+                grp = dst.create_group(
+                    f'projection_{proj}'
+                )
+                for k, v in attrs.items():
+                    grp.attrs[k] = v
+                grp.attrs['projection'] = proj
 
     return None
 
@@ -145,5 +179,5 @@ def make_firebox_data():
 if __name__ == '__main__':
     ids, orientations = make_sfr_data()
     make_shapes_data(ids, orientations)
-    touch_image_files()
+    make_image_files()
     make_firebox_data()
