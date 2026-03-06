@@ -102,6 +102,47 @@ def make_shapes_data(ids, orientations):
     return None
 
 
+def touch_image_files():
+    sat_img_dir = TEST_DATA_DIR / 'sat_band_ugr'
+    sat_img_dir.mkdir(parents=True, exist_ok=True)
+    sat_img_path = sat_img_dir / 'object_1271_sate_ugrband_FOV13_p650.hdf5'
+    sat_img_path.touch()
+
+    host_img_dir = TEST_DATA_DIR / 'host_band_ugr'
+    host_img_dir.mkdir(parents=True, exist_ok=True)
+    host_img_path = host_img_dir / 'object_768_host_ugrband_FOV15_p750.hdf5'
+    host_img_path.touch()
+
+    return None
+
+
+def make_firebox_data():
+    import uci_tools
+
+    firebox_data_dir = pathlib.Path(
+        gallearn.config.config['paths']['firebox_data_dir']
+    )
+    output_dir = pathlib.Path('./test_data/objects_1200')
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for fname in [
+            'particles_within_Rvir_object_768.hdf5',
+            'particles_within_Rvir_object_1271.hdf5']:
+        orig_path = (
+            firebox_data_dir
+            / 'objects_1200'
+            / fname
+        )
+        output_path = output_dir / fname
+        
+        grps = uci_tools.tools.get_downsample_groups(orig_path, 3)
+        uci_tools.tools.downsample_data(orig_path, output_path, grps, 1.e-2)
+
+    return None
+
+
 if __name__ == '__main__':
     ids, orientations = make_sfr_data()
     make_shapes_data(ids, orientations)
+    touch_image_files()
+    make_firebox_data()
