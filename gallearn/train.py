@@ -447,8 +447,16 @@ def main(
     print(f'\nModel architecture:\n{model}\n')
 
     # Loss function (BCEWithLogitsLoss is more numerically stable than
-    # Sigmoid + BCELoss)
-    loss_fn = nn.BCEWithLogitsLoss()
+    # Sigmoid + BCELoss).  pos_weight = n_negative / n_positive
+    # upweights the minority class (quenched, label=0 is negative,
+    # star-forming, label=1 is positive) to counteract class imbalance.
+    train_labels = labels[train_idxs]
+    n_pos = float((train_labels == 1).sum())
+    n_neg = float((train_labels == 0).sum())
+    pos_weight = torch.tensor(
+        n_neg / n_pos, device=device,
+    )
+    loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     # Learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -481,13 +489,19 @@ def main(
         )
 
         if wandb_mode in ('y', 'r'):
+            import matplotlib.pyplot as plt
             import wandb
-            cm = wandb.plot.confusion_matrix(
-                probs=None,
-                y_true=test_metrics['labels'],
-                preds=test_metrics['preds'],
-                class_names=['quenched', 'star-forming'],
+            from sklearn.metrics import ConfusionMatrixDisplay
+
+            fig, ax = plt.subplots()
+            ConfusionMatrixDisplay.from_predictions(
+                test_metrics['labels'],
+                test_metrics['preds'],
+                display_labels=['quenched', 'star-forming'],
+                normalize='true',
+                ax=ax,
             )
+            ax.set_title(f'Epoch {epoch}')
             wandb.log({
                 'epoch': epoch,
                 'train/loss': train_metrics['loss'],
@@ -499,9 +513,10 @@ def main(
                 'test/recall': test_metrics['recall'],
                 'test/specificity': test_metrics['specificity'],
                 'test/f1': test_metrics['f1'],
-                'test/confusion_matrix': cm,
+                'test/confusion_matrix': wandb.Image(fig),
                 'lr': model.optimizer.param_groups[0]['lr'],
             })
+            plt.close(fig)
 
         # Save checkpoint if best F1
         if test_metrics['f1'] > best_f1:
