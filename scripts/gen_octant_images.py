@@ -73,6 +73,8 @@ OCTANT_DIRECTIONS = {
     'mmm': np.array([-1., -1., -1.]) / np.sqrt(3.),
 }
 
+OCTANT_LABELS = list(OCTANT_DIRECTIONS.keys())
+
 
 def rotation_matrix_to_z(n):
     """
@@ -159,9 +161,9 @@ def scan_image_dirs(host_dir, sat_dir):
     return galaxies
 
 
-def process_galaxy(gal, objects_dir, output_dir):
-    """Generate octant images for a single galaxy.  Returns a
-    dict with keys 'gal_id', 'success', and 'message'."""
+def process_galaxy(gal, objects_dir, output_dir, queue):
+    """Generate octant images for a single galaxy.  Sends
+    progress updates to queue and returns a result dict."""
     src_attrs = gal['attrs']
     gal_id = int(src_attrs['galaxyID'])
     fov = gal['fov']
@@ -178,6 +180,7 @@ def process_galaxy(gal, objects_dir, output_dir):
     )
 
     if not obj_path.exists():
+        queue.put(('skip', gal_id, obj_path.name))
         return {
             'gal_id': gal_id,
             'success': False,
@@ -187,6 +190,8 @@ def process_galaxy(gal, objects_dir, output_dir):
     ahf_arg = (
         str(ahf_path) if ahf_path.exists() else None
     )
+
+    queue.put(('load', gal_id, None))
 
     # Redirect stdout to suppress verbose printouts from
     # mockobservation_tools and its dependencies (e.g. L/M
@@ -204,6 +209,7 @@ def process_galaxy(gal, objects_dir, output_dir):
                 ahf_path=ahf_arg,
             )
     except Exception as exc:
+        queue.put(('error', gal_id, str(exc)))
         return {
             'gal_id': gal_id,
             'success': False,
@@ -213,7 +219,8 @@ def process_galaxy(gal, objects_dir, output_dir):
     out_path = output_dir / fname
     try:
         with h5py.File(out_path, 'w') as f:
-            for label, n in OCTANT_DIRECTIONS.items():
+            for oct_i, (label, n) in enumerate(
+                    OCTANT_DIRECTIONS.items()):
                 R = rotation_matrix_to_z(n)
                 star_rot = rotate_snapdict(star_sd, R)
                 gas_rot = rotate_snapdict(gas_sd, R)
@@ -250,15 +257,20 @@ def process_galaxy(gal, objects_dir, output_dir):
                     'band_r',
                     data=np.float32(band_r),
                 )
+
+                queue.put(('octant', gal_id, oct_i + 1))
+
     except Exception as exc:
         if out_path.exists():
             out_path.unlink()
+        queue.put(('error', gal_id, str(exc)))
         return {
             'gal_id': gal_id,
             'success': False,
             'message': f'image generation error: {exc}',
         }
 
+    queue.put(('done', gal_id, None))
     return {
         'gal_id': gal_id,
         'success': True,
@@ -273,6 +285,10 @@ def _worker(args):
 
 
 def main():
+    import rich.live
+    import rich.progress
+    import rich.table
+
     import gallearn
 
     config_paths = gallearn.config.config['gallearn_paths']
@@ -283,58 +299,155 @@ def main():
     host_image_dir = config_paths['host_image_dir']
     sat_image_dir = config_paths['sat_image_dir']
 
-    firebox_dir = pathlib.Path(config_paths['firebox_data_dir'])
-    output_dir = pathlib.Path(config_paths['aug_angles_image_dir'])
+    firebox_dir = pathlib.Path(
+        config_paths['firebox_data_dir']
+    )
+    output_dir = pathlib.Path(
+        config_paths['aug_angles_image_dir']
+    )
     objects_dir = firebox_dir / 'objects_1200_original'
 
     # Scan existing image directories to build the galaxy
-    # catalogue.  Each entry carries the source file's attributes,
-    # FOV, and pixel count.
+    # catalogue.  Each entry carries the source file's
+    # attributes, FOV, and pixel count.
     galaxies = scan_image_dirs(host_image_dir, sat_image_dir)
     n_galaxies = len(galaxies)
-    print(
-        f'Found {n_galaxies} galaxies in image directories.',
-        flush=True,
-    )
     if n_galaxies == 0:
-        print('Nothing to do.')
+        print('No galaxies found. Nothing to do.')
         raise SystemExit(0)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     n_workers = multiprocessing.cpu_count()
-    print(f'Using {n_workers} workers.', flush=True)
+    manager = multiprocessing.Manager()
+    queue = manager.Queue()
 
     work_args = [
-        (gal, objects_dir, output_dir)
+        (gal, objects_dir, output_dir, queue)
         for gal in galaxies
     ]
 
+    # Set up the rich progress display.  The overall bar
+    # tracks completed galaxies; per-galaxy bars show octant
+    # progress and appear/disappear as workers pick up tasks.
+    progress = rich.progress.Progress(
+        rich.progress.TextColumn(
+            '{task.description}', style='bold',
+        ),
+        rich.progress.BarColumn(bar_width=30),
+        rich.progress.MofNCompleteColumn(),
+        rich.progress.TimeElapsedColumn(),
+    )
+
+    overall_task = progress.add_task(
+        f'[cyan]Overall ({n_workers} workers)',
+        total=n_galaxies,
+    )
+
+    # Maps gal_id -> rich task_id for active galaxy bars.
+    active_tasks = {}
+
     n_done = 0
     n_skip = 0
-    with multiprocessing.Pool(n_workers) as pool:
-        results = pool.imap_unordered(
-            _worker, work_args,
+    n_finished = 0
+
+    with (
+        multiprocessing.Pool(n_workers) as pool,
+        rich.live.Live(progress, refresh_per_second=12),
+    ):
+        async_results = pool.starmap_async(
+            process_galaxy, work_args,
         )
-        for i, result in enumerate(results, 1):
-            gid = result['gal_id']
-            status = (
-                'done' if result['success'] else 'SKIP'
-            )
-            print(
-                f'[{i}/{n_galaxies}] {gid}: '
-                f'{result["message"]} [{status}]',
-                flush=True,
-            )
-            if result['success']:
+
+        while not async_results.ready() or not queue.empty():
+            try:
+                msg = queue.get(timeout=0.1)
+            except Exception:
+                continue
+
+            kind, gal_id, payload = msg
+
+            if kind == 'load':
+                tid = progress.add_task(
+                    f'  galaxy {gal_id}',
+                    total=8,
+                )
+                active_tasks[gal_id] = tid
+
+            elif kind == 'octant':
+                tid = active_tasks.get(gal_id)
+                if tid is not None:
+                    progress.update(
+                        tid, completed=payload,
+                    )
+
+            elif kind == 'done':
+                tid = active_tasks.pop(gal_id, None)
+                if tid is not None:
+                    progress.update(
+                        tid,
+                        completed=8,
+                        description=(
+                            f'  galaxy {gal_id} [green]✓'
+                        ),
+                    )
+                    progress.remove_task(tid)
                 n_done += 1
-            else:
+                n_finished += 1
+                progress.update(
+                    overall_task, completed=n_finished,
+                )
+
+            elif kind == 'skip':
                 n_skip += 1
+                n_finished += 1
+                progress.update(
+                    overall_task, completed=n_finished,
+                )
+
+            elif kind == 'error':
+                tid = active_tasks.pop(gal_id, None)
+                if tid is not None:
+                    progress.update(
+                        tid,
+                        description=(
+                            f'  galaxy {gal_id}'
+                            f' [red]✗ {payload}'
+                        ),
+                    )
+                    progress.remove_task(tid)
+                n_skip += 1
+                n_finished += 1
+                progress.update(
+                    overall_task, completed=n_finished,
+                )
+
+        # Drain any remaining messages.
+        while not queue.empty():
+            try:
+                msg = queue.get_nowait()
+                kind, gal_id, payload = msg
+                if kind in ('done', 'skip', 'error'):
+                    n_finished += 1
+                    if kind == 'done':
+                        n_done += 1
+                    else:
+                        n_skip += 1
+                    progress.update(
+                        overall_task,
+                        completed=n_finished,
+                    )
+                    tid = active_tasks.pop(
+                        gal_id, None
+                    )
+                    if tid is not None:
+                        progress.remove_task(tid)
+            except Exception:
+                break
 
     print(
         f'\nDone. {n_done} galaxies processed,'
         f' {n_skip} skipped.',
-        flush=True,
     )
 
 
