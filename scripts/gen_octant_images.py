@@ -276,7 +276,7 @@ def main():
 
     firebox_dir = pathlib.Path(config_paths['firebox_data_dir'])
     output_dir = pathlib.Path(config_paths['aug_angles_image_dir'])
-    objects_dir = firebox_dir / 'objects_1200'
+    objects_dir = firebox_dir / 'objects_1200_original'
 
     # Scan existing image directories to build the galaxy
     # catalogue.  Each entry carries the source file's attributes,
