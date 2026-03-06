@@ -158,8 +158,8 @@ def scan_image_dirs(host_dir, sat_dir):
 
 
 def process_galaxy(gal, objects_dir, output_dir):
-    """Generate octant images for a single galaxy.  Returns True
-    on success, False on skip/error."""
+    """Generate octant images for a single galaxy.  Returns a
+    dict with keys 'gal_id', 'success', and 'message'."""
     src_attrs = gal['attrs']
     gal_id = int(src_attrs['galaxyID'])
     fov = gal['fov']
@@ -176,19 +176,14 @@ def process_galaxy(gal, objects_dir, output_dir):
     )
 
     if not obj_path.exists():
-        print(
-            f'{gal_id}: {obj_path.name} not found, skipping.',
-            flush=True,
-        )
-        return False
+        return {
+            'gal_id': gal_id,
+            'success': False,
+            'message': f'{obj_path.name} not found',
+        }
 
     ahf_arg = (
         str(ahf_path) if ahf_path.exists() else None
-    )
-
-    print(
-        f'{gal_id} (FOV={fov}, {pixels}px)',
-        flush=True,
     )
 
     try:
@@ -201,8 +196,11 @@ def process_galaxy(gal, objects_dir, output_dir):
             ahf_path=ahf_arg,
         )
     except Exception as exc:
-        print(f'  {gal_id} load error: {exc}', flush=True)
-        return False
+        return {
+            'gal_id': gal_id,
+            'success': False,
+            'message': f'load error: {exc}',
+        }
 
     out_path = output_dir / fname
     try:
@@ -244,21 +242,24 @@ def process_galaxy(gal, objects_dir, output_dir):
                     data=np.float32(band_r),
                 )
     except Exception as exc:
-        print(
-            f'  {gal_id} image generation error: {exc}',
-            flush=True,
-        )
         if out_path.exists():
             out_path.unlink()
-        return False
+        return {
+            'gal_id': gal_id,
+            'success': False,
+            'message': f'image generation error: {exc}',
+        }
 
-    print(f'  Saved {out_path.name}', flush=True)
-    return True
+    return {
+        'gal_id': gal_id,
+        'success': True,
+        'message': f'saved {out_path.name}',
+    }
 
 
 def _worker(args):
     """Unpack arguments for process_galaxy so it works with
-    Pool.map."""
+    Pool.imap_unordered."""
     return process_galaxy(*args)
 
 
@@ -300,11 +301,27 @@ def main():
         for gal in galaxies
     ]
 
+    n_done = 0
+    n_skip = 0
     with multiprocessing.Pool(n_workers) as pool:
-        results = pool.map(_worker, work_args)
+        results = pool.imap_unordered(
+            _worker, work_args,
+        )
+        for i, result in enumerate(results, 1):
+            gid = result['gal_id']
+            status = (
+                'done' if result['success'] else 'SKIP'
+            )
+            print(
+                f'[{i}/{n_galaxies}] {gid}: '
+                f'{result["message"]} [{status}]',
+                flush=True,
+            )
+            if result['success']:
+                n_done += 1
+            else:
+                n_skip += 1
 
-    n_done = sum(results)
-    n_skip = len(results) - n_done
     print(
         f'\nDone. {n_done} galaxies processed,'
         f' {n_skip} skipped.',
