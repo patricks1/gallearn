@@ -21,3 +21,6 @@ dependencies:
   - pandas < 3.0.0
   - cython
   - wandb
+  - pip:
+    - git+https://github.com/courtk32/FIRE_studio.git
+    - git+https://github.com/courtk32/mockobservation-tools.git
