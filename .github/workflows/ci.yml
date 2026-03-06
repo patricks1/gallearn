@@ -19,7 +19,18 @@ jobs:
         echo $CONDA/bin >> $GITHUB_PATH
     - name: Install dependencies
       run: |
-        conda env update --file environment.yml --name base
+        # Strip the pip section from environment.yml so conda
+        # does not try to build wheels in isolation.  The pip
+        # packages are installed in the next step with
+        # --no-build-isolation.
+        sed '/^  - pip:/,/^  [^ ]/{ /^  - pip:/d; /^    -/d; }' \
+          environment.yml > environment_ci.yml
+        conda env update --file environment_ci.yml --name base
+    - name: Install git pip packages
+      run: |
+        pip install --no-build-isolation \
+          git+https://github.com/courtk32/FIRE_studio.git \
+          git+https://github.com/courtk32/mockobservation-tools.git
     - name: Lint with flake8
       run: |
         conda install flake8
