@@ -464,7 +464,7 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
             string(res) * 
             "x" * 
             string(res) * 
-            "_3proj_wsat_wvmap"
+            "_11proj_wsat_wvmap"
 
         # Sample type
         if Nfiles !== nothing
