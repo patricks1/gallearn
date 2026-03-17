@@ -121,7 +121,7 @@ def ensure_user_config():
 
     if ensure_key(
             config,
-            'aug_angles_image_dir',
+            'octant_img_dir',
             '/DFS-L/DATA/cosmo/pstaudt/FIREBox/Images/band_ugr'):
         changed = True
 

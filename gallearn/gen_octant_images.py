@@ -2,7 +2,7 @@
 Generate mock galaxy images at 8 viewing angles, one per Cartesian octant.
 Each direction is the body diagonal of its octant: (+/-1, +/-1, +/-1)/sqrt(3).
 These directions are maximally distinct from one another and from the existing
-xy/yz/zx projections. The code saves the images in aug_angles_image_dir
+xy/yz/zx projections. The code saves the images in octant_img_dir
 (read from config_<env_name>.ini).
 
 Strategy
@@ -46,7 +46,7 @@ the mockobservation tutorials for all FIREbox data.
 
 Usage
 -----
-  python scripts/gen_octant_images.py
+  python -c "import gallearn.gen_octant_images; gallearn.gen_octant_images.gen()"
 """
 
 import contextlib
@@ -284,7 +284,7 @@ def _worker(args):
     return process_galaxy(*args)
 
 
-def main():
+def gen():
     import rich.live
     import rich.progress
     import rich.table
@@ -303,7 +303,7 @@ def main():
         config_paths['firebox_data_dir']
     )
     output_dir = pathlib.Path(
-        config_paths['aug_angles_image_dir']
+        config_paths['octant_img_dir']
     )
     objects_dir = firebox_dir / 'objects_1200_original'
 
@@ -422,7 +422,7 @@ def main():
                     overall_task, completed=n_finished,
                 )
 
-        # Drain any remaining messages.
+        # Drain any regening messages.
         while not queue.empty():
             try:
                 msg = queue.get_nowait()
@@ -452,4 +452,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    gen()

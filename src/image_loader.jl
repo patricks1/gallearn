@@ -19,6 +19,7 @@ sat_direc = conf["gallearn_paths"]["sat_image_dir"]
 #host_direc = "/DFS-L/DATA/cosmo/kleinca/FIREBox_Images/host/" *
 #    "ugrband_massmocks_final"
 host_direc = conf["gallearn_paths"]["host_image_dir"]
+octant_img_dir = conf["gallearn_paths"]["octant_img_dir"]
 
 gallearn_dir = conf["gallearn_paths"]["project_data_dir"]
 tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
@@ -52,7 +53,11 @@ function process_file(
     h5open(path, "r") do file
         #println("reading $fname")
         global shape_band
-        for proj in ["projection_xy/", "projection_yz/", "projection_zx/"]
+        proj_keys = sort(filter(
+            k -> startswith(k, "projection_"),
+            keys(file)
+        ))
+        for proj in proj_keys
             shape_band = nothing
             img = nothing
             if all_bands
@@ -62,7 +67,7 @@ function process_file(
             end
             for (i, band) in enumerate(bands)
                 band = "band_" * band
-                band_img = read(file, proj * band)
+                band_img = read(file, proj * "/" * band)
                 shape_band = size(band_img) 
                 if shape_band[end] > 2000
                     # Leave img as nothing if the image is too big. Once we 
@@ -101,7 +106,7 @@ function process_file(
             # Save this file's position. 
             underscores = findall(isequal('_'), fname)
             push!(ids_X, fname[1 : underscores[2] - 1])
-            push!(orientations, replace(proj, "/" => ""))
+            push!(orientations, proj)
             push!(fnames_sorted, fname)
 
             if shapeXimgs != shape_band
@@ -231,12 +236,17 @@ function load_images(
     )
     host_paths = joinpath.(host_direc, host_fnames)
     sat_fnames = filter(
-        f -> isfile(joinpath(sat_direc, f)) && endswith(f, ".hdf5"), 
+        f -> isfile(joinpath(sat_direc, f)) && endswith(f, ".hdf5"),
         readdir(sat_direc)
     )
     sat_paths = joinpath.(sat_direc, sat_fnames)
-    files = [host_fnames; sat_fnames]
-    paths = [host_paths; sat_paths]
+    octant_fnames = filter(
+        f -> isfile(joinpath(octant_img_dir, f)) && endswith(f, ".hdf5"),
+        readdir(octant_img_dir)
+    )
+    octant_paths = joinpath.(octant_img_dir, octant_fnames)
+    files = [host_fnames; sat_fnames; octant_fnames]
+    paths = [host_paths; sat_paths; octant_paths]
 
     open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
         println(f, "Beginning.")
@@ -296,8 +306,13 @@ function load_images(
         good_paths = good_paths[good_indices]
     end
 
-    N_proj = 3 # Number of projections
-    global X = zeros(Nfiles * 3, Nbands, res, res) 
+    N_rows = sum(
+        HDF5.h5open(p, "r") do f
+            count(k -> startswith(k, "projection_"), keys(f))
+        end
+        for p in good_paths[1:Nfiles]
+    )
+    global X = zeros(N_rows, Nbands, res, res)
     shapeXimgs = size(X)[end - 1 : end]
     ids_X = String[]
     fnames_sorted = String[]

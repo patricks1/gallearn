@@ -12,6 +12,15 @@ Manifest.toml
 
 # ignore data folder
 #data/*
+*.h5
+*.hdf5
+
+# ignore slurm output
+*.out
+slurm.epilog-*
+
+# ignore Claude instruction files
+CLAUDE.md
 
 __pycache__
 
