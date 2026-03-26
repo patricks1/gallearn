@@ -1,4 +1,4 @@
-module image_loader
+module Dataset
 
 using HDF5
 using CSV
@@ -403,7 +403,7 @@ function load_vmap(id, res)
     return vmap 
 end
 
-function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
+function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
     uci = PyCall.pyimport("uci_tools")
     ids_X, X, files, y_df, orientations_X = load_images(
         Nfiles=Nfiles,
@@ -414,6 +414,44 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
     VMAP = zeros(length(ids_X), 1, res, res)
     orientations = unique(orientations_X)
     ids_set = unique(ids_X)
+
+    # Preflight check: before doing any heavy work, scan the HDF5 keys
+    # of every vmap file and verify that all orientations present in
+    # the image data for that galaxy are also present in its vmap. This
+    # catches image/vmap mismatches (e.g. octant images generated after
+    # vmaps were written) at the start of the run rather than deep in
+    # the loop below.
+    maps_dir = conf["gallearn_paths"]["vmaps_dir"]
+    mismatches = Dict{String, Vector{String}}()
+    for id in ids_set
+        id_int = parse(Int, replace(id, "object_" => ""))
+        vmap_path = joinpath(
+            maps_dir,
+            "object_$(id_int)_vmap.hdf5"
+        )
+        if isfile(vmap_path)
+            # Read only the top-level keys -- no pixel data loaded.
+            vmap_keys = HDF5.h5open(vmap_path, "r") do f
+                keys(f)
+            end
+            id_orients = unique(orientations_X[ids_X .== id])
+            missing_orients = setdiff(id_orients, vmap_keys)
+            if !isempty(missing_orients)
+                mismatches[id] = collect(missing_orients)
+            end
+        end
+    end
+    if !isempty(mismatches)
+        println(
+            "Preflight: $(length(mismatches)) galaxies have image " *
+            "orientations missing from their vmaps:"
+        )
+        for (id, missing_orients) in sort(collect(mismatches))
+            println("  $id: $missing_orients")
+        end
+        error("Orientation mismatch between images and vmaps.")
+    end
+
     for id in ids_set
         id_int = parse(Int, replace(id, "object_" => ""))
         vmap = load_vmap(id_int, res)
@@ -497,4 +535,4 @@ function load_data(tgt_type; Nfiles=nothing, save=false, res=256)
     return ids_X, y_df, ys, X, files, orientations_X
 end
 
-end # module image_loader
+end # module Dataset

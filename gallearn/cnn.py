@@ -2,47 +2,6 @@ import torch.nn as nn
 import torch
 import datetime
 
-def load_fr_julia(Nfiles):
-    from julia.api import Julia
-    jl = Julia(compiled_modules=False, debug=False)
-
-    import julia
-    from julia import Pkg
-    from julia import Main
-
-    import subprocess
-
-    import numpy as np
-
-    Pkg.activate('/export/nfs0home/pstaudt/projects/gal-learn/GalLearn')
-
-    # Attempt to locate the Julia executable path
-    try:
-        julia_path = subprocess.check_output(
-                ["which", "julia"]
-            ).decode("utf-8").strip()
-        print("Julia executable path:", julia_path)
-        
-        # Optional: Print Julia version to verify
-        julia_version = subprocess.check_output(
-                [julia_path, "--version"]
-            ).decode("utf-8").strip()
-        print("Julia version:", julia_version)
-    except subprocess.CalledProcessError:
-        print("Julia executable not found in PATH")
-
-    Main.include('image_loader.jl')
-    obs_sorted, ys, ys_sorted, X, files = julia.Main.image_loader.load_data(
-        Nfiles=Nfiles,
-        res=1500
-    )
-
-    ys = torch.FloatTensor(np.array(ys_sorted))
-    X = torch.FloatTensor(X)
-
-    return X, ys
-
-
 def get_radii(d):
     import h5py
     import os

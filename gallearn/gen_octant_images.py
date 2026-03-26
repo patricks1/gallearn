@@ -58,70 +58,15 @@ import h5py
 import numpy as np
 
 import mockobservation_tools.galaxy_tools as gt
+import uci_tools.rotate_galaxy
 
 
-# Body-diagonal unit vectors, one per octant.  The label encodes the sign of
-# each Cartesian component: p = +1, m = -1.
-OCTANT_DIRECTIONS = {
-    'ppp': np.array([ 1.,  1.,  1.]) / np.sqrt(3.),
-    'ppm': np.array([ 1.,  1., -1.]) / np.sqrt(3.),
-    'pmp': np.array([ 1., -1.,  1.]) / np.sqrt(3.),
-    'pmm': np.array([ 1., -1., -1.]) / np.sqrt(3.),
-    'mpp': np.array([-1.,  1.,  1.]) / np.sqrt(3.),
-    'mpm': np.array([-1.,  1., -1.]) / np.sqrt(3.),
-    'mmp': np.array([-1., -1.,  1.]) / np.sqrt(3.),
-    'mmm': np.array([-1., -1., -1.]) / np.sqrt(3.),
-}
-
-OCTANT_LABELS = list(OCTANT_DIRECTIONS.keys())
-
-
-def rotation_matrix_to_z(n):
-    """
-    3x3 rotation matrix R such that R @ n == [0, 0, 1].  Uses Rodrigues'
-    rotation formula; the degenerate case n == -z_hat is handled with a
-    180-degree rotation about the x-axis.
-    """
-    n = np.asarray(n, dtype=float)
-    n = n / np.linalg.norm(n)
-    z = np.array([0., 0., 1.])
-    v = np.cross(n, z)
-    c = float(np.dot(n, z))
-    s = float(np.linalg.norm(v))
-    if s < 1e-10:
-        if c > 0.:
-            return np.eye(3)
-        # n is antiparallel to z: rotate 180 degrees around the x-axis
-        return np.array(
-            [[ 1.,  0.,  0.],
-             [ 0., -1.,  0.],
-             [ 0.,  0., -1.]]
-        )
-    k = v / s
-    K = np.array(
-        [[ 0.,   -k[2],  k[1]],
-         [ k[2],  0.,   -k[0]],
-         [-k[1],  k[0],  0.  ]]
-    )
-    return (
-        c * np.eye(3)
-        + (1. - c) * np.outer(k, k)
-        + s * K
-    )
-
-
-def rotate_snapdict(snapdict, R):
-    """
-    Shallow copy of snapdict with Coordinates rotated by R.
-
-    The 3D radius 'r' is invariant under rotation and does not need updating.
-    get_mock_observation only uses 'r' for the FOV mask, so this shallow copy
-    is sufficient.
-    """
-    d = snapdict.copy()
-    # Coordinates has shape (N, 3); the row-vector convention requires R.T
-    d['Coordinates'] = snapdict['Coordinates'] @ R.T
-    return d
+# Aliases to uci_tools so callers can reference these names from this
+# module without importing uci_tools directly.
+OCTANT_DIRECTIONS = uci_tools.rotate_galaxy.OCTANT_DIRECTIONS
+OCTANT_LABELS = list(uci_tools.rotate_galaxy.OCTANT_DIRECTIONS.keys())
+rotation_matrix_to_z = uci_tools.rotate_galaxy.rotation_matrix_to_z
+rotate_snapdict = uci_tools.rotate_galaxy.rotate_snapdict
 
 
 def scan_image_dirs(host_dir, sat_dir):

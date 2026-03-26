@@ -3,7 +3,7 @@ module GalLearn
 include("GalLearnConfig.jl")
 using .GalLearnConfig
 
-include("image_loader.jl")
-using .image_loader
+include("Dataset.jl")
+using .Dataset
 
 end
