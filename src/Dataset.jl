@@ -6,7 +6,6 @@ using DataFrames
 using ProgressBars
 import Images
 import StatsBase
-import PyCall
 import Plots
 import ..GalLearnConfig
 
@@ -404,7 +403,6 @@ function load_vmap(id, res)
 end
 
 function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
-    uci = PyCall.pyimport("uci_tools")
     ids_X, X, files, y_df, orientations_X = load_images(
         Nfiles=Nfiles,
         res=res,
