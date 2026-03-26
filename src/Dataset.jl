@@ -3,7 +3,6 @@ module Dataset
 using HDF5
 using CSV
 using DataFrames
-using ProgressBars
 import Images
 import StatsBase
 import Plots
@@ -27,127 +26,49 @@ tgt_2d_host_path = conf["gallearn_paths"]["host_2d_shapes"]
 tgt_2d_sat_path = conf["gallearn_paths"]["sat_2d_shapes"]
 output_dir = conf["gallearn_paths"]["project_data_dir"]
 
-function process_file(
-            fname,
-            path,
-            iX,
-            X,
-            shapeXimgs,
-            ids_X,
-            fnames_sorted,
-            gallearn_dir,
-            all_bands,
-            orientations
+function fmt_time(secs)
+    m = floor(Int, secs / 60)
+    s = floor(Int, secs % 60)
+    return "$(m)m $(s)s"
+end
+
+# tick_progress! increments a shared atomic counter and prints a progress
+# line whenever the integer percentage ticks up. Call once per completed
+# work item at the end of a Threads.@threads loop body. t_start is the
+# value of time() captured before the loop.
+function tick_progress!(counter, total, label, t_start)
+    prev = Threads.atomic_add!(counter, 1)
+    pct_before = (prev * 100) ÷ total
+    pct_after = ((prev + 1) * 100) ÷ total
+    if pct_after > pct_before
+        elapsed = time() - t_start
+        remaining = elapsed * (total - (prev + 1)) / (prev + 1)
+        print(
+            "\r  $(label): $(pct_after)% " *
+            "($(fmt_time(elapsed)) elapsed, " *
+            "$(fmt_time(remaining)) remaining)"
         )
-    open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
-        println(f, fname)      
     end
+end
 
-    if all_bands
-        Nbands = 3
-    else
-        Nbands = 1
-    end
-
-    h5open(path, "r") do file
-        #println("reading $fname")
-        global shape_band
+# scan_file reads only HDF5 dataset-size metadata (not pixel data) for one
+# file and returns the projection keys whose images have width <= 2000.
+function scan_file(path)
+    valid_projs = String[]
+    HDF5.h5open(path, "r") do file
         proj_keys = sort(filter(
-            k -> startswith(k, "projection_"),
-            keys(file)
+            k -> startswith(k, "projection_"), keys(file)
         ))
         for proj in proj_keys
-            shape_band = nothing
-            img = nothing
-            if all_bands
-                bands = ["g", "u", "r"]
-            else
-                bands = ["r"]
+            # size() on an HDF5Dataset reads only the dataspace metadata,
+            # not the pixel data, so this pass is cheap.
+            sz = size(file[proj * "/band_r"])
+            if sz[end] <= 2000
+                push!(valid_projs, proj)
             end
-            for (i, band) in enumerate(bands)
-                band = "band_" * band
-                band_img = read(file, proj * "/" * band)
-                shape_band = size(band_img) 
-                if shape_band[end] > 2000
-                    # Leave img as nothing if the image is too big. Once we 
-                    # break
-                    # this loop here, we'll continue to the next file 
-                    # below.
-                    break 
-                end
-                if i == 1 
-                    img = zeros(Nbands, shape_band...) 
-                elseif size(band_img) != shape_band
-                    error("Bands have different shapes.")
-                end
-                img[i, :, :] = band_img 
-            end
-
-            if shape_band[end] > 2000
-                # Image is too big; we should move to the next file. If 
-                # this is the
-                # case, img == nothing at this point, given the break 
-                # above.
-                open(joinpath(
-                        gallearn_dir, "image_loader_ram_use.txt"), 
-                        "a") do f
-                    println(f, "Skipping " * fname)
-                end
-                # Make X one row smaller than we were expecting, since 
-                # we're
-                # skipping an image and `ids_X` will be shorter.
-                X = X[1 : end - 1, :, :, :]
-                shapeXimgs = size(X)[end - 1 : end]
-                # Go to the next projection without addint 1 to iX
-                continue
-            end
-
-            # Save this file's position. 
-            underscores = findall(isequal('_'), fname)
-            push!(ids_X, fname[1 : underscores[2] - 1])
-            push!(orientations, proj)
-            push!(fnames_sorted, fname)
-
-            if shapeXimgs != shape_band
-                if Nbands > 1
-                    img = Images.imresize(
-                        img,
-                        Nbands,
-                        shapeXimgs...
-                    )
-                else
-                    innerimg = img[1, :, :]
-                    img = Images.imresize(innerimg, shapeXimgs...)
-                    img = reshape(img, (1, size(img)...))
-                end
-            end
-                
-            X = parent(X) # Removing ridiculous OffsetArray indexing
-            X[iX, :, :, :] = img
-            shapeXimgs = size(X)[end - 1 : end]
-            open(joinpath(
-                        gallearn_dir, 
-                        "image_loader_ram_use.txt"
-                    ), "a") do f
-                println(f, shapeXimgs)
-                println(
-                    f, 
-                    "Memory used by X: $(Base.summarysize(X) / 1e9) GB"
-                )
-            end
-
-            # Set the index for the next element of X to create. Note that 
-            # this
-            # advancement only happens if we don't skip the image we 
-            # evaluate.
-            # For instances where we skip, there's a continue statement 
-            # above
-            # that runs *before* we add to iX.
-            iX += 1
         end
     end
-    
-    return X, shapeXimgs, iX
+    return valid_projs
 end
 
 function read_2d_tgt()
@@ -163,7 +84,7 @@ function read_2d_tgt()
         #     n
         #     Re
         #     Ie
-        # Header for the satellite file is 
+        # Header for the satellite file is
         #     galaxyID
         #     FOV
         #     pixel
@@ -201,9 +122,9 @@ end
 function read_3d_tgt()
     files = readdir(tgt_3d_dir)
     ys = CSV.read(joinpath(tgt_3d_dir, "FIREBoxm9.csv"), DataFrame)
-    for mclass in ["7", "8", "10"] 
+    for mclass in ["7", "8", "10"]
         ys_add = CSV.read(
-            joinpath(tgt_3d_dir, "FIREBoxm" * mclass * ".csv"), 
+            joinpath(tgt_3d_dir, "FIREBoxm" * mclass * ".csv"),
             DataFrame
         )
         ys = vcat(ys, ys_add)
@@ -230,7 +151,7 @@ function load_images(
             tgt_type="2d"
         )
     host_fnames = filter(
-        f -> isfile(joinpath(host_direc, f)) && endswith(f, ".hdf5"), 
+        f -> isfile(joinpath(host_direc, f)) && endswith(f, ".hdf5"),
         readdir(host_direc)
     )
     host_paths = joinpath.(host_direc, host_fnames)
@@ -246,10 +167,6 @@ function load_images(
     octant_paths = joinpath.(octant_img_dir, octant_fnames)
     files = [host_fnames; sat_fnames; octant_fnames]
     paths = [host_paths; sat_paths; octant_paths]
-
-    open(joinpath(gallearn_dir, "image_loader_ram_use.txt"), "a") do f
-        println(f, "Beginning.")
-    end
 
     baddies = [
         "object_1162",
@@ -267,32 +184,28 @@ function load_images(
         Nbands = 1
     elseif tgt_type in ("sfr", "avg_sfr")
         y_df = read_sfr_tgt(tgt_type)
-        all_bands= true
+        all_bands = true
         Nbands = 3
     else
         throw(ArgumentError(
             "`tgt_type` should be \"2d\", \"3d\", \"sfr\", or \"avg_sfr\"."
         ))
     end
-    
-    # For every file name, create an inner mask the size of y_df.Simulation 
-    # where 
-    # a 
-    # `true`
-    # marks the simulation in y_df (if any) whose name 
-    # occurs in that file name. 
-    # If any row in that inner mask is true (although there should be at most
-    # one), the given file is marked with a `true` in the `in_tgt` outer mask.
+
+    # For every file name, create an inner mask the size of y_df.Simulation
+    # where a `true` marks the simulation in y_df (if any) whose name occurs
+    # in that file name. If any row in that inner mask is true (although
+    # there should be at most one), mark the file with a `true` in the
+    # `in_tgt` outer mask.
     in_tgt = [
-        any(occursin(obj * "_", f) for obj in y_df.Simulation) 
+        any(occursin(obj * "_", f) for obj in y_df.Simulation)
         for f in files
     ]
 
     good_files = files[.!is_bad .& in_tgt]
     good_paths = paths[.!is_bad .& in_tgt]
     if Nfiles === nothing
-        # If the user hasn't specified the number of files to run through, 
-        # then
+        # If the user hasn't specified the number of files to run through,
         # run through all of them.
         Nfiles = length(good_files)
     else
@@ -305,42 +218,72 @@ function load_images(
         good_paths = good_paths[good_indices]
     end
 
-    N_rows = sum(
-        HDF5.h5open(p, "r") do f
-            count(k -> startswith(k, "projection_"), keys(f))
-        end
-        for p in good_paths[1:Nfiles]
+    # Pass 1: scan each file for valid (non-oversized) projection keys.
+    # Each thread works on a separate file, so no locking is needed.
+    # scan_file reads only HDF5 metadata, so this pass is fast.
+    println(
+        "Pass 1: scanning $(Nfiles) files for valid projections " *
+        "using $(Threads.nthreads()) threads..."
     )
-    global X = zeros(N_rows, Nbands, res, res)
-    shapeXimgs = size(X)[end - 1 : end]
-    ids_X = String[]
-    fnames_sorted = String[]
-    orientations = String[]
-
-    iX = 1
-    for item in ProgressBar(
-                zip(good_files[1:Nfiles], good_paths[1:Nfiles])
-            )
-        fname, path = item
-        X, shapeXimgs, iX = process_file(
-            fname,
-            path,
-            iX,
-            X,
-            shapeXimgs,
-            ids_X,
-            fnames_sorted,
-            gallearn_dir,
-            all_bands,
-            orientations
-        )
+    valid_projs_per_file = Vector{Vector{String}}(undef, Nfiles)
+    p1_done = Threads.Atomic{Int}(0)
+    p1_start = time()
+    Threads.@threads for fi in 1:Nfiles
+        valid_projs_per_file[fi] = scan_file(good_paths[fi])
+        tick_progress!(p1_done, Nfiles, "Pass 1", p1_start)
     end
-    # Get rid of the ridiculous OffsetArray indexing
-    X = parent(X)
+    println() # Advance past the \r progress line.
+
+    # Compute per-file starting row indices via prefix sum so that pass 2
+    # can write each file's rows without any shared mutable state.
+    counts = length.(valid_projs_per_file)
+    offsets = cumsum([1; counts[1:end-1]])
+    N_rows = sum(counts)
+
+    X = zeros(N_rows, Nbands, res, res)
+    ids_X = Vector{String}(undef, N_rows)
+    fnames_sorted = Vector{String}(undef, N_rows)
+    orientations = Vector{String}(undef, N_rows)
+
+    # Pass 2: load and resize pixel data in parallel. Each thread fills its
+    # pre-assigned rows in X, ids_X, fnames_sorted, and orientations, so
+    # no locking is needed. Same atomic progress counter as pass 1.
+    println("Pass 2: loading images...")
+    p2_done = Threads.Atomic{Int}(0)
+    p2_start = time()
+    Threads.@threads for fi in 1:Nfiles
+        fname = good_files[fi]
+        path = good_paths[fi]
+        projs = valid_projs_per_file[fi]
+        base_row = offsets[fi]
+        underscores = findall(isequal('_'), fname)
+        obj_id = fname[1:underscores[2]-1]
+        HDF5.h5open(path, "r") do file
+            for (pi, proj) in enumerate(projs)
+                row = base_row + pi - 1
+                bands_list = all_bands ? ["g", "u", "r"] : ["r"]
+                img = zeros(Nbands, res, res)
+                for (bi, band) in enumerate(bands_list)
+                    band_data = read(file, proj * "/band_" * band)
+                    if size(band_data) != (res, res)
+                        band_data = Images.imresize(band_data, res, res)
+                    end
+                    img[bi, :, :] = parent(band_data)
+                end
+                X[row, :, :, :] = img
+                ids_X[row] = obj_id
+                orientations[row] = proj
+                fnames_sorted[row] = fname
+            end
+        end
+        tick_progress!(p2_done, Nfiles, "Pass 2", p2_start)
+    end
+    println() # Advance past the \r progress line.
+    println("Done loading images. X shape: $(size(X))")
+
     if logandscale
-        # Turn zeros into the smallest value greater than zero to avoid 
-        # -Inf in
-        # the logs.
+        # Turn zeros into the smallest value greater than zero to avoid
+        # -Inf in the logs.
         is_zero = X .== 0
         X[is_zero] .= minimum(X[.!is_zero])
         logX = log10.(X)
@@ -360,9 +303,9 @@ function load_images(
     elseif tgt_type in ("sfr", "avg_sfr")
         mask = falses(length(ids_X), size(y_df)[1])
         for i in 1:length(ids_X)
-            # For every id_X, generate a vector of booleans, corresponding to
-            # the rows in y_df where the Simulation matches id_X. (There should
-            # only be one match for each id_X.)
+            # For every id_X, generate a vector of booleans corresponding
+            # to the rows in y_df where Simulation matches id_X. There
+            # should only be one match for each id_X.
             mask[i, :] .= y_df[!, "Simulation"] .== ids_X[i]
         end
     else
@@ -399,7 +342,7 @@ function load_vmap(id, res)
             end
         end
     end
-    return vmap 
+    return vmap
 end
 
 function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
@@ -413,15 +356,20 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
     orientations = unique(orientations_X)
     ids_set = unique(ids_X)
 
-    # Preflight check: before doing any heavy work, scan the HDF5 keys
-    # of every vmap file and verify that all orientations present in
-    # the image data for that galaxy are also present in its vmap. This
-    # catches image/vmap mismatches (e.g. octant images generated after
-    # vmaps were written) at the start of the run rather than deep in
-    # the loop below.
+    # Preflight check: before doing any heavy work, scan the HDF5 keys of
+    # every vmap file and verify that all orientations present in the image
+    # data for that galaxy are also present in its vmap. This catches
+    # image/vmap mismatches at the start of the run rather than deep in the
+    # loop below.
     maps_dir = conf["gallearn_paths"]["vmaps_dir"]
     mismatches = Dict{String, Vector{String}}()
-    for id in ids_set
+    # mismatch_lock protects mismatches since multiple threads may find
+    # problems and write to it concurrently.
+    mismatch_lock = ReentrantLock()
+    n_ids = length(ids_set)
+    preflight_done = Threads.Atomic{Int}(0)
+    preflight_start = time()
+    Threads.@threads for id in ids_set
         id_int = parse(Int, replace(id, "object_" => ""))
         vmap_path = joinpath(
             maps_dir,
@@ -435,10 +383,14 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
             id_orients = unique(orientations_X[ids_X .== id])
             missing_orients = setdiff(id_orients, vmap_keys)
             if !isempty(missing_orients)
-                mismatches[id] = collect(missing_orients)
+                lock(mismatch_lock) do
+                    mismatches[id] = collect(missing_orients)
+                end
             end
         end
+        tick_progress!(preflight_done, n_ids, "Preflight", preflight_start)
     end
+    println() # Advance past the \r progress line.
     if !isempty(mismatches)
         println(
             "Preflight: $(length(mismatches)) galaxies have image " *
@@ -450,21 +402,16 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
         error("Orientation mismatch between images and vmaps.")
     end
 
-    for id in ids_set
+    # Each galaxy reads its own vmap file and writes to non-overlapping rows
+    # of VMAP (each (id, orientation) pair maps to a unique row), so
+    # @threads requires no locking here.
+    println("Loading vmaps...")
+    vmap_done = Threads.Atomic{Int}(0)
+    vmap_start = time()
+    Threads.@threads for id in ids_set
         id_int = parse(Int, replace(id, "object_" => ""))
         vmap = load_vmap(id_int, res)
-        if isnothing(vmap)
-            # Delete all rows corresponding to `id` from the data, because
-            # there are no bound star particles.
-            is_id = ids_X .== id
-            indices_0_bound = findall(is_id)
-            for data in (ids_X, X, files, y_df, orientations_X)
-                one_to_end = axes(data, 1)
-                trailing_dims = ntuple(_ -> Colon(), ndims(data) - 1)
-                rows_keep = setdiff(one_to_end, indices_0_bound)
-                data = data[rows_keep, trailing_dims...]
-            end
-        else
+        if !isnothing(vmap)
             for orientation in orientations
                 is_id = ids_X .== id
                 is_orient = orientations_X .== orientation
@@ -475,7 +422,9 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
                 VMAP[i, 1, :, :] = vmap[orientation]["vmap"]
             end
         end
+        tick_progress!(vmap_done, n_ids, "Loading vmaps", vmap_start)
     end
+    println() # Advance past the \r progress line.
     X  = cat(X, VMAP; dims=2)
     println("X shape: $(size(X))")
 
@@ -496,10 +445,10 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
     end
 
     if save
-        fname = "gallearn_data_" * 
-            string(res) * 
-            "x" * 
-            string(res) * 
+        fname = "gallearn_data_" *
+            string(res) *
+            "x" *
+            string(res) *
             "_11proj_wsat_wvmap"
 
         # Sample type
@@ -509,6 +458,10 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
 
         # 2d, 3d, sfr, or avg_sfr target data
         fname *= "_" * tgt_type * "_tgt"
+
+        # Temporary because I'm testing multiprocessing while a serialized run
+        # is already going.
+        fname *= "_mp" 
 
         fname *= ".h5"
 
@@ -528,8 +481,8 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
                         ["ys_sorted", ys_out],
                     ]
                 println(
-                    "Saving " 
-                    * label 
+                    "Saving "
+                    * label
                     * " of type $(typeof(data))"
                 )
                 write(f, label, data)
