@@ -515,12 +515,19 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
         fname *= ".h5"
 
         h5open(joinpath(output_dir, fname), "w") do f
+            # Permute X and ys before writing so that h5py reads them
+            # in PyTorch (row-major) order. Julia writes column-major
+            # data to HDF5, and h5py reverses all axes on read. Writing
+            # X as (W, H, C, N) means h5py reads (N, C, H, W). Writing
+            # ys as (features, N) means h5py reads (N, features).
+            X_out = permutedims(X, (4, 3, 2, 1))
+            ys_out = permutedims(ys, (2, 1))
             for (label, data) in [
-                        ["X", X],
+                        ["X", X_out],
                         ["obs_sorted", ids_X],
                         ["orientations", orientations_X],
                         ["file_names", files],
-                        ["ys_sorted", ys],
+                        ["ys_sorted", ys_out],
                     ]
                 println(
                     "Saving " 
