@@ -9,6 +9,7 @@ Manifest.toml
 
 # ignore hidden files
 .*
+!.github
 
 # ignore data folder
 #data/*
