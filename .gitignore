@@ -16,6 +16,9 @@ Manifest.toml
 *.h5
 *.hdf5
 
+# ignore compiled sysimages
+*.so
+
 # ignore slurm output
 *.out
 slurm.epilog-*
