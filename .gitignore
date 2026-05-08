@@ -1,6 +1,9 @@
 # Ignore Julia Manifest
 Manifest.toml
 
+# setuptools_scm auto-generates this file from the git tag
+gallearn/_version.py
+
 # ignore python compile files
 *.pyc
 

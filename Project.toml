@@ -1,6 +1,6 @@
 name = "GalLearn"
 uuid = "dfff7834-18b7-4b70-946a-24bde2fbec96"
-version = "0.0.0-b0"
+version = "0.1.0-a0"
 authors = ["Patrick Staudt <patrickstaudt1@gmail.com>"]
 
 [deps]

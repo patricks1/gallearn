@@ -211,6 +211,36 @@ def sasinh_imgs_sscale_vmaps(X, stretch=1.e-5):
 
 
 def std_asinh(X, stretch=1.e-5, return_distrib=False, means=None, stds=None):
+    '''
+    Apply asinh to the dataset with the given stretch and standardize the
+    result along axis 1 e.g. the color channels of a
+    NCHW (number-channel-height-width) dataset
+
+    Parameters
+    ----------
+    X: torch.tensor, shape (N_obs, N_chan, h, w)
+        Dataset to process.
+    stretch: float
+        The value by which to multiply X before applying asinh.
+    return_distrib: bool, default False
+        If True, return the means and standard deviations of each channel so
+        the user can apply them later without recalculating
+    means: torch.tensor of floats, shape (N_chan,), default None
+        The means to apply to each channel when standardizing
+    stds: torch.tensor of floats, shape (N_chan,), default None
+        The standard deviations to appy to each channel when standardizing
+
+    Returns
+    -------
+    X: torch.tensor, shape (N_obs, N_chan, h, w)
+        The standardized dataset.
+    means: torch.tensor, shape (N_chan,)
+        The calculated mean of each channel. Only returned when
+        return_distrib=True.
+    stds: torch.tensor, shape (N_chan,)
+        The calculated standard deviation of each channel. Only returned
+        when return_distrib=True.
+    '''
     import torch
     X = X.detach().clone()
     X = torch.asinh(stretch * X)
@@ -247,7 +277,7 @@ def min_max_scale_255(X):
 def new_min_max_scale(X):
     '''
     Min-max scale the data from 0 to 255. Scaling is done for all galaxies at
-    once, on a per-channel (u, g, r) basis. Given that the X input spans ~8
+    once, on a per-channel (r, g, u) basis. Given that the X input spans ~8
     orders of magnitues, only the brightest regions contribute significant
     information. Additionally, any galaxies whose maximum brightness falls many
     orders of magnitude below the brightest galaxy may not show significant
@@ -263,6 +293,33 @@ def new_min_max_scale(X):
 
 
 def std_scale(X, return_distrib=False, means=None, stds=None):
+    '''
+    Standardize a dataset along axis 1 e.g. the color channels of a NCHW 
+    (number-channel-height-width) dataset
+
+    Parameters
+    ----------
+    X: torch.tensor, shape (N_obs, N_chan, h, w)
+        Dataset to standardize
+    return_distrib: bool, default False
+        If True, return the means and standard deviations of each channel so
+        the user can apply them later without recalculating
+    means: torch.tensor of floats, shape (N_chan,), default None
+        The means to apply to each channel when standardizing
+    stds: torch.tensor of floats, shape (N_chan,), default None
+        The standard deviations to appy to each channel when standardizing
+
+    Returns
+    -------
+    X: torch.tensor, shape (N_obs, N_chan, h, w)
+        The standardized dataset.
+    means: torch.tensor, shape (N_chan,)
+        The calculated mean of each channel. Only returned when
+        return_distrib=True.
+    stds: torch.tensor, shape (N_chan,)
+        The calculated standard deviation of each channel. Only returned
+        when return_distrib=True.
+    '''
     import torch
     X = X.detach().clone()
     if means is None:
@@ -307,11 +364,11 @@ def plt_distrib_of_means(ax, X, title=None, all_bands=False):
         heights[i], edges[i] = torch.histogram(m, bins=bins)
 
     if all_bands:
-        colors = ['C2', 'C0', 'C3'],
-        labels = ['g', 'u', 'r']
+        colors = ['C3', 'C2', 'C0'],
+        labels = ['r', 'g', 'u']
     else:
-        colors = ['C2']
-        labels = ['g']
+        colors = ['C3']
+        labels = ['r']
     for h, e, c, l in zip(
                 heights.detach().cpu().numpy(), 
                 edges.detach().cpu().numpy(),
@@ -363,11 +420,11 @@ def plt_distrib(ax, X, title=None, all_bands=False):
         heights[i], edges[i] = hist
 
     if all_bands:
-        colors = ['C2', 'C0', 'C3'],
-        labels = ['g', 'u', 'r']
+        colors = ['C3', 'C2', 'C0'],
+        labels = ['r', 'g', 'u']
     else:
-        colors = ['C2']
-        labels = ['g']
+        colors = ['C3']
+        labels = ['r']
     for h, e, c, l in zip(
                 heights.detach().cpu().numpy(), 
                 edges.detach().cpu().numpy(),

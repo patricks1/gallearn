@@ -96,7 +96,9 @@ function load_file(path, projs, fname, all_bands, Nbands, res)
     img_data = zeros(n_projs, Nbands, res, res)
     HDF5.h5open(path, "r") do file
         for (pi, proj) in enumerate(projs)
-            bands_list = all_bands ? ["g", "u", "r"] : ["r"]
+            # Ternary: load r, g, u bands for multi-band targets, or
+            # only r for single-band targets.
+            bands_list = all_bands ? ["r", "g", "u"] : ["r"]
             img = zeros(Nbands, res, res)
             for (bi, band) in enumerate(bands_list)
                 band_data = read(file, proj * "/band_" * band)
@@ -192,21 +194,29 @@ function load_images(
             res=256,
             tgt_type="2d"
         )
+    println("Scanning host image directory..."); flush(stdout)
     host_fnames = filter(
         f -> isfile(joinpath(host_direc, f)) && endswith(f, ".hdf5"),
         readdir(host_direc)
     )
     host_paths = joinpath.(host_direc, host_fnames)
+    println("Found $(length(host_fnames)) host files."); flush(stdout)
+    println("Scanning satellite image directory..."); flush(stdout)
     sat_fnames = filter(
         f -> isfile(joinpath(sat_direc, f)) && endswith(f, ".hdf5"),
         readdir(sat_direc)
     )
     sat_paths = joinpath.(sat_direc, sat_fnames)
+    println("Found $(length(sat_fnames)) satellite files."); flush(stdout)
+    println("Scanning octant image directory..."); flush(stdout)
     octant_fnames = filter(
         f -> isfile(joinpath(octant_img_dir, f)) && endswith(f, ".hdf5"),
         readdir(octant_img_dir)
     )
     octant_paths = joinpath.(octant_img_dir, octant_fnames)
+    println(
+        "Found $(length(octant_fnames)) octant files."
+    ); flush(stdout)
     files = [host_fnames; sat_fnames; octant_fnames]
     paths = [host_paths; sat_paths; octant_paths]
 
@@ -216,6 +226,7 @@ function load_images(
     ]
     is_bad = [any(occursin(baddy, f) for baddy in baddies) for f in files]
 
+    println("Reading target dataframe..."); flush(stdout)
     if tgt_type == "3d"
         y_df = read_3d_tgt()
         all_bands = true
@@ -234,6 +245,10 @@ function load_images(
         ))
     end
 
+    println(
+        "Target dataframe loaded ($(nrow(y_df)) rows). " *
+        "Building file mask..."
+    ); flush(stdout)
     # For every file name, create an inner mask the size of y_df.Simulation
     # where a `true` marks the simulation in y_df (if any) whose name occurs
     # in that file name. If any row in that inner mask is true (although
@@ -243,9 +258,16 @@ function load_images(
         any(occursin(obj * "_", f) for obj in y_df.Simulation)
         for f in files
     ]
+    println(
+        "File mask built: $(sum(in_tgt)) of $(length(files)) files " *
+        "matched target dataframe."
+    ); flush(stdout)
 
     good_files = files[.!is_bad .& in_tgt]
     good_paths = paths[.!is_bad .& in_tgt]
+    println(
+        "$(length(good_files)) good files after filtering baddies."
+    ); flush(stdout)
     if Nfiles === nothing
         # If the user hasn't specified the number of files to run through,
         # run through all of them.
@@ -267,8 +289,10 @@ function load_images(
     # progress line as workers complete.
     println(
         "Pass 1: scanning $(Nfiles) files using $(nworkers()) workers..."
-    )
+    ); flush(stdout)
+    println("Creating RemoteChannel..."); flush(stdout)
     prog1 = RemoteChannel(() -> Channel{Nothing}(Nfiles))
+    println("RemoteChannel created. Starting pmap..."); flush(stdout)
     t_p1 = time()
     p1_task = @async pmap(good_paths[1:Nfiles]) do path
         result = scan_file(path)
@@ -329,9 +353,19 @@ function load_images(
     end
     println() # Advance past the \r progress line.
     if !isempty(mismatches)
+        mismatch_path = joinpath(output_dir, "vmap_mismatches.csv")
+        open(mismatch_path, "w") do io
+            println(io, "galaxy_id,missing_orientation")
+            for (id, missing_orients) in sort(collect(mismatches))
+                for orient in sort(missing_orients)
+                    println(io, "$id,$orient")
+                end
+            end
+        end
         println(
             "Preflight: $(length(mismatches)) galaxies have image " *
-            "orientations missing from their vmaps:"
+            "orientations missing from their vmaps. " *
+            "Wrote details to $mismatch_path"
         )
         for (id, missing_orients) in sort(collect(mismatches))
             println("  $id: $missing_orients")
@@ -458,6 +492,7 @@ function load_vmap(id, res)
 end
 
 function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
+    println("build_training_data: calling load_images..."); flush(stdout)
     ids_X, X, files, y_df, orientations_X = load_images(
         Nfiles=Nfiles,
         res=res,

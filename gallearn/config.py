@@ -93,6 +93,9 @@ def ensure_user_config():
         changed = True
         print(f'firebox_data_dir added to {__package__}_paths')
 
+    if ensure_key(config, 'firebox_snap', 'objects_1200_original'):
+        changed = True
+
     if not config.has_option(f'{__package__}_paths', 'sat_image_dir'):
         config.set(
             f'{__package__}_paths',
