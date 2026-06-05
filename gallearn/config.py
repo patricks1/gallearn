@@ -118,7 +118,7 @@ def ensure_user_config():
                 config,
                 'vmaps_dir',
                 "/DFS-L/DATA/cosmo/pstaudt/gallearn/"
-                    "vmaps_res256_min_cden1.4e+1"
+                    "vmaps-res256-min_cden1.4e+01-bound_filter_none"
             ):
         changed = True
 

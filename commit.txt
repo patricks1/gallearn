@@ -1,0 +1,17 @@
+feat: update default vmaps_dir to new bound_filter directory format
+
+The vmaps directory name now encodes the bound_filter parameter used
+during generation, matching the new format introduced in uci-tools.
+Also adds wip/ to sys.path in view_gal.ipynb so vel_map_orientation_exp
+can be imported, and fixes the FOV filter bug in vel_map_orientation_exp
+by replacing in-place array assignment with explicit reassignment.
+
+## Files Changed
+
+- gallearn/config.py: update default vmaps_dir from
+  vmaps_res256_min_cden1.4e+1 to
+  vmaps-res256-min_cden1.4e+01-bound_filter_none
+- gallearn/view_gal.ipynb: add wip/ to sys.path before importing
+  vel_map_orientation_exp
+- wip/vel_map_orientation_exp.py: fix FOV filter in-place assignment
+  bug; add explicit only_bound=False to load_particles calls
