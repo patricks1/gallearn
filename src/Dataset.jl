@@ -68,6 +68,8 @@ end
 # scan_file reads only HDF5 dataset-size metadata (not pixel data) for one
 # file and returns the projection keys whose images have width <= 2000.
 # Workers call this during pass 1 so each worker has its own HDF5 context.
+# The <= 2000 guard excludes merger galaxies, which tend to have very large
+# images (e.g. galaxy 2 at 5550x5550 px).
 function scan_file(path)
     valid_projs = String[]
     HDF5.h5open(path, "r") do file
@@ -223,6 +225,11 @@ function load_images(
     baddies = [
         "object_1162",
         "object_280",
+        # Gal 1238 is stripped but some vmap proj's have a tiny amount of gas
+        # while others
+        # are absent. The code doesn't drop the gal becasue some vmaps exist,
+        # but then it errors because some are missing.
+        "object_1238",
     ]
     is_bad = [any(occursin(baddy, f) for baddy in baddies) for f in files]
 
