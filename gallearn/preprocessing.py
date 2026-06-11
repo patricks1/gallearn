@@ -267,11 +267,23 @@ def std_scale(X, return_distrib=False, means=None, stds=None):
     X = X.detach().clone()
     if means is None:
         means = torch.zeros(X.shape[1])
+        calc_means = True
+    else:
+        calc_means = False
     if stds is None:
         stds = torch.zeros(X.shape[1])
+        calc_stds = True
+    else:
+        calc_stds = False
     for i in range(X.shape[1]):
-        std = X[:, i].std()
-        mean = X[:, i].mean()
+        if calc_stds:
+            std = X[:, i].std()
+        else:
+            std = stds[i]
+        if calc_means:
+            mean = X[:, i].mean()
+        else:
+            mean = means[i]
         X[:, i] -= mean
         X[:, i] /= std
         means[i] = mean
@@ -405,7 +417,9 @@ def test(save=False):
     from matplotlib import rcParams
     rcParams['axes.titlesize'] = 8.
 
-    d = load_data('gallearn_data_256x256_3proj_2d_tgt.h5')
+    d = load_data(
+        'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
+    )
     X = d['X']
     Xstd = std_scale(X)
     Xminmax = min_max_scale(X)
@@ -480,25 +494,29 @@ def plt_ssfr():
     import os
     import torch
     import matplotlib.pyplot as plt
+    import numpy as np
 
-    d = load_data('gallearn_data_128x128_3proj_wsat_sfr_tgt.h5')
-    ssfrs = d['ys_sorted']#.flatten()
+    d = load_data(
+        'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
+    )
+    ssfrs = d['ys_sorted']
     #iszero = ssfrs == 0.
     #print(len(ssfrs))
     #print(iszero.sum())
     #new_ys = torch.asinh(ssfrs * 1.e12)
-    #new_ys = std_asinh(ssfrs, 1.e11).flatten()
-    new_ys = ssfrs.flatten()
+    new_ys, means, stds = std_asinh(ssfrs, 1.e11, return_distrib=True)
+    print(means, stds)
+    new_ys = new_ys.flatten()
     print(new_ys.min(), new_ys.max(), torch.median(new_ys))
-    #isnan = torch.isnan(ssfrs)
-    #print(isnan.sum())
+    isnan = torch.isnan(ssfrs)
+    print(isnan.sum())
     #print(d['obs_sorted'][isnan])
     
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
     ax.hist(new_ys)
-    ax.set_xlabel('$\dfrac{SFR}{M_\star}\;[10^{-8}\,\mathrm{yr}^{-1}]$')
+    ax.set_xlabel('$\dfrac{SFR}{M_\star}\;[\mathrm{Gyr}^{-1}]$')
     ax.set_yscale('log')
     plt.tight_layout()
     plt.show()
