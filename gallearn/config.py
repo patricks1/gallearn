@@ -93,6 +93,9 @@ def ensure_user_config():
         changed = True
         print(f'firebox_data_dir added to {__package__}_paths')
 
+    if ensure_key(config, 'firebox_snap', 'objects_1200_original'):
+        changed = True
+
     if not config.has_option(f'{__package__}_paths', 'sat_image_dir'):
         config.set(
             f'{__package__}_paths',
@@ -115,7 +118,7 @@ def ensure_user_config():
                 config,
                 'vmaps_dir',
                 "/DFS-L/DATA/cosmo/pstaudt/gallearn/"
-                    "vmaps_res256_min_cden1.4e+1"
+                    "vmaps-res256-min_cden1.4e+01-bound_filter_none"
             ):
         changed = True
 
