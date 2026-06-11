@@ -26,6 +26,9 @@ gallearn/_version.py
 *.out
 slurm.epilog-*
 
+# ignore commit message scratch files
+commit.txt
+
 # ignore Claude instruction files
 CLAUDE.md
 
