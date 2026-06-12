@@ -1,7 +1,31 @@
+import contextlib
 import h5py
 import time
 import math
 import torch
+
+
+@contextlib.contextmanager
+def _open_hdf5(path):
+    # h5py.File.close() raises RuntimeError (EBADF) on the second
+    # _close_open_objects call when the file lives on an SMB share.
+    # That call targets secondary HDF5 file-type objects (e.g. external
+    # links). The first call (datasets/groups) and f.id.close() both
+    # succeed. We replicate the two-step close manually so the main file
+    # descriptor is always released even when the secondary cleanup fails.
+    f = h5py.File(path, 'r', locking=False)
+    try:
+        yield f
+    finally:
+        if f.id.valid:
+            f.id._close_open_objects(h5py.h5f.OBJ_LOCAL | ~h5py.h5f.OBJ_FILE)
+            try:
+                f.id._close_open_objects(h5py.h5f.OBJ_LOCAL | h5py.h5f.OBJ_FILE)
+            except RuntimeError:
+                pass
+            f.id.close()
+            h5py._objects.nonlocal_close()
+
 
 def load_data(fname):
     import torch
@@ -16,7 +40,7 @@ def load_data(fname):
     )
 
     start = time.time()
-    with h5py.File(data_path, 'r') as f:
+    with _open_hdf5(data_path) as f:
         # Expects (N, C, H, W) layout. Run scripts/transpose_hdf5.py
         # first if the file is still in Julia order (H, W, C, N).
         X = torch.FloatTensor(f['X'][()])
@@ -62,7 +86,7 @@ def load_metadata(fname):
         fname
     )
 
-    with h5py.File(hdf5_path, 'r') as f:
+    with _open_hdf5(hdf5_path) as f:
         N = f['X'].shape[0]
         obs_sorted = np.array(f['obs_sorted'], dtype=str)
         orientations = np.array(f['orientations'], dtype=str)
@@ -83,8 +107,9 @@ def load_metadata(fname):
 def compute_scaling_stats(hdf5_path, N, stretch=1.e-5, chunk_size=256):
     '''
     Compute per-channel mean and std for the transformed X data without
-    loading the full dataset into memory. Uses a two-pass approach over the
-    HDF5 file, reading in chunks.
+    loading the full dataset into memory. Uses a two-pass approach over
+    the HDF5 file, reading in chunks, with both passes sharing a single
+    file handle.
 
     The transform matches sasinh_imgs_sscale_vmaps:
     - Channels 0-2 (images): asinh(stretch * x)
@@ -92,12 +117,17 @@ def compute_scaling_stats(hdf5_path, N, stretch=1.e-5, chunk_size=256):
 
     Returns (means, stds) each of shape (4,).
     '''
-    # Pass 1: compute means
     channel_sum = torch.zeros(4, dtype=torch.float64)
     channel_count = torch.zeros(4, dtype=torch.float64)
+    channel_sq_sum = torch.zeros(4, dtype=torch.float64)
 
-    with h5py.File(hdf5_path, 'r') as f:
+    # Both passes share one file handle to avoid the h5py EBADF error that
+    # occurs when the same file is opened, read in many chunks, closed, and
+    # immediately re-opened for a second pass.
+    with _open_hdf5(hdf5_path) as f:
         X_dset = f['X']
+
+        # Pass 1: compute means
         for start in range(0, N, chunk_size):
             end = min(start + chunk_size, N)
             # HDF5 shape is (N, C, H, W); read a chunk of samples
@@ -114,13 +144,9 @@ def compute_scaling_stats(hdf5_path, N, stretch=1.e-5, chunk_size=256):
                 channel_sum[c] += vals.to(torch.float64).sum()
                 channel_count[c] += vals.numel()
 
-    means = (channel_sum / channel_count).float()
+        means = (channel_sum / channel_count).float()
 
-    # Pass 2: compute stds
-    channel_sq_sum = torch.zeros(4, dtype=torch.float64)
-
-    with h5py.File(hdf5_path, 'r') as f:
-        X_dset = f['X']
+        # Pass 2: compute stds
         for start in range(0, N, chunk_size):
             end = min(start + chunk_size, N)
             chunk = torch.FloatTensor(X_dset[start:end])

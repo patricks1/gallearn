@@ -1,5 +1,7 @@
 import os
+import fcntl
 import configparser
+import multiprocessing
 
 env_str = os.getenv('CONDA_DEFAULT_ENV', 'base')
 if env_str == 'base':
@@ -23,8 +25,20 @@ def get_path():
 
 
 def ensure_user_config():
-    config = configparser.ConfigParser()
+    # Child processes (e.g. DataLoader workers) skip writing. Only the
+    # main process creates or updates the config file. Multiple concurrent
+    # main-process runs are serialized by the flock below.
+    if multiprocessing.parent_process() is not None:
+        return get_path()
     config_path = get_path()
+    lock_path = config_path + '.lock'
+    with open(lock_path, 'w') as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        return _ensure_user_config_locked(config_path)
+
+
+def _ensure_user_config_locked(config_path):
+    config = configparser.ConfigParser()
     changed = False
 
     if os.path.isfile(config_path):
@@ -93,7 +107,7 @@ def ensure_user_config():
         changed = True
         print(f'firebox_data_dir added to {__package__}_paths')
 
-    if ensure_key(config, 'firebox_snap', 'objects_1200_original'):
+    if ensure_key(config, 'firebox_snap', 'objects_1200'):
         changed = True
 
     if not config.has_option(f'{__package__}_paths', 'sat_image_dir'):
@@ -161,21 +175,11 @@ def load_config():
     if config_path:
         # In that case, go ahead and get the full path the .ini
         config_path = os.path.expanduser(config_path)
-    elif os.environ.get(
-                f'{__package__.upper()}_CONFIG_CHECKED'
-            ):
-        # A parent process already validated the config file
-        # in this session. Skip ensure_user_config to avoid
-        # race conditions with DataLoader worker processes.
-        config_path = get_path()
     else:
         # Otherwise, check that the user has a
         # config_<environment_name>.ini. Create one for them
         # if they don't.
         config_path = ensure_user_config()
-        os.environ[
-            f'{__package__.upper()}_CONFIG_CHECKED'
-        ] = '1'
 
     config = configparser.ConfigParser(
         interpolation=configparser.ExtendedInterpolation()
