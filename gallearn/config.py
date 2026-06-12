@@ -113,6 +113,21 @@ def ensure_user_config():
 
     if ensure_key(
                 config,
+                'octant_img_dir',
+                '/DFS-L/DATA/cosmo/pstaudt/gallearn/octant_images'
+            ):
+        changed = True
+
+    if ensure_key(
+                config,
+                'octant_shapes',
+                '/DFS-L/DATA/cosmo/pstaudt/gallearn/'
+                    'AstroPhot_octant_allgals_bandr_Sersic.csv'
+            ):
+        changed = True
+
+    if ensure_key(
+                config,
                 'vmaps_dir',
                 "/DFS-L/DATA/cosmo/pstaudt/gallearn/"
                     "vmaps_res256_min_cden1.4e+1"
