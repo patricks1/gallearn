@@ -104,6 +104,9 @@ function load_file(path, projs, fname, all_bands, Nbands, res)
             img = zeros(Nbands, res, res)
             for (bi, band) in enumerate(bands_list)
                 band_data = read(file, proj * "/band_" * band)
+                # h5py wrote (H, W); Julia reverses axes on read to (W, H).
+                # Transpose back so spatial layout is correct.
+                band_data = permutedims(band_data, (2, 1))
                 if size(band_data) != (res, res)
                     band_data = Images.imresize(band_data, res, res)
                 end
@@ -491,7 +494,12 @@ function load_vmap(id, res)
     HDF5.h5open(path, "r") do file
         for orientation in keys(file)
             for data in keys(file[orientation])
-                vmap[orientation] = read(file, orientation)
+                grp = read(file, orientation)
+                # h5py wrote vmap as (H, W); Julia reverses axes to (W, H).
+                # Transpose back so spatial layout is consistent with the
+                # band images.
+                grp["vmap"] = permutedims(grp["vmap"], (2, 1))
+                vmap[orientation] = grp
             end
         end
     end
