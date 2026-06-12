@@ -1,7 +1,31 @@
+import contextlib
 import h5py
 import time
 import math
 import torch
+
+
+@contextlib.contextmanager
+def _open_hdf5(path):
+    # h5py.File.close() raises RuntimeError (EBADF) on the second
+    # _close_open_objects call when the file lives on an SMB share.
+    # That call targets secondary HDF5 file-type objects (e.g. external
+    # links). The first call (datasets/groups) and f.id.close() both
+    # succeed. We replicate the two-step close manually so the main file
+    # descriptor is always released even when the secondary cleanup fails.
+    f = h5py.File(path, 'r', locking=False)
+    try:
+        yield f
+    finally:
+        if f.id.valid:
+            f.id._close_open_objects(h5py.h5f.OBJ_LOCAL | ~h5py.h5f.OBJ_FILE)
+            try:
+                f.id._close_open_objects(h5py.h5f.OBJ_LOCAL | h5py.h5f.OBJ_FILE)
+            except RuntimeError:
+                pass
+            f.id.close()
+            h5py._objects.nonlocal_close()
+
 
 def load_data(fname):
     import torch
@@ -16,7 +40,7 @@ def load_data(fname):
     )
 
     start = time.time()
-    with h5py.File(data_path, 'r') as f:
+    with _open_hdf5(data_path) as f:
         # Expects (N, C, H, W) layout. Run scripts/transpose_hdf5.py
         # first if the file is still in Julia order (H, W, C, N).
         X = torch.FloatTensor(f['X'][()])
@@ -62,7 +86,7 @@ def load_metadata(fname):
         fname
     )
 
-    with h5py.File(hdf5_path, 'r') as f:
+    with _open_hdf5(hdf5_path) as f:
         N = f['X'].shape[0]
         obs_sorted = np.array(f['obs_sorted'], dtype=str)
         orientations = np.array(f['orientations'], dtype=str)
@@ -83,8 +107,9 @@ def load_metadata(fname):
 def compute_scaling_stats(hdf5_path, N, stretch=1.e-5, chunk_size=256):
     '''
     Compute per-channel mean and std for the transformed X data without
-    loading the full dataset into memory. Uses a two-pass approach over the
-    HDF5 file, reading in chunks.
+    loading the full dataset into memory. Uses a two-pass approach over
+    the HDF5 file, reading in chunks, with both passes sharing a single
+    file handle.
 
     The transform matches sasinh_imgs_sscale_vmaps:
     - Channels 0-2 (images): asinh(stretch * x)
@@ -92,12 +117,17 @@ def compute_scaling_stats(hdf5_path, N, stretch=1.e-5, chunk_size=256):
 
     Returns (means, stds) each of shape (4,).
     '''
-    # Pass 1: compute means
     channel_sum = torch.zeros(4, dtype=torch.float64)
     channel_count = torch.zeros(4, dtype=torch.float64)
+    channel_sq_sum = torch.zeros(4, dtype=torch.float64)
 
-    with h5py.File(hdf5_path, 'r') as f:
+    # Both passes share one file handle to avoid the h5py EBADF error that
+    # occurs when the same file is opened, read in many chunks, closed, and
+    # immediately re-opened for a second pass.
+    with _open_hdf5(hdf5_path) as f:
         X_dset = f['X']
+
+        # Pass 1: compute means
         for start in range(0, N, chunk_size):
             end = min(start + chunk_size, N)
             # HDF5 shape is (N, C, H, W); read a chunk of samples
@@ -114,13 +144,9 @@ def compute_scaling_stats(hdf5_path, N, stretch=1.e-5, chunk_size=256):
                 channel_sum[c] += vals.to(torch.float64).sum()
                 channel_count[c] += vals.numel()
 
-    means = (channel_sum / channel_count).float()
+        means = (channel_sum / channel_count).float()
 
-    # Pass 2: compute stds
-    channel_sq_sum = torch.zeros(4, dtype=torch.float64)
-
-    with h5py.File(hdf5_path, 'r') as f:
-        X_dset = f['X']
+        # Pass 2: compute stds
         for start in range(0, N, chunk_size):
             end = min(start + chunk_size, N)
             chunk = torch.FloatTensor(X_dset[start:end])
@@ -160,7 +186,7 @@ class LazyGalaxyDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         if self._file is None:
-            self._file = h5py.File(self.hdf5_path, 'r')
+            self._file = h5py.File(self.hdf5_path, 'r', locking=False)
         hdf5_idx = self.indices[idx].item()
         # HDF5 shape is (N, C, H, W); read one sample -> (C, H, W)
         x = torch.FloatTensor(self._file['X'][hdf5_idx])
@@ -211,6 +237,36 @@ def sasinh_imgs_sscale_vmaps(X, stretch=1.e-5):
 
 
 def std_asinh(X, stretch=1.e-5, return_distrib=False, means=None, stds=None):
+    '''
+    Apply asinh to the dataset with the given stretch and standardize the
+    result along axis 1 e.g. the color channels of a
+    NCHW (number-channel-height-width) dataset
+
+    Parameters
+    ----------
+    X: torch.tensor, shape (N_obs, N_chan, h, w)
+        Dataset to process.
+    stretch: float
+        The value by which to multiply X before applying asinh.
+    return_distrib: bool, default False
+        If True, return the means and standard deviations of each channel so
+        the user can apply them later without recalculating
+    means: torch.tensor of floats, shape (N_chan,), default None
+        The means to apply to each channel when standardizing
+    stds: torch.tensor of floats, shape (N_chan,), default None
+        The standard deviations to appy to each channel when standardizing
+
+    Returns
+    -------
+    X: torch.tensor, shape (N_obs, N_chan, h, w)
+        The standardized dataset.
+    means: torch.tensor, shape (N_chan,)
+        The calculated mean of each channel. Only returned when
+        return_distrib=True.
+    stds: torch.tensor, shape (N_chan,)
+        The calculated standard deviation of each channel. Only returned
+        when return_distrib=True.
+    '''
     import torch
     X = X.detach().clone()
     X = torch.asinh(stretch * X)
@@ -247,7 +303,7 @@ def min_max_scale_255(X):
 def new_min_max_scale(X):
     '''
     Min-max scale the data from 0 to 255. Scaling is done for all galaxies at
-    once, on a per-channel (u, g, r) basis. Given that the X input spans ~8
+    once, on a per-channel (r, g, u) basis. Given that the X input spans ~8
     orders of magnitues, only the brightest regions contribute significant
     information. Additionally, any galaxies whose maximum brightness falls many
     orders of magnitude below the brightest galaxy may not show significant
@@ -263,15 +319,54 @@ def new_min_max_scale(X):
 
 
 def std_scale(X, return_distrib=False, means=None, stds=None):
+    '''
+    Standardize a dataset along axis 1 e.g. the color channels of a NCHW 
+    (number-channel-height-width) dataset
+
+    Parameters
+    ----------
+    X: torch.tensor, shape (N_obs, N_chan, h, w)
+        Dataset to standardize
+    return_distrib: bool, default False
+        If True, return the means and standard deviations of each channel so
+        the user can apply them later without recalculating
+    means: torch.tensor of floats, shape (N_chan,), default None
+        The means to apply to each channel when standardizing
+    stds: torch.tensor of floats, shape (N_chan,), default None
+        The standard deviations to appy to each channel when standardizing
+
+    Returns
+    -------
+    X: torch.tensor, shape (N_obs, N_chan, h, w)
+        The standardized dataset.
+    means: torch.tensor, shape (N_chan,)
+        The calculated mean of each channel. Only returned when
+        return_distrib=True.
+    stds: torch.tensor, shape (N_chan,)
+        The calculated standard deviation of each channel. Only returned
+        when return_distrib=True.
+    '''
     import torch
     X = X.detach().clone()
     if means is None:
         means = torch.zeros(X.shape[1])
+        calc_means = True
+    else:
+        calc_means = False
     if stds is None:
         stds = torch.zeros(X.shape[1])
+        calc_stds = True
+    else:
+        calc_stds = False
     for i in range(X.shape[1]):
-        std = X[:, i].std()
-        mean = X[:, i].mean()
+        if calc_stds:
+            std = X[:, i].std()
+        else:
+            std = stds[i]
+        if calc_means:
+            mean = X[:, i].mean()
+        else:
+            mean = means[i]
         X[:, i] -= mean
         X[:, i] /= std
         means[i] = mean
@@ -307,11 +402,11 @@ def plt_distrib_of_means(ax, X, title=None, all_bands=False):
         heights[i], edges[i] = torch.histogram(m, bins=bins)
 
     if all_bands:
-        colors = ['C2', 'C0', 'C3'],
-        labels = ['g', 'u', 'r']
+        colors = ['C3', 'C2', 'C0'],
+        labels = ['r', 'g', 'u']
     else:
-        colors = ['C2']
-        labels = ['g']
+        colors = ['C3']
+        labels = ['r']
     for h, e, c, l in zip(
                 heights.detach().cpu().numpy(), 
                 edges.detach().cpu().numpy(),
@@ -363,11 +458,11 @@ def plt_distrib(ax, X, title=None, all_bands=False):
         heights[i], edges[i] = hist
 
     if all_bands:
-        colors = ['C2', 'C0', 'C3'],
-        labels = ['g', 'u', 'r']
+        colors = ['C3', 'C2', 'C0'],
+        labels = ['r', 'g', 'u']
     else:
-        colors = ['C2']
-        labels = ['g']
+        colors = ['C3']
+        labels = ['r']
     for h, e, c, l in zip(
                 heights.detach().cpu().numpy(), 
                 edges.detach().cpu().numpy(),
@@ -405,7 +500,9 @@ def test(save=False):
     from matplotlib import rcParams
     rcParams['axes.titlesize'] = 8.
 
-    d = load_data('gallearn_data_256x256_3proj_2d_tgt.h5')
+    d = load_data(
+        'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
+    )
     X = d['X']
     Xstd = std_scale(X)
     Xminmax = min_max_scale(X)
@@ -480,25 +577,29 @@ def plt_ssfr():
     import os
     import torch
     import matplotlib.pyplot as plt
+    import numpy as np
 
-    d = load_data('gallearn_data_128x128_3proj_wsat_sfr_tgt.h5')
-    ssfrs = d['ys_sorted']#.flatten()
+    d = load_data(
+        'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
+    )
+    ssfrs = d['ys_sorted']
     #iszero = ssfrs == 0.
     #print(len(ssfrs))
     #print(iszero.sum())
     #new_ys = torch.asinh(ssfrs * 1.e12)
-    #new_ys = std_asinh(ssfrs, 1.e11).flatten()
-    new_ys = ssfrs.flatten()
+    new_ys, means, stds = std_asinh(ssfrs, 1.e11, return_distrib=True)
+    print(means, stds)
+    new_ys = new_ys.flatten()
     print(new_ys.min(), new_ys.max(), torch.median(new_ys))
-    #isnan = torch.isnan(ssfrs)
-    #print(isnan.sum())
+    isnan = torch.isnan(ssfrs)
+    print(isnan.sum())
     #print(d['obs_sorted'][isnan])
     
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
     ax.hist(new_ys)
-    ax.set_xlabel('$\dfrac{SFR}{M_\star}\;[10^{-8}\,\mathrm{yr}^{-1}]$')
+    ax.set_xlabel('$\dfrac{SFR}{M_\star}\;[\mathrm{Gyr}^{-1}]$')
     ax.set_yscale('log')
     plt.tight_layout()
     plt.show()

@@ -5,9 +5,14 @@ import PyCall
 import Plots
 import Printf
 
+include("GalLearnConfig.jl")
+using .GalLearnConfig
+
 ENV["GKSwstype"] = "100"
 
-super_dir = "/DFS-L/DATA/cosmo/jgmoren1/FIREbox/FB15N1024/"
+conf = GalLearnConfig.read_config()
+super_dir = conf["gallearn_paths"]["firebox_data_dir"]
+firebox_snap = conf["gallearn_paths"]["firebox_snap"]
 
 function make_vel_map_gal(gal_id)
     uci = PyCall.pyimport("UCI_tools")
@@ -17,7 +22,7 @@ function make_vel_map_gal(gal_id)
     id_str = string(gal_id)
     path = joinpath(
         super_dir,
-        "objects_1200",
+        firebox_snap,
         "particles_within_Rvir_object_" * id_str * ".hdf5"
     )
     if isfile(path)

@@ -4,7 +4,12 @@ using Printf
 using DataFrames
 using ProgressBars
 
-direc = "/DFS-L/DATA/cosmo/jgmoren1/FIREbox/FB15N1024/"
+include("GalLearnConfig.jl")
+using .GalLearnConfig
+
+conf = GalLearnConfig.read_config()
+direc = conf["gallearn_paths"]["firebox_data_dir"]
+firebox_snap = conf["gallearn_paths"]["firebox_snap"]
 
 function get_N_structures(obj_num)
     obj_num = string(obj_num)
@@ -14,7 +19,7 @@ function get_N_structures(obj_num)
     end
     stars_in_gal = Set(stars_in_gal)
 
-    fname = direc * "objects_1200/object_" * obj_num * ".hdf5"
+    fname = joinpath(direc, firebox_snap, "object_" * obj_num * ".hdf5")
     all_stars, N_structures = h5open(fname, "r") do file
         all_stars = read(file, "stars_id")
         N_structures = read(file, "object_n_substructures")
@@ -35,7 +40,7 @@ N_bounds = Int[]
 N_structuress = Int[]
 fracs = Float64[]
 
-files = readdir(direc * "objects_1200")
+files = readdir(joinpath(direc, firebox_snap))
 for ahf_fname in ProgressBar(files)
     ibeg = findlast('_', ahf_fname) + 1
     iend = findlast(".hdf5", ahf_fname)[1] - 1

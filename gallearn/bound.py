@@ -3,10 +3,12 @@ import h5py
 import os
 import numpy as np
 from progressbar import ProgressBar
+from . import config
 
 start = time.time()
 
-direc = "/DFS-L/DATA/cosmo/jgmoren1/FIREBox/FB15N1024/"
+direc = config.config.get('gallearn_paths', 'firebox_data_dir')
+firebox_snap = config.config.get('gallearn_paths', 'firebox_snap')
 
 def get_N_structures(obj_num):
     obj_num = str(obj_num)
@@ -14,7 +16,7 @@ def get_N_structures(obj_num):
     with h5py.File(fname, 'r') as f:
         stars_in_gal = f['particleIDs'][:]
 
-    fname = direc + 'objects_1200/object_' + obj_num + '.hdf5'
+    fname = os.path.join(direc, firebox_snap, 'object_' + obj_num + '.hdf5')
     with h5py.File(fname, 'r') as f:
         all_stars = f['stars_id'][:]
 
@@ -30,7 +32,7 @@ N_starss = []
 N_bounds = []
 fracs = []
 
-files = os.listdir(direc + 'objects_1200')
+files = os.listdir(os.path.join(direc, firebox_snap))
 pbar = ProgressBar()
 for ahf_fname in pbar(files):
     ibeg = ahf_fname.rindex('_') + 1

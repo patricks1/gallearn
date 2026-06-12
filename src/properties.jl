@@ -3,7 +3,12 @@ import PyCall
 import Plots
 import Printf
 
-direc = "/DFS-L/DATA/cosmo/jgmoren1/FIREbox/FB15N1024/"
+include("GalLearnConfig.jl")
+using .GalLearnConfig
+
+conf = GalLearnConfig.read_config()
+direc = conf["gallearn_paths"]["firebox_data_dir"]
+firebox_snap = conf["gallearn_paths"]["firebox_snap"]
 
 function get_hosts()
     fname = direc * "global_sample_data/global_sample_data_snapshot_1200.hdf5"
@@ -23,11 +28,11 @@ end
 function test(host_ids)
     id = Int(host_ids[2])
     id_str = string(id)
-    fname = direc *
-        "objects_1200/particles_within_Rvir_object_" * 
-        #"objects_1200/bound_particle_filters_object_" * 
-        id_str * 
-        ".hdf5"
+    fname = joinpath(
+        direc,
+        firebox_snap,
+        "particles_within_Rvir_object_" * id_str * ".hdf5"
+    )
     h5open(fname, "r") do file
         global sfrs, gas_masses, Mstar, snap_time
         println("\nAvailable keys:")

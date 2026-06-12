@@ -66,12 +66,23 @@ def compute_classification_metrics(outputs, targets):
         )
         specificity = tn / (tn + fp + 1e-8)
 
+        # F1 for the quenched (negative) class
+        precision_q = tn / (tn + fn + 1e-8)
+        recall_q = tn / (tn + fp + 1e-8)
+        f1_q = (
+            2 * precision_q * recall_q
+            / (precision_q + recall_q + 1e-8)
+        )
+        macro_f1 = (f1 + f1_q) / 2
+
     return {
         'accuracy': accuracy.item(),
         'precision': precision.item(),
         'recall': recall.item(),
         'specificity': specificity.item(),
         'f1': f1.item(),
+        'f1_quenched': f1_q.item(),
+        'macro_f1': macro_f1.item(),
     }
 
 
@@ -670,6 +681,19 @@ def main(
 
     print('\nModel architecture:\n{0}\n'.format(model))
 
+    # For the classifier, recompute loss_fn with pos_weight now that
+    # train_idxs is known. pos_weight = n_negative / n_positive makes each
+    # positive (star-forming) sample contribute n_neg/n_pos times as much
+    # to the loss as a negative (quenched) sample, so the model can't
+    # minimize loss by always predicting star-forming.
+    if task == 'classifier':
+        train_targets = targets[train_idxs]
+        n_pos = float((train_targets == 1).sum())
+        n_neg = float((train_targets == 0).sum())
+        loss_fn = nn.BCEWithLogitsLoss(
+            pos_weight=torch.tensor(n_neg / n_pos, device=device)
+        )
+
     # Learning rate scheduler
     if use_scheduler:
         scheduler = (
@@ -686,6 +710,9 @@ def main(
 
     # Training loop
     print('Starting training...\n')
+    # higher_is_better is set per-task above: True for classifier (F1),
+    # False for regressor (loss). It controls which direction counts as
+    # an improvement when deciding whether to save a checkpoint.
     if higher_is_better:
         best_metric = 0.0
     else:
@@ -707,19 +734,22 @@ def main(
 
         # Logging
         if task == 'classifier':
+            # macro_f1 averages F1 across both classes equally, so a
+            # model that ignores the minority class (quenched) is
+            # penalized even if its star-forming F1 is high.
             print(
                 'Epoch {0:3d} | '
                 'Train Loss: {1:.4f}, '
                 'Acc: {2:.3f} | '
                 'Test Loss: {3:.4f}, '
                 'Acc: {4:.3f}, '
-                'F1: {5:.3f}'.format(
+                'Macro F1: {5:.3f}'.format(
                     epoch,
                     train_metrics['loss'],
                     train_metrics['accuracy'],
                     test_metrics['loss'],
                     test_metrics['accuracy'],
-                    test_metrics['f1'],
+                    test_metrics['macro_f1'],
                 )
             )
         else:
@@ -740,6 +770,7 @@ def main(
             )
 
         if wandb_mode in ('y', 'r'):
+            import matplotlib.pyplot as plt
             import wandb
             log_dict = {
                 'epoch': epoch,
@@ -750,6 +781,16 @@ def main(
                 ),
             }
             if task == 'classifier':
+                from sklearn.metrics import ConfusionMatrixDisplay
+                fig, ax = plt.subplots()
+                ConfusionMatrixDisplay.from_predictions(
+                    test_metrics['labels'],
+                    test_metrics['preds'],
+                    display_labels=['quenched', 'star-forming'],
+                    normalize='true',
+                    ax=ax,
+                )
+                ax.set_title('Epoch {0}'.format(epoch))
                 log_dict.update({
                     'train/accuracy': (
                         train_metrics['accuracy']
@@ -768,18 +809,13 @@ def main(
                         test_metrics['specificity']
                     ),
                     'test/f1': test_metrics['f1'],
-                    'test/confusion_matrix': (
-                        wandb.plot.confusion_matrix(
-                            probs=None,
-                            y_true=test_metrics['labels'],
-                            preds=test_metrics['preds'],
-                            class_names=[
-                                'quenched',
-                                'star-forming',
-                            ],
-                        )
+                    'test/f1_quenched': (
+                        test_metrics['f1_quenched']
                     ),
+                    'test/macro_f1': test_metrics['macro_f1'],
+                    'test/confusion_matrix': wandb.Image(fig),
                 })
+                plt.close(fig)
             else:
                 log_dict.update({
                     'train/rmse': train_metrics['rmse'],

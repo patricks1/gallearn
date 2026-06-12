@@ -1,6 +1,9 @@
 # Ignore Julia Manifest
 Manifest.toml
 
+# setuptools_scm auto-generates this file from the git tag
+gallearn/_version.py
+
 # ignore python compile files
 *.pyc
 
@@ -9,9 +12,25 @@ Manifest.toml
 
 # ignore hidden files
 .*
+!.github
 
 # ignore data folder
 #data/*
+*.h5
+*.hdf5
+
+# ignore compiled sysimages
+*.so
+
+# ignore slurm output
+*.out
+slurm.epilog-*
+
+# ignore commit message scratch files
+commit.txt
+
+# ignore Claude instruction files
+CLAUDE.md
 
 __pycache__
 
