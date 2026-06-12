@@ -3,6 +3,7 @@ from . import (
     config,
     gen_octant_images,
     preprocessing,
+    visual_checks,
 )
 
 try:
@@ -16,5 +17,6 @@ __all__ = [
     'cnn',
     'config',
     'gen_octant_images',
-    'preprocessing'
+    'preprocessing',
+    'visual_checks',
 ]
