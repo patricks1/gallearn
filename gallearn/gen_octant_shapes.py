@@ -6,13 +6,6 @@ import h5py
 import numpy as np
 import pandas as pd
 import scipy.optimize
-from rich.progress import (
-    Progress,
-    BarColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    MofNCompleteColumn,
-)
 
 from . import config
 
@@ -51,6 +44,7 @@ def _process_galaxy(args):
     '''
     import mockobservation_tools.sersic_tools as sersic_tools
     gal_id, hdf5_path, queue = args
+    queue.put(('start', gal_id, None))
     rows = []
     with h5py.File(hdf5_path, 'r') as f:
         # FOV and pixel count are the same across all projections for a
@@ -100,7 +94,8 @@ def _process_galaxy(args):
                     'Ie': np.nan,
                 }
             rows.append(row)
-            queue.put(1)
+            queue.put(('view', gal_id, len(rows)))
+    queue.put(('done', gal_id, None))
     return rows
 
 
@@ -142,31 +137,101 @@ def gen():
         for fname in hdf5_files
     ]
 
-    n_views = len(worker_args) * len(OCTANT_PROJECTIONS)
+    import rich.live
+    import rich.progress
+
+    class RightMofNColumn(rich.progress.ProgressColumn):
+        """Like MofNCompleteColumn but right-justified so fractions with
+        different total widths align at the slash."""
+        def render(self, task):
+            total = int(task.total) if task.total else 0
+            completed = int(task.completed)
+            total_width = len(str(total))
+            return rich.progress.Text(
+                f'{completed:{total_width}d}/{total}',
+                style='progress.download',
+                justify='right',
+            )
+
+    class LinearETAColumn(rich.progress.ProgressColumn):
+        """ETA from total elapsed / fraction done -- never disappears
+        between slow completions the way the sliding-window column does."""
+        def render(self, task):
+            if not task.total or not task.completed:
+                return rich.progress.Text(
+                    'eta -:--:--', style='progress.remaining',
+                )
+            elapsed = task.elapsed or 0.0
+            remaining = elapsed / task.completed * (
+                task.total - task.completed
+            )
+            hours, rem = divmod(int(remaining), 3600)
+            mins, secs = divmod(rem, 60)
+            return rich.progress.Text(
+                f'eta {hours}:{mins:02d}:{secs:02d}',
+                style='progress.remaining',
+            )
+
+    n_galaxies = len(worker_args)
+    n_workers = multiprocessing.cpu_count()
+
+    progress = rich.progress.Progress(
+        rich.progress.TextColumn(
+            '{task.description}', style='bold',
+        ),
+        rich.progress.BarColumn(bar_width=30),
+        RightMofNColumn(),
+        rich.progress.TimeElapsedColumn(),
+        LinearETAColumn(),
+    )
+    overall = progress.add_task(
+        f'[cyan]Sersic fits ({n_workers} workers)',
+        total=n_galaxies,
+    )
+    active_tasks = {}
+    n_finished = 0
 
     all_rows = []
-    with Progress(
-        TextColumn('[progress.description]{task.description}'),
-        BarColumn(),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-    ) as progress:
-        overall = progress.add_task(
-            'Fitting Sersic profiles', total=n_views
-        )
-        with multiprocessing.Pool() as pool:
-            result = pool.map_async(_process_galaxy, worker_args)
-            completed = 0
-            while not result.ready():
-                while not queue.empty():
-                    queue.get_nowait()
-                    completed += 1
-                    progress.update(overall, completed=completed)
-            galaxy_rows_list = result.get()
-            # Drain any queue items that arrived after result.ready().
-            while not queue.empty():
-                queue.get_nowait()
-            progress.update(overall, completed=n_views)
+    with (
+        multiprocessing.Pool(n_workers) as pool,
+        rich.live.Live(progress, refresh_per_second=12),
+    ):
+        result = pool.map_async(_process_galaxy, worker_args)
+        while not result.ready() or not queue.empty():
+            try:
+                kind, gal_id, payload = queue.get(timeout=0.1)
+            except Exception:
+                continue
+            if kind == 'start':
+                tid = progress.add_task(
+                    f'  galaxy {gal_id}',
+                    total=len(OCTANT_PROJECTIONS),
+                )
+                active_tasks[gal_id] = tid
+            elif kind == 'view':
+                tid = active_tasks.get(gal_id)
+                if tid is not None:
+                    progress.update(tid, completed=payload)
+            elif kind == 'done':
+                tid = active_tasks.pop(gal_id, None)
+                if tid is not None:
+                    progress.remove_task(tid)
+                n_finished += 1
+                progress.update(overall, completed=n_finished)
+        galaxy_rows_list = result.get()
+        # Drain messages that arrived after result.ready().
+        while not queue.empty():
+            try:
+                kind, gal_id, payload = queue.get_nowait()
+                if kind == 'done':
+                    n_finished += 1
+                    progress.update(overall, completed=n_finished)
+                    tid = active_tasks.pop(gal_id, None)
+                    if tid is not None:
+                        progress.remove_task(tid)
+            except Exception:
+                break
+        progress.update(overall, completed=n_galaxies)
 
     for galaxy_rows in galaxy_rows_list:
         all_rows.extend(galaxy_rows)
