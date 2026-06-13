@@ -1,0 +1,9 @@
+galaxyID,FOV,pixel,view,band,b_a,PA,n,Re,Ie
+112,17,850,projection_ppp,band_r,0.6,1.2,1.0,5.0,6.0
+112,17,850,projection_ppm,band_r,0.6,1.2,1.0,5.0,6.0
+112,17,850,projection_pmp,band_r,0.6,1.2,1.0,5.0,6.0
+112,17,850,projection_pmm,band_r,0.6,1.2,1.0,5.0,6.0
+112,17,850,projection_mpp,band_r,0.6,1.2,1.0,5.0,6.0
+112,17,850,projection_mpm,band_r,0.6,1.2,1.0,5.0,6.0
+112,17,850,projection_mmp,band_r,0.6,1.2,1.0,5.0,6.0
+112,17,850,projection_mmm,band_r,0.6,1.2,1.0,5.0,6.0
