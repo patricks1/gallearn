@@ -27,7 +27,14 @@ def get_radii(d):
     assert not df_Re_sat.duplicated(
         subset=['galaxyID', 'view', 'band']
     ).any(), 'The satellite shapes file has duplicate rows.'
-    df_Re = pd.concat([df_Re_host, df_Re_sat], axis=0)
+    df_Re_octant = pd.read_csv(
+        config.config[f'{__package__}_paths']['octant_shapes'],
+        dtype=dtype_dict,
+    )
+    assert not df_Re_octant.duplicated(
+        subset=['galaxyID', 'view', 'band']
+    ).any(), 'The octant shapes file has duplicate rows.'
+    df_Re = pd.concat([df_Re_host, df_Re_sat, df_Re_octant], axis=0)
     df_Re.rename(
         columns={'galaxyID': 'id', 'view': 'orientation'},
         inplace=True
@@ -459,8 +466,9 @@ class ResNet(nn.Module):
                 n_blocks_list=None,
                 dataset=None,
                 out_channels_list=[64, 128, 256, 512],
-                N_img_channels=None
-            ):
+                N_img_channels=None,
+                auto_load=True):
+
         '''
         Adapted from https://github.com/freshtechyy/resnet.git
 
@@ -489,12 +497,13 @@ class ResNet(nn.Module):
             run_name
         )
         self.states_dir = os.path.join(self.run_dir, 'states')
-        if not os.path.isdir(self.run_dir):
-            os.mkdir(self.run_dir)
-            os.mkdir(self.states_dir)
-            self.need_to_load = False
-        else:
+        if auto_load and os.path.isdir(self.run_dir):
             self.need_to_load = True
+        else:
+            if not os.path.isdir(self.run_dir):
+                os.mkdir(self.run_dir)
+                os.mkdir(self.states_dir)
+            self.need_to_load = False
 
         if self.need_to_load and (
                     N_out_channels is not None

@@ -14,10 +14,28 @@ TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def make_sfr_data(seed=42):
+    '''
+    Sample 10 random galaxies from the full SFR dataset HDF5 and write them
+    to tests/test_data/ under the same filename. Returns the galaxy IDs and
+    orientations of the sampled rows so make_shapes_data can build matching
+    shape CSVs.
+
+    Parameters
+    ----------
+    seed: int, default 42
+        Random seed for reproducible sampling.
+
+    Returns
+    -------
+    ids: np.ndarray of int
+        Galaxy IDs of the 10 sampled rows.
+    orientations: np.ndarray of str
+        Projection names of the 10 sampled rows.
+    '''
     from gallearn import preprocessing
 
     dataset_fname = (
-        'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
+        'gallearn_data_256x256_11proj_wsat_wvmap_avg_sfr_tgt_mp.h5'
     )
     test_data_fname = dataset_fname#.replace('data', 'testdata')
 
@@ -50,7 +68,32 @@ def make_sfr_data(seed=42):
 
 
 def make_shapes_data(ids, orientations, seed=42):
+    '''
+    Build trimmed versions of the host, satellite, and octant Sersic shape
+    CSVs for CI. Each full CSV is sampled down to the rows matching the given
+    galaxy IDs and orientations, plus 5 randomly sampled non-matching rows as
+    decoys. Writes one CSV per source file to tests/test_data/ under the same
+    filename as the source.
+
+    Parameters
+    ----------
+    ids: np.ndarray of int
+        Galaxy IDs from make_sfr_data.
+    orientations: np.ndarray of str
+        Projection names from make_sfr_data.
+    seed: int, default 42
+        Random seed for reproducible sampling.
+
+    Returns
+    -------
+    None
+    '''
     def sample_df(config_key, ids, orientations):
+        '''
+        Read the shapes CSV at config_key, keep the rows matching ids and
+        orientations, append 5 randomly sampled non-matching rows as decoys,
+        and write the result to tests/test_data/.
+        '''
         key_df = pd.DataFrame({'galaxyID': ids, 'view': orientations})
         assert not key_df.duplicated().any(), (
             'You have provided duplicate galaxy-orientation samples.'
@@ -86,6 +129,8 @@ def make_shapes_data(ids, orientations, seed=42):
         df_sample = shapes_df.merge(
             key_df,
             on=['galaxyID', 'view'],
+            # 'inner' keeps only rows present in both DataFrames, i.e. the
+            # shapes rows that match the requested galaxy-orientation pairs.
             how='inner',
             validate='one_to_one'
         )
@@ -98,6 +143,7 @@ def make_shapes_data(ids, orientations, seed=42):
 
     sample_df('host_2d_shapes', ids, orientations)
     sample_df('sat_2d_shapes', ids, orientations)
+    sample_df('octant_shapes', ids, orientations)
 
     return None
 
