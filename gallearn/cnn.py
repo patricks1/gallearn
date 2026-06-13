@@ -1027,7 +1027,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     else:
         device_str = 'cpu'
     device = torch.device(device_str)
-    # Note: Avoid torch.set_default_device() - it causes issues with MPS on macOS Tahoe
+    # Note: Avoid torch.set_default_device() - it causes issues with MPS on
+    # macOS Tahoe
 
     def weights_init(layer_in):
         '''
@@ -1159,7 +1160,8 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         #lr = 3.e-5 # learning rate
         lr = 1.e-3 # learning rate
         momentum = 0.5
-        dataset = 'gallearn_data_256x256_11proj_wsat_wvmap_avg_sfr_tgt_mp.h5'
+        #dataset = 'gallearn_data_256x256_11proj_wsat_wvmap_avg_sfr_tgt_mp.h5'
+        dataset = 'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
         n_blocks_list = [1, 1, 1, 1]
         out_channels_list = [16, 32, 64, 128]
         resblock = BasicResBlock 

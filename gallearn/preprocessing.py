@@ -106,16 +106,33 @@ def load_metadata(fname):
 
 def compute_scaling_stats(hdf5_path, N, stretch=1.e-5, chunk_size=256):
     '''
-    Compute per-channel mean and std for the transformed X data without
-    loading the full dataset into memory. Uses a two-pass approach over
-    the HDF5 file, reading in chunks, with both passes sharing a single
-    file handle.
+    Compute per-channel mean and std for transformed X data without loading
+    the full dataset into memory.
 
-    The transform matches sasinh_imgs_sscale_vmaps:
-    - Channels 0-2 (images): asinh(stretch * x)
-    - Channel 3 (vmap): replace NaN with 0
+    Uses a two-pass chunked approach over the HDF5 file. Both passes share
+    a single file handle. The transforms applied before computing stats
+    match sasinh_imgs_sscale_vmaps: channels 0-2 get asinh(stretch * x),
+    and channel 3 (vmap) has NaN replaced with 0.
 
-    Returns (means, stds) each of shape (4,).
+    Parameters
+    ----------
+    hdf5_path : str or Path
+        Path to the HDF5 file. Must contain an 'X' dataset of shape
+        (N_total, 4, H, W).
+    N : int
+        Number of samples to use. Reads indices [0, N) from the dataset.
+    stretch : float, optional
+        Asinh stretch factor applied to image channels 0-2. Default 1e-5.
+    chunk_size : int, optional
+        Number of samples to load per iteration. Default 256.
+
+    Returns
+    -------
+    means : torch.Tensor, shape (4,)
+        Per-channel mean of the transformed data over the N samples.
+    stds : torch.Tensor, shape (4,)
+        Per-channel standard deviation (population) of the transformed
+        data over the N samples.
     '''
     channel_sum = torch.zeros(4, dtype=torch.float64)
     channel_count = torch.zeros(4, dtype=torch.float64)
