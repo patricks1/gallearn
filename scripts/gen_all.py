@@ -5,6 +5,7 @@ if __name__ == '__main__':
     scripts_dir = pathlib.Path(__file__).parent
     for script in [
         'gen_octant_images.py',
+        'gen_octant_shapes.py',
         'gen_vmaps.py',
     ]:
         runpy.run_path(
