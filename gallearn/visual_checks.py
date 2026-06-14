@@ -44,10 +44,12 @@ def load_gal_for_imshow(gal_id, img_orientation, d):
 
 
 def show_gal_fr_X(gal_id, d):
-    """Show a galaxy's three standard projections side by side.
+    """Show all 11 projections of a galaxy in a 3x4 subplot grid.
 
-    Displays projection_xy, projection_yz, and projection_zx in a 1x3
-    subplot grid with axes hidden.
+    Row 0 shows the three standard projections (xy, yz, zx) with x/y/z
+    axis labels; the fourth cell in row 0 is hidden. Rows 1 and 2 show
+    the eight octant projections with axes hidden and the projection name
+    as the subplot title.
 
     Parameters
     ----------
@@ -63,19 +65,46 @@ def show_gal_fr_X(gal_id, d):
     """
     import matplotlib.pyplot as plt
 
-    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(20., 10.))
-    fig.set_wspace = (0.1)
-    for i, orientation in enumerate([
-            'projection_xy',
-            'projection_yz',
-            'projection_zx']):
-        x = load_gal_for_imshow(gal_id, orientation, d)
-        if x is None:
-            continue
-        ax = axs[i]
-        ax.imshow(x[0])
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)
+    # (projection suffix, xlabel, ylabel) -- empty strings mean hide axes
+    standard = [
+        ('xy', 'x', 'y'),
+        ('yz', 'y', 'z'),
+        ('zx', 'z', 'x'),
+    ]
+    octant_row1 = ['ppp', 'ppm', 'pmp', 'pmm']
+    octant_row2 = ['mpp', 'mpm', 'mmp', 'mmm']
+
+    fig, axs = plt.subplots(nrows=3, ncols=4, figsize=(20., 15.))
+    fig.subplots_adjust(wspace=0.1, hspace=0.3)
+
+    for col, (suffix, xlabel, ylabel) in enumerate(standard):
+        ax = axs[0, col]
+        x = load_gal_for_imshow(gal_id, f'projection_{suffix}', d)
+        ax.set_title(suffix)
+        if x is not None:
+            ax.imshow(x[0])
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.tick_params(
+            left=False,
+            bottom=False,
+            labelleft=False,
+            labelbottom=False,
+        )
+    axs[0, 3].set_visible(False)
+
+    for row_idx, octant_row in enumerate([octant_row1, octant_row2]):
+        for col, suffix in enumerate(octant_row):
+            ax = axs[row_idx + 1, col]
+            x = load_gal_for_imshow(
+                gal_id, f'projection_{suffix}', d
+            )
+            ax.set_title(suffix)
+            if x is not None:
+                ax.imshow(x[0])
+            ax.get_xaxis().set_visible(False)
+            ax.get_yaxis().set_visible(False)
+
     plt.show()
 
 
