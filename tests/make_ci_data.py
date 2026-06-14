@@ -148,16 +148,21 @@ def make_shapes_data(ids, orientations, seed=42):
     return None
 
 
-def make_octant_image_files():
+def make_octant_image_files(gal_ids=(112, 910)):
     '''
-    Build a downsampled (32x32) octant HDF5 fixture for galaxy 112 and
-    write it to tests/test_data/octant_images/. Then run _process_galaxy
-    on the fixture and save the Sersic fit results to
+    Build downsampled (64x64) octant HDF5 fixtures for the given galaxy
+    IDs and write them to tests/test_data/octant_images/. Then run
+    _process_galaxy on each fixture and save the Sersic fit results to
     tests/test_data/octant_shapes_reference.json as the stored regression
-    reference.
+    reference, keyed by galaxy ID then projection name.
 
-    FOV is kept at its original value -- the galaxy spans the same
+    FOV is kept at its original value -- each galaxy spans the same
     physical extent in kpc regardless of pixel resolution.
+
+    Parameters
+    ----------
+    gal_ids : tuple of int, default (112, 910)
+        Galaxy IDs to process.
     '''
     import json
     import queue as queue_mod
@@ -167,52 +172,59 @@ def make_octant_image_files():
     octant_img_dir = pathlib.Path(
         config.config['gallearn_paths']['octant_img_dir']
     )
-    # Galaxy IDs are encoded as the second underscore-delimited token in each
-    # filename (e.g. object_112_host_ugrband_FOV17_p850.hdf5 -> 112).
-    matches = sorted(octant_img_dir.glob('object_112_*_ugrband_*.hdf5'))
-    if not matches:
-        raise FileNotFoundError(
-            f'No HDF5 file for galaxy 112 found in {octant_img_dir}'
-        )
-    src = matches[0]
     out_dir = TEST_DATA_DIR / 'octant_images'
     out_dir.mkdir(parents=True, exist_ok=True)
-    dst = out_dir / src.name
     target_pixels = 64
+    ref = {}
 
-    with h5py.File(src, 'r') as f_src, h5py.File(dst, 'w') as f_dst:
-        first_proj = gen_octant_shapes.OCTANT_PROJECTIONS[0]
-        orig_pixels = int(f_src[first_proj].attrs['pixels'])
-        zoom = target_pixels / orig_pixels
-        for proj in gen_octant_shapes.OCTANT_PROJECTIONS:
-            # Copy all attributes, then override 'pixels' to reflect the
-            # downsampled resolution. FOV stays at its original value.
-            grp = f_dst.create_group(proj)
-            for k, v in f_src[proj].attrs.items():
-                grp.attrs[k] = v
-            grp.attrs['pixels'] = target_pixels
-            # Downsample each band (u, g, r) to target_pixels x target_pixels.
-            # scipy.ndimage.zoom rescales the array by the given factor (< 1
-            # shrinks, > 1 enlarges) using spline interpolation (order 3 by
-            # default).
-            for band in f_src[proj].keys():
-                arr = f_src[proj][band][()]
-                small = scipy.ndimage.zoom(arr, zoom).astype(np.float32)
-                grp.create_dataset(band, data=small)
+    for gal_id in gal_ids:
+        # Galaxy IDs are the second underscore-delimited token in each
+        # filename (e.g. object_112_host_ugrband_FOV17_p850.hdf5 -> 112).
+        matches = sorted(
+            octant_img_dir.glob(f'object_{gal_id}_*_ugrband_*.hdf5')
+        )
+        if not matches:
+            raise FileNotFoundError(
+                f'No HDF5 file for galaxy {gal_id} found in {octant_img_dir}'
+            )
+        src = matches[0]
+        dst = out_dir / src.name
 
-    # Run the actual fitting code on the downsampled fixture and store the
-    # results as the regression reference. Future test runs compare against
-    # this JSON to catch unintended changes to _process_galaxy output.
-    rows = gen_octant_shapes._process_galaxy(
-        (112, str(dst), queue_mod.SimpleQueue())
-    )
-    ref = {
-        r['view']: {
-            k: v for k, v in r.items()
-            if k not in ('galaxyID', 'FOV', 'pixel', 'view', 'band')
+        with h5py.File(src, 'r') as f_src, h5py.File(dst, 'w') as f_dst:
+            first_proj = gen_octant_shapes.OCTANT_PROJECTIONS[0]
+            orig_pixels = int(f_src[first_proj].attrs['pixels'])
+            zoom = target_pixels / orig_pixels
+            for proj in gen_octant_shapes.OCTANT_PROJECTIONS:
+                # Copy all attributes, then override 'pixels' to reflect
+                # the downsampled resolution. FOV stays at its original
+                # value.
+                grp = f_dst.create_group(proj)
+                for k, v in f_src[proj].attrs.items():
+                    grp.attrs[k] = v
+                grp.attrs['pixels'] = target_pixels
+                # Downsample each band (u, g, r) to target_pixels x
+                # target_pixels. scipy.ndimage.zoom rescales the array by
+                # the given factor (< 1 shrinks, > 1 enlarges) using
+                # spline interpolation (order 3 by default).
+                for band in f_src[proj].keys():
+                    arr = f_src[proj][band][()]
+                    small = scipy.ndimage.zoom(arr, zoom).astype(np.float32)
+                    grp.create_dataset(band, data=small)
+
+        # Run the actual fitting code on the downsampled fixture and store
+        # the results as the regression reference. Future test runs compare
+        # against this JSON to catch unintended changes to _process_galaxy.
+        rows = gen_octant_shapes._process_galaxy(
+            (gal_id, str(dst), queue_mod.SimpleQueue())
+        )
+        ref[str(gal_id)] = {
+            r['view']: {
+                k: v for k, v in r.items()
+                if k not in ('galaxyID', 'FOV', 'pixel', 'view', 'band')
+            }
+            for r in rows
         }
-        for r in rows
-    }
+
     ref_path = TEST_DATA_DIR / 'octant_shapes_reference.json'
     with open(ref_path, 'w') as fh:
         json.dump(ref, fh, indent=2)
