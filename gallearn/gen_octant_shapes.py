@@ -1,5 +1,7 @@
 import multiprocessing
 import os
+import pathlib
+import re
 import warnings
 
 import h5py
@@ -23,40 +25,42 @@ OCTANT_PROJECTIONS = [
 
 def _process_galaxy(args):
     '''
-    Fit a Sersic2D profile to the r-band of each octant projection for one
-    galaxy. Pool.map requires a single argument, so the caller packs all
-    inputs into a tuple.
+    Fit a Sersic2D profile to the r-band image of each octant projection for
+    one galaxy. Pool workers accept only a single argument, so the caller
+    packs all inputs into a tuple.
 
     Parameters
     ----------
     args: tuple
-        (gal_id, hdf5_path, queue) where gal_id is the FIREBox galaxy ID,
-        hdf5_path is the path to the octant image HDF5 file, and queue is
-        a multiprocessing manager Queue used to report per-view progress
-        back to the main process.
+        A three-element tuple (gal_id, hdf5_path, queue):
+        - gal_id (int): FIREBox galaxy ID extracted from the HDF5 filename.
+        - hdf5_path (str): Absolute path to the octant image HDF5 file.
+        - queue (multiprocessing.managers.Queue): Shared queue used to report
+          per-view progress back to the main process without a shared counter.
 
     Returns
     -------
     rows: list of dict
-        One dict per octant projection. Each dict has the columns listed in
-        the gen_octant_shapes plan: galaxyID, FOV, pixel, view, band, b_a,
-        PA, n, Re, Ie. Failed fits write NaN for all fit columns.
+        One dict per octant projection (8 total). Each dict contains:
+        galaxyID, FOV, pixel, view, band, b_a, PA, n, Re, Ie.
+        Failed fits write NaN for b_a, PA, n, Re, and Ie so that downstream
+        code can filter them out rather than silently consuming NaN values.
     '''
     import mockobservation_tools.sersic_tools as sersic_tools
     gal_id, hdf5_path, queue = args
     queue.put(('start', gal_id, None))
     rows = []
     with h5py.File(hdf5_path, 'r') as f:
-        # FOV and pixel count are the same across all projections for a
-        # given galaxy, so read them from the first group.
+        # FOV and pixel count are uniform across all 8 projections for a
+        # given galaxy, so reading from the first group is sufficient.
         fov = f[OCTANT_PROJECTIONS[0]].attrs['FOV']
         pixels = f[OCTANT_PROJECTIONS[0]].attrs['pixels']
         for proj_name in OCTANT_PROJECTIONS:
             band_r = f[proj_name]['band_r'][()]
             try:
-                # Treat OptimizeWarning as an error so failed fits fall
-                # through to the except branch instead of returning garbage
-                # popt values.
+                # Promote OptimizeWarning to an exception so that fits that
+                # converge to a degenerate solution fall into the except
+                # branch rather than returning garbage popt values.
                 with warnings.catch_warnings():
                     warnings.filterwarnings(
                         'error',
@@ -74,13 +78,15 @@ def _process_galaxy(args):
                     'pixel': pixels,
                     'view': proj_name,
                     'band': 'band_r',
-                    'b_a': 1 - popt[5],
-                    'PA': popt[6] % np.pi,
+                    'b_a': 1 - popt[5],      # axis ratio = 1 - ellipticity
+                    'PA': popt[6] % np.pi,    # position angle in [0, pi)
                     'n': popt[2],
                     'Re': popt[1],
                     'Ie': popt[0],
                 }
             except (RuntimeError, scipy.optimize.OptimizeWarning):
+                # Write NaN fit columns so the row still exists in the CSV
+                # and can be identified as a failed fit.
                 row = {
                     'galaxyID': gal_id,
                     'FOV': fov,
@@ -94,26 +100,70 @@ def _process_galaxy(args):
                     'Ie': np.nan,
                 }
             rows.append(row)
+            # Notify the main process that one more projection is done so it
+            # can update the per-galaxy progress bar.
             queue.put(('view', gal_id, len(rows)))
     queue.put(('done', gal_id, None))
     return rows
 
 
-def gen():
+def _append_rows_to_csv(rows, path):
+    '''
+    Append a list of row dicts to a CSV file, writing the header only when
+    the file does not yet exist.
+
+    Parameters
+    ----------
+    rows: list of dict
+        Row dicts as returned by _process_galaxy. All dicts must have the
+        same keys; pd.DataFrame infers column order from the first dict.
+    path: str or pathlib.Path
+        Destination CSV path. Created on first call; subsequent calls append
+        without repeating the header row.
+
+    Returns
+    -------
+    None
+    '''
+    df = pd.DataFrame(rows)
+    df.to_csv(
+        path,
+        mode='a',
+        header=not os.path.exists(path),  # write header only for new file
+        index=False,
+    )
+
+
+def gen(resume: bool = False):
     '''
     Fit Sersic2D profiles to the octant projections of all galaxies in
-    octant_img_dir and write the results to
-    project_data_dir/AstroPhot_octant_allgals_bandr_Sersic.csv.
+    octant_img_dir and write the results to a CSV in project_data_dir. Each
+    galaxy's rows are written to disk as soon as its worker finishes, so a
+    partial CSV survives an interrupted run.
 
-    The output CSV has the same columns as the existing host and satellite
-    shape files (host_2d_shapes, sat_2d_shapes) so that get_radii in cnn.py
-    can concatenate all three and look up Re uniformly. Galaxy-view pairs
-    whose fits fail are written with NaN fit columns so get_radii can drop
-    them rather than silently including them with NaN Re.
+    Only galaxies whose ID appears in host_2d_shapes or sat_2d_shapes are
+    processed. Galaxies absent from both files have no standard-axis fit and
+    are not useful for training.
 
-    Call as:
-        python -c "import gallearn.gen_octant_shapes;
-                   gallearn.gen_octant_shapes.gen()"
+    Output file naming follows these rules:
+    - If no output file exists yet, writes to
+      AstroPhot_octant_allgals_bandr_Sersic.csv.
+    - If that file exists and resume is False, writes to the next available
+      versioned name (_v2, _v3, ...) so prior results are never overwritten.
+    - If resume is True, appends to the highest-versioned existing file and
+      skips galaxies whose galaxyID already appears in it.
+
+    Parameters
+    ----------
+    resume: bool
+        When True, find the highest-versioned existing output CSV, skip
+        galaxies whose galaxyID already appears in it, and append new rows to
+        that same file. When False (default), start a new versioned file if
+        any output file already exists.
+
+    Returns
+    -------
+    None
     '''
     octant_img_dir = config.config[
         f'{__package__}_paths'
@@ -122,12 +172,44 @@ def gen():
         f'{__package__}_paths'
     ]['project_data_dir']
 
+    # Find the highest-versioned existing output file, if any. The base file
+    # (no version suffix) counts as v1. This determines both the resume target
+    # and the starting point for the next version number.
+    out_stem = 'AstroPhot_octant_allgals_bandr_Sersic'
+    ver_re = re.compile(
+        r'^' + re.escape(out_stem) + r'(?:_v(\d+))?\.csv$'
+    )
+    versions = []
+    for name in os.listdir(project_data_dir):
+        m = ver_re.match(name)
+        if m:
+            v = int(m.group(1)) if m.group(1) else 1
+            versions.append((v, pathlib.Path(project_data_dir) / name))
+    if versions:
+        latest_v, out_path = max(versions, key=lambda x: x[0])
+    else:
+        latest_v = 0
+        out_path = pathlib.Path(project_data_dir) / f'{out_stem}.csv'
+
+    # In non-resume mode, bump to the next version so we never overwrite an
+    # existing file. In resume mode we keep out_path pointing at the latest
+    # file so we append to it.
+    if not resume and out_path.exists():
+        next_v = latest_v + 1
+        suffix = f'_v{next_v}'
+        out_path = pathlib.Path(project_data_dir) / f'{out_stem}{suffix}.csv'
+        print(f'Existing file found; writing new results to {out_path.name}')
+
+    # Discover all octant image HDF5 files and extract galaxy IDs from their
+    # filenames (pattern: object_<galaxyID>_*.hdf5).
     hdf5_files = sorted([
         f for f in os.listdir(octant_img_dir)
         if f.endswith('.hdf5') or f.endswith('.h5')
     ])
-    # Each worker needs the manager queue so it can report per-view progress
-    # back to the main process without a shared counter.
+
+    # The manager queue is shared by all workers so they can send progress
+    # messages back to the main process. It must be created before worker_args
+    # because each tuple embeds a reference to this queue.
     manager = multiprocessing.Manager()
     queue = manager.Queue()
     worker_args = [
@@ -137,12 +219,62 @@ def gen():
         for fname in hdf5_files
     ]
 
+    # Load the galaxy IDs that have standard-axis (non-octant) Sersic fits.
+    # We only run octant fitting for these galaxies because get_radii in
+    # cnn.py needs the paired standard-axis Re to be meaningful.
+    host_ids = pd.read_csv(
+        config.config[f'{__package__}_paths']['host_2d_shapes'],
+        usecols=['galaxyID'],
+    )['galaxyID']
+    sat_ids = pd.read_csv(
+        config.config[f'{__package__}_paths']['sat_2d_shapes'],
+        usecols=['galaxyID'],
+    )['galaxyID']
+    shape_ids = set(host_ids).union(set(sat_ids))
+    n_before_shape = len(worker_args)
+    worker_args = [a for a in worker_args if a[0] in shape_ids]
+    n_excluded = n_before_shape - len(worker_args)
+    if n_excluded:
+        print(
+            f'{n_excluded} galaxies excluded: not in host_2d_shapes'
+            f' or sat_2d_shapes.'
+        )
+
+    # In resume mode, skip galaxies that are already present in the output
+    # file. A galaxy is considered done if any row with its galaxyID exists,
+    # since workers write all 8 projections atomically before signalling done.
+    if resume and out_path.exists():
+        existing = pd.read_csv(out_path, usecols=['galaxyID'])
+        done_ids = set(existing['galaxyID'])
+        n_before_resume = len(worker_args)
+        worker_args = [a for a in worker_args if a[0] not in done_ids]
+        n_skipped = n_before_resume - len(worker_args)
+        print(
+            f'Resume mode: skipping {n_skipped} completed galaxies,'
+            f' {len(worker_args)} remaining.'
+        )
+
+    if not worker_args:
+        print('No galaxies to process.')
+        return
+
     import rich.live
     import rich.progress
 
     class RightMofNColumn(rich.progress.ProgressColumn):
-        """Like MofNCompleteColumn but right-justified so fractions with
-        different total widths align at the slash."""
+        '''Like MofNCompleteColumn but right-justified so fractions with
+        different total widths align at the slash.
+
+        Parameters
+        ----------
+        table_column: rich.table.Column, optional
+            Passed through to ProgressColumn.__init__.
+
+        Returns
+        -------
+        rich.progress.Text
+            Right-justified "completed/total" string.
+        '''
         def render(self, task):
             total = int(task.total) if task.total else 0
             completed = int(task.completed)
@@ -154,8 +286,20 @@ def gen():
             )
 
     class LinearETAColumn(rich.progress.ProgressColumn):
-        """ETA from total elapsed / fraction done -- never disappears
-        between slow completions the way the sliding-window column does."""
+        '''ETA computed as (elapsed / fraction_done) * fraction_remaining.
+        Unlike the default sliding-window ETA, this never disappears between
+        slow task completions.
+
+        Parameters
+        ----------
+        table_column: rich.table.Column, optional
+            Passed through to ProgressColumn.__init__.
+
+        Returns
+        -------
+        rich.progress.Text
+            "eta H:MM:SS" string, or "eta -:--:--" when no data yet.
+        '''
         def render(self, task):
             if not task.total or not task.completed:
                 return rich.progress.Text(
@@ -172,6 +316,8 @@ def gen():
                 style='progress.remaining',
             )
 
+    # n_galaxies is computed after both filters so the progress bar shows the
+    # actual number of galaxies this run will process.
     n_galaxies = len(worker_args)
     n_workers = multiprocessing.cpu_count()
 
@@ -188,71 +334,72 @@ def gen():
         f'[cyan]Sersic fits ({n_workers} workers)',
         total=n_galaxies,
     )
+    # Maps gal_id to the rich task ID for its per-galaxy progress bar so we
+    # can update and remove it when the worker sends view/done messages.
     active_tasks = {}
-    n_finished = 0
 
-    all_rows = []
+    n_total = len(worker_args)
+    n_completed = 0   # galaxies whose done message has been processed
+    n_attempted = 0   # total galaxy-view pairs processed (8 per galaxy)
+    n_success = 0
+    n_failed = 0
+    failed_pairs = []  # (galaxyID, view) tuples for the summary printout
+
     with (
         multiprocessing.Pool(n_workers) as pool,
         rich.live.Live(progress, refresh_per_second=12),
     ):
-        result = pool.map_async(_process_galaxy, worker_args)
-        while not result.ready() or not queue.empty():
+        # Dispatch one apply_async call per galaxy so we can collect and write
+        # each galaxy's rows as soon as it finishes, rather than waiting for
+        # all galaxies to complete as map_async would require.
+        async_results = {
+            args[0]: pool.apply_async(_process_galaxy, (args,))
+            for args in worker_args
+        }
+        # Keep looping until every galaxy has sent its done message AND the
+        # queue is empty. The queue.empty() guard drains any view messages
+        # that arrived after the last done was processed.
+        while n_completed < n_total or not queue.empty():
             try:
                 kind, gal_id, payload = queue.get(timeout=0.1)
             except Exception:
+                # queue.get timed out; loop and check the exit condition again.
                 continue
             if kind == 'start':
+                # Worker just started this galaxy; create its progress bar.
                 tid = progress.add_task(
                     f'  galaxy {gal_id}',
                     total=len(OCTANT_PROJECTIONS),
                 )
                 active_tasks[gal_id] = tid
             elif kind == 'view':
+                # Worker finished one more projection; advance the bar.
                 tid = active_tasks.get(gal_id)
                 if tid is not None:
                     progress.update(tid, completed=payload)
             elif kind == 'done':
+                # Worker finished all projections. Collect its rows, write
+                # them to disk immediately, then retire the progress bar.
                 tid = active_tasks.pop(gal_id, None)
                 if tid is not None:
                     progress.remove_task(tid)
-                n_finished += 1
-                progress.update(overall, completed=n_finished)
-        galaxy_rows_list = result.get()
-        # Drain messages that arrived after result.ready().
-        while not queue.empty():
-            try:
-                kind, gal_id, payload = queue.get_nowait()
-                if kind == 'done':
-                    n_finished += 1
-                    progress.update(overall, completed=n_finished)
-                    tid = active_tasks.pop(gal_id, None)
-                    if tid is not None:
-                        progress.remove_task(tid)
-            except Exception:
-                break
-        progress.update(overall, completed=n_galaxies)
+                rows = async_results[gal_id].get()
+                _append_rows_to_csv(rows, out_path)
+                for row in rows:
+                    n_attempted += 1
+                    if pd.notna(row['Re']):
+                        n_success += 1
+                    else:
+                        n_failed += 1
+                        failed_pairs.append((row['galaxyID'], row['view']))
+                n_completed += 1
+                progress.update(overall, completed=n_completed)
 
-    for galaxy_rows in galaxy_rows_list:
-        all_rows.extend(galaxy_rows)
-
-    df = pd.DataFrame(all_rows)
-
-    n_attempted = len(df)
-    n_success = df['Re'].notna().sum()
-    n_failed = n_attempted - n_success
     print(
         f'\n{n_attempted} galaxy-view pairs attempted: '
         f'{n_success} succeeded, {n_failed} failed.'
     )
     if n_failed > 0:
-        failed = df[df['Re'].isna()][['galaxyID', 'view']]
-        for _, row in failed.iterrows():
-            print(f'  object_{row["galaxyID"]} {row["view"]}')
-
-    out_path = os.path.join(
-        project_data_dir,
-        'AstroPhot_octant_allgals_bandr_Sersic.csv',
-    )
-    df.to_csv(out_path, index=False)
+        for gal_id, view in failed_pairs:
+            print(f'  object_{gal_id} {view}')
     print(f'\nWrote {out_path}')
