@@ -120,37 +120,60 @@ class TestRotateSnapdict:
 class TestScanImageDirs:
 
     def test_finds_galaxies(self):
+        '''Verifies scan_image_dirs returns exactly the galaxy IDs present
+        in the fixture dirs. Discovers expected IDs by globbing so the test
+        stays valid after fixture regeneration without hard-coded values.'''
         host_dir = TEST_DATA_DIR / 'host_band_ugr'
         sat_dir = TEST_DATA_DIR / 'sat_band_ugr'
-        galaxies = gallearn.gen_octant_images.scan_image_dirs(host_dir, sat_dir)
-        ids = {g['attrs']['galaxyID'] for g in galaxies}
-        assert 768 in ids or 768.0 in ids
-        assert 1271 in ids or 1271.0 in ids
+        expected_ids = set()
+        for d in (host_dir, sat_dir):
+            for p in d.glob('object_*.hdf5'):
+                expected_ids.add(int(p.name.split('_')[1]))
+        galaxies = gallearn.gen_octant_images.scan_image_dirs(
+            host_dir, sat_dir,
+        )
+        found_ids = {int(g['attrs']['galaxyID']) for g in galaxies}
+        assert found_ids == expected_ids
 
     def test_reads_fov_and_pixels(self):
+        '''Verifies the 'fov' and 'pixels' values scan_image_dirs returns
+        for each galaxy match the FOV and pixels HDF5 attrs in the source
+        file. Reads expected values from the fixture files directly so the
+        test does not hard-code specific numbers.'''
         host_dir = TEST_DATA_DIR / 'host_band_ugr'
         sat_dir = TEST_DATA_DIR / 'sat_band_ugr'
-        galaxies = gallearn.gen_octant_images.scan_image_dirs(host_dir, sat_dir)
-        by_id = {
-            int(g['attrs']['galaxyID']): g
-            for g in galaxies
-        }
-        assert by_id[768]['fov'] == 15
-        assert by_id[768]['pixels'] == 750
-        assert by_id[1271]['fov'] == 13
-        assert by_id[1271]['pixels'] == 650
+        galaxies = gallearn.gen_octant_images.scan_image_dirs(
+            host_dir, sat_dir,
+        )
+        by_id = {int(g['attrs']['galaxyID']): g for g in galaxies}
+        for gal_id, gal in by_id.items():
+            src_files = list(host_dir.glob(f'object_{gal_id}_*.hdf5'))
+            src_files += list(sat_dir.glob(f'object_{gal_id}_*.hdf5'))
+            assert src_files, f'No fixture file for galaxy {gal_id}'
+            with h5py.File(src_files[0], 'r') as f:
+                grp = f[list(f.keys())[0]]
+                expected_fov = grp.attrs['FOV']
+                expected_pixels = grp.attrs['pixels']
+            assert gal['fov'] == expected_fov
+            assert gal['pixels'] == expected_pixels
 
     def test_deduplicates_by_galaxy_id(self):
-        # Scanning the same directory twice should not
-        # produce duplicates.
+        '''Passes the same directory as both arguments to scan_image_dirs so
+        scan_image_dirs encounters every file twice. Verifies scan_image_dirs
+        deduplicates by galaxy ID to avoid processing each galaxy twice.'''
         host_dir = TEST_DATA_DIR / 'host_band_ugr'
-        galaxies = gallearn.gen_octant_images.scan_image_dirs(host_dir, host_dir)
-        ids = [
-            int(g['attrs']['galaxyID']) for g in galaxies
-        ]
+        galaxies = gallearn.gen_octant_images.scan_image_dirs(
+            host_dir, host_dir,
+        )
+        ids = [int(g['attrs']['galaxyID']) for g in galaxies]
         assert len(ids) == len(set(ids))
 
     def test_missing_dir_warns(self, capsys):
+        '''Verifies scan_image_dirs prints a warning and skips a given
+        directory if it does not exist. The pipeline may have generated
+        only host images or only satellite images so far; scan_image_dirs
+        should return whatever galaxies it can find rather than aborting
+        the run.'''
         galaxies = gallearn.gen_octant_images.scan_image_dirs(
             '/nonexistent/path', '/also/nonexistent',
         )
@@ -159,9 +182,15 @@ class TestScanImageDirs:
         assert 'Warning' in captured.out
 
     def test_attrs_copied(self):
+        '''Verifies scan_image_dirs copies FOV, pixels, galaxyID, and
+        format attrs from each HDF5 file into the returned dict. Downstream
+        code requires all four attributes; missing any one would break
+        image processing.'''
         host_dir = TEST_DATA_DIR / 'host_band_ugr'
         sat_dir = TEST_DATA_DIR / 'sat_band_ugr'
-        galaxies = gallearn.gen_octant_images.scan_image_dirs(host_dir, sat_dir)
+        galaxies = gallearn.gen_octant_images.scan_image_dirs(
+            host_dir, sat_dir,
+        )
         for gal in galaxies:
             attrs = gal['attrs']
             assert 'FOV' in attrs

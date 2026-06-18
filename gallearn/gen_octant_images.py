@@ -71,11 +71,27 @@ rotate_snapdict = uci_tools.rotate_galaxy.rotate_snapdict
 
 def scan_image_dirs(host_dir, sat_dir):
     """
-    Scan host and satellite image directories for existing per-galaxy
-    HDF5 files.  Opens each file and reads attributes from the first
-    projection group.  Returns a list of dicts with keys: attrs (dict
-    of all attributes from the source file), fov, pixels, fname.
-    Deduplicates by galaxyID attribute.
+    Scan host_dir and sat_dir for per-galaxy HDF5 files, read attributes
+    from the first projection group of each, and return a list with one
+    dict per unique galaxy ID. Deduplicate by galaxy ID so downstream
+    code processes each galaxy once even if it has files in both dirs.
+
+    Parameters
+    ----------
+    host_dir: str or pathlib.Path
+        Directory containing host galaxy HDF5 files.
+    sat_dir: str or pathlib.Path
+        Directory containing satellite galaxy HDF5 files.
+
+    Returns
+    -------
+    list of dict
+        One entry per unique galaxy ID. Each dict has keys: attrs (all
+        HDF5 attributes from the first projection group), fov (int),
+        pixels (int), fname (filename string). When multiple files share
+        a galaxy ID, the first file encountered wins: scan_image_dirs
+        scans host_dir before sat_dir and sorts files within each
+        directory alphabetically.
     """
     galaxies = []
     seen_ids = set()
@@ -94,6 +110,8 @@ def scan_image_dirs(host_dir, sat_dir):
             except Exception:
                 continue
             gal_id = attrs.get('galaxyID')
+            # Skip IDs already in seen_ids to guard against the
+            # possibility of multiple image files for the same galaxy.
             if gal_id is None or gal_id in seen_ids:
                 continue
             seen_ids.add(gal_id)
