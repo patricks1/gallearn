@@ -69,8 +69,6 @@ def _process_galaxy(args):
         pixels = f[OCTANT_PROJECTIONS[0]].attrs['pixels']
         for proj_name in OCTANT_PROJECTIONS:
             if proj_name in skip_views:
-                n_sent += 1
-                queue.put(('view', gal_id, len(skip_views) + n_sent))
                 continue
             band_r = f[proj_name]['band_r'][()]
             try:
@@ -119,6 +117,23 @@ def _process_galaxy(args):
             n_sent += 1
             queue.put(('view', gal_id, len(skip_views) + n_sent))
     queue.put(('done', gal_id, None))
+
+
+def _sort_csv(path):
+    '''Read the CSV at path, sort by galaxyID then view, and overwrite it.
+
+    Parameters
+    ----------
+    path: pathlib.Path
+        CSV file to sort in place.
+
+    Returns
+    -------
+    None
+    '''
+    df = pd.read_csv(path)
+    df = df.sort_values(['galaxyID', 'view']).reset_index(drop=True)
+    df.to_csv(path, index=False)
 
 
 def _append_rows_to_csv(rows, path):
@@ -367,6 +382,8 @@ def gen(resume: bool = False):
         suffix = f'_v{next_v}'
         out_path = pathlib.Path(project_data_dir) / f'{out_stem}{suffix}.csv'
         print(f'Existing file found; writing new results to {out_path.name}')
+    else:
+        print(f'Output file: {out_path.name}')
 
     # Create the output CSV (header only) immediately so that a second
     # concurrent instance of gen() sees the file and starts a new version
@@ -443,6 +460,7 @@ def gen(resume: bool = False):
             f'Resume mode: skipping {n_skipped} completed galaxies,'
             f' {n_partial} partially done, {len(worker_args)} remaining.'
         )
+        _sort_csv(out_path)
 
     if not worker_args:
         print('No galaxies to process.')
@@ -453,6 +471,7 @@ def gen(resume: bool = False):
         out_path,
         label='Sersic fits',
     )
+    _sort_csv(out_path)
 
     # Check that every expected (galaxyID, view) pair landed in the CSV.
     # Missing pairs indicate rows lost to a crash mid-write; backfill them.
@@ -484,6 +503,7 @@ def gen(resume: bool = False):
         n_success += bf_success
         n_failed += bf_failed
         failed_pairs.extend(bf_pairs)
+        _sort_csv(out_path)
 
     print(
         f'\n{n_attempted} galaxy-view pairs attempted: '

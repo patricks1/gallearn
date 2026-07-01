@@ -110,6 +110,13 @@ def _ensure_user_config_locked(config_path):
     if ensure_key(config, 'firebox_snap', 'objects_1200'):
         changed = True
 
+    if ensure_key(
+                config,
+                'dataset',
+                'gallearn_data_256x256_11proj_wsat_wvmap_avg_sfr_tgt_mp.h5'
+            ):
+        changed = True
+
     if not config.has_option(f'{__package__}_paths', 'sat_image_dir'):
         config.set(
             f'{__package__}_paths',

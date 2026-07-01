@@ -515,11 +515,10 @@ def test(save=False):
     import torch
     from matplotlib import pyplot as plt
     from matplotlib import rcParams
+    from . import config
     rcParams['axes.titlesize'] = 8.
 
-    d = load_data(
-        'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
-    )
+    d = load_data(config.config['gallearn_paths']['dataset'])
     X = d['X']
     Xstd = std_scale(X)
     Xminmax = min_max_scale(X)
@@ -595,10 +594,9 @@ def plt_ssfr():
     import torch
     import matplotlib.pyplot as plt
     import numpy as np
+    from . import config
 
-    d = load_data(
-        'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
-    )
+    d = load_data(config.config['gallearn_paths']['dataset'])
     ssfrs = d['ys_sorted']
     #iszero = ssfrs == 0.
     #print(len(ssfrs))

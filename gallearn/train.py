@@ -444,10 +444,7 @@ def weights_init(module):
 def main(
         task,
         model_type,
-        dataset=(
-            'gallearn_data_256x256_3proj'
-            '_wsat_wvmap_avg_sfr_tgt.h5'
-        ),
+        dataset=config.config['gallearn_paths']['dataset'],
         run_name=None,
         n_epochs=100,
         batch_size=32,
@@ -909,10 +906,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--dataset',
         type=str,
-        default=(
-            'gallearn_data_256x256_3proj'
-            '_wsat_wvmap_avg_sfr_tgt_nchw.h5'
-        ),
+        default=config.config['gallearn_paths']['dataset'],
         help=(
             'Dataset filename (default: %(default)s)'
         ),

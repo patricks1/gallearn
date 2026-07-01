@@ -11,17 +11,15 @@ def test_BernoulliNet():
     '''
     Verify that we can instantiate a BernoulliNet.
     '''
-    from gallearn import cnn, preprocessing
+    import gallearn
 
-    data_fname = (
-        'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
-    )
-    data_dict = preprocessing.load_data(data_fname)
+    data_fname = gallearn.config.config['gallearn_paths']['dataset']
+    data_dict = gallearn.preprocessing.load_data(data_fname)
     X = data_dict['X']
-    rs = cnn.get_radii(data_dict)
+    rs = gallearn.cnn.get_radii(data_dict)
 
     resnet18 = torchvision.models.resnet18()
-    classifier = cnn.BernoulliNet(
+    classifier = gallearn.cnn.BernoulliNet(
         lr=1.e-4,
         momentum=0.5,
         backbone=resnet18,

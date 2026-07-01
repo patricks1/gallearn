@@ -1169,8 +1169,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         #lr = 3.e-5 # learning rate
         lr = 1.e-3 # learning rate
         momentum = 0.5
-        #dataset = 'gallearn_data_256x256_11proj_wsat_wvmap_avg_sfr_tgt_mp.h5'
-        dataset = 'gallearn_data_256x256_3proj_wsat_wvmap_avg_sfr_tgt_nchw.h5'
+        dataset = config.config[f'{__package__}_paths']['dataset']
         n_blocks_list = [1, 1, 1, 1]
         out_channels_list = [16, 32, 64, 128]
         resblock = BasicResBlock 
