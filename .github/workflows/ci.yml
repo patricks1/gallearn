@@ -26,8 +26,10 @@ jobs:
         sed '/^  - pip:/,/^  [^ ]/{ /^  - pip:/d; /^    -/d; }' \
           environment.yml > environment_ci.yml
         conda env update --file environment_ci.yml --name base
-    - name: Install git pip packages
+    - name: Install pip packages
       run: |
+        conda run -n base pip install --no-build-isolation \
+          astrophot==0.17.3
         conda run -n base pip install --no-build-isolation \
           git+https://github.com/courtk32/FIRE_studio.git
         conda run -n base pip install --no-build-isolation \

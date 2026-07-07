@@ -2,6 +2,7 @@ import multiprocessing
 import os
 import pathlib
 import re
+import traceback
 import warnings
 
 import h5py
@@ -133,67 +134,82 @@ def _process_galaxy(args):
     -------
     None
         Rows are delivered via queue messages rather than as a return value.
-        Fits that raise an exception send NaN for b_a, PA, n, Re, and
-        Ie_log10 so that downstream code can filter them out rather than
-        silently consuming NaN values. AstroPhot fits reporting
-        non-convergence do not raise and are not NaN'd out; their real
-        fitted values are kept, with the non-convergence noted separately
-        in the 'converged' column.
+        Fits that raise RuntimeError or scipy.optimize.OptimizeWarning (the
+        optimizer's own signals that it could not find a solution) send NaN
+        for b_a, PA, n, Re, and Ie_log10 so that downstream code can filter
+        them out rather than silently consuming NaN values. AstroPhot fits
+        reporting non-convergence do not raise and are not NaN'd out; their
+        real fitted values are kept, with the non-convergence noted
+        separately in the 'converged' column. Any other exception (a
+        missing dependency, an API mismatch, a bug) is not a per-projection
+        fit failure, so it is not caught here; _process_galaxy reports it
+        as a ('fatal', gal_id, traceback) queue message instead, since a
+        bare re-raise inside a multiprocessing.Pool worker would only be
+        discarded by apply_async and leave _run_fitting_pass hanging
+        forever waiting for a 'done' message this worker will never send.
     '''
+    import scipy.optimize
+
     gal_id, hdf5_path, queue, skip_views, fitter = args
-    queue.put(('start', gal_id, len(skip_views)))
-    n_sent = 0
-    with h5py.File(hdf5_path, 'r') as f:
-        # FOV and pixel count are uniform across all 8 projections for a
-        # given galaxy, so reading from the first group is sufficient.
-        fov = f[OCTANT_PROJECTIONS[0]].attrs['FOV']
-        pixels = f[OCTANT_PROJECTIONS[0]].attrs['pixels']
-        for proj_name in OCTANT_PROJECTIONS:
-            if proj_name in skip_views:
-                continue
-            band_r = f[proj_name]['band_r'][()]
-            try:
-                if fitter == 'astrophot':
-                    b_a, PA, n, Re, Ie, converged = _fit_astrophot(
-                        band_r, fov, pixels,
-                    )
-                else:
-                    b_a, PA, n, Re, Ie = _fit_sersic_2d(band_r, fov)
-                row = {
-                    'galaxyID': gal_id,
-                    'FOV': fov,
-                    'pixel': pixels,
-                    'view': proj_name,
-                    'band': 'band_r',
-                    'b_a': b_a,
-                    'PA': PA,
-                    'n': n,
-                    'Re': Re,
-                    'Ie_log10': Ie,
-                }
-                if fitter == 'astrophot':
-                    row['converged'] = converged
-            except Exception:
-                # Write NaN fit columns so the row still exists in the CSV
-                # and can be identified as a failed fit.
-                row = {
-                    'galaxyID': gal_id,
-                    'FOV': fov,
-                    'pixel': pixels,
-                    'view': proj_name,
-                    'band': 'band_r',
-                    'b_a': np.nan,
-                    'PA': np.nan,
-                    'n': np.nan,
-                    'Re': np.nan,
-                    'Ie_log10': np.nan,
-                }
-                if fitter == 'astrophot':
-                    row['converged'] = np.nan
-            queue.put(('row', gal_id, row))
-            n_sent += 1
-            queue.put(('view', gal_id, len(skip_views) + n_sent))
-    queue.put(('done', gal_id, None))
+    try:
+        queue.put(('start', gal_id, len(skip_views)))
+        n_sent = 0
+        with h5py.File(hdf5_path, 'r') as f:
+            # FOV and pixel count are uniform across all 8 projections for
+            # a given galaxy, so reading from the first group is
+            # sufficient.
+            fov = f[OCTANT_PROJECTIONS[0]].attrs['FOV']
+            pixels = f[OCTANT_PROJECTIONS[0]].attrs['pixels']
+            for proj_name in OCTANT_PROJECTIONS:
+                if proj_name in skip_views:
+                    continue
+                band_r = f[proj_name]['band_r'][()]
+                try:
+                    if fitter == 'astrophot':
+                        b_a, PA, n, Re, Ie, converged = _fit_astrophot(
+                            band_r, fov, pixels,
+                        )
+                    else:
+                        b_a, PA, n, Re, Ie = _fit_sersic_2d(band_r, fov)
+                    row = {
+                        'galaxyID': gal_id,
+                        'FOV': fov,
+                        'pixel': pixels,
+                        'view': proj_name,
+                        'band': 'band_r',
+                        'b_a': b_a,
+                        'PA': PA,
+                        'n': n,
+                        'Re': Re,
+                        'Ie_log10': Ie,
+                    }
+                    if fitter == 'astrophot':
+                        row['converged'] = converged
+                except (RuntimeError, scipy.optimize.OptimizeWarning):
+                    # The optimizer itself reported failure to find a
+                    # solution. Write NaN fit columns so the row still
+                    # exists in the CSV and can be identified as a failed
+                    # fit.
+                    row = {
+                        'galaxyID': gal_id,
+                        'FOV': fov,
+                        'pixel': pixels,
+                        'view': proj_name,
+                        'band': 'band_r',
+                        'b_a': np.nan,
+                        'PA': np.nan,
+                        'n': np.nan,
+                        'Re': np.nan,
+                        'Ie_log10': np.nan,
+                    }
+                    if fitter == 'astrophot':
+                        row['converged'] = np.nan
+                queue.put(('row', gal_id, row))
+                n_sent += 1
+                queue.put(('view', gal_id, len(skip_views) + n_sent))
+        queue.put(('done', gal_id, None))
+    except Exception:
+        queue.put(('fatal', gal_id, traceback.format_exc()))
 
 
 def _sort_csv(path):
@@ -383,6 +399,14 @@ def _run_fitting_pass(worker_args, out_path, label):
                     progress.remove_task(tid)
                 n_completed += 1
                 progress.update(overall, completed=n_completed)
+            elif kind == 'fatal':
+                # This worker will never send a 'done' message for
+                # gal_id, so raise now instead of letting the while loop
+                # above hang forever waiting for one.
+                raise RuntimeError(
+                    f'_process_galaxy failed fatally for galaxy'
+                    f' {gal_id}:\n{payload}'
+                )
 
     return n_attempted, n_success, n_failed, failed_pairs
 

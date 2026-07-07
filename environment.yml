@@ -23,5 +23,6 @@ dependencies:
   - wandb
   - rich
   - pip:
+    - astrophot==0.17.3
     - git+https://github.com/courtk32/FIRE_studio.git
     - git+https://github.com/courtk32/mockobservation-tools.git
