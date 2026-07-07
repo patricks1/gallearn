@@ -19,6 +19,11 @@ gallearn/_version.py
 *.h5
 *.hdf5
 
+# CI fixture HDF5s under tests/test_data/ are real test inputs, not
+# generated data, so track them despite the blanket rule above.
+!tests/test_data/**/*.h5
+!tests/test_data/**/*.hdf5
+
 # ignore compiled sysimages
 *.so
 
