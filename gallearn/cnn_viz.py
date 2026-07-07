@@ -1,7 +1,7 @@
 import cnn
 from . import preprocessing
+from . import config
 import torch
-import paths
 import os
 
 import matplotlib as mpl
@@ -30,7 +30,9 @@ run_name = 'visionary-darkness-190'
 model = cnn.load_net(run_name)
 
 def show_filters():
-    results_dir = os.path.join(paths.data, run_name)
+    results_dir = os.path.join(
+        config.config['gallearn_paths']['project_data_dir'], run_name,
+    )
     if not os.path.isdir(results_dir):
         os.mkdir(results_dir)
     os.chdir(results_dir)

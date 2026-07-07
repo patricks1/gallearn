@@ -7,8 +7,6 @@ import warnings
 import h5py
 import numpy as np
 import pandas as pd
-import scipy.optimize
-
 from . import config
 
 OCTANT_PROJECTIONS = [
@@ -24,13 +22,90 @@ OCTANT_PROJECTIONS = [
 
 CSV_COLUMNS = [
     'galaxyID', 'FOV', 'pixel', 'view', 'band',
-    'b_a', 'PA', 'n', 'Re', 'Ie',
+    'b_a', 'PA', 'n', 'Re', 'Ie_log10',
 ]
+ASTROPHOT_CSV_COLUMNS = CSV_COLUMNS + ['converged']
+
+
+def _fit_astrophot(band_r, fov, pixels):
+    '''Fit a Sersic profile to band_r using AstroPhot's LM optimizer.
+
+    Parameters
+    ----------
+    band_r: np.ndarray
+        2D r-band image array.
+    fov: float
+        Field of view in kpc.
+    pixels: int
+        Number of pixels along one image side.
+
+    Returns
+    -------
+    tuple
+        (b_a, PA, n, Re, Ie, converged) where Re is in kpc, Ie is
+        log10(flux/arcsec^2) (matching the units of Courtney's existing
+        host/sat shape CSVs, since the installed AstroPhot version reports
+        Ie linearly), and converged is the LM optimizer's status message
+        (e.g. 'success', 'fail. Maximum iterations').
+    '''
+    import astrophot as ap
+    pixel_scale = 2 * fov / pixels
+    target = ap.image.TargetImage(data=band_r, pixelscale=1)
+    model = ap.models.SersicGalaxy(name='galaxy', target=target)
+    model.initialize()
+    result = ap.fit.LM(model, verbose=0).fit()
+    b_a = model.q.value.item()
+    PA = model.PA.value.item()
+    n = model.n.value.item()
+    Re = model.Re.value.item() * pixel_scale
+    Ie = np.log10(model.Ie.value.item())
+    converged = result.message
+    return b_a, PA, n, Re, Ie, converged
+
+
+def _fit_sersic_2d(band_r, fov):
+    '''Fit a Sersic2D profile using mockobservation_tools.sersic_tools.
+
+    Parameters
+    ----------
+    band_r: np.ndarray
+        2D r-band image array.
+    fov: float
+        Field of view in kpc.
+
+    Returns
+    -------
+    tuple of float
+        (b_a, PA, n, Re, Ie) where Re is in kpc and Ie is
+        log10(L_sun/kpc^2), matching the log10 convention used for the
+        AstroPhot backend.
+    '''
+    import mockobservation_tools.sersic_tools as sersic_tools
+    import scipy.optimize
+    # Promote OptimizeWarning to an exception so fits that converge to a
+    # degenerate solution raise rather than return garbage popt values.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            'error',
+            category=scipy.optimize.OptimizeWarning,
+        )
+        popt, _ = sersic_tools.fit_sersic(
+            image=band_r,
+            FOV=fov,
+            sersic_type='sersic2D',
+        )
+    # popt order: [amplitude, r_eff, n, x_0, y_0, ellip, theta]
+    b_a = 1 - popt[5]        # axis ratio = 1 - ellipticity
+    PA = popt[6] % np.pi     # position angle in [0, pi)
+    n = popt[2]
+    Re = popt[1]
+    Ie = np.log10(popt[0])
+    return b_a, PA, n, Re, Ie
 
 
 def _process_galaxy(args):
     '''
-    Fit a Sersic2D profile to the r-band image of each octant projection for
+    Fit a Sersic profile to the r-band image of each octant projection for
     one galaxy. Pool workers accept only a single argument, so the caller
     packs all inputs into a tuple.
 
@@ -42,24 +117,30 @@ def _process_galaxy(args):
     Parameters
     ----------
     args: tuple
-        A four-element tuple (gal_id, hdf5_path, queue, skip_views):
+        A five-element tuple (gal_id, hdf5_path, queue, skip_views, fitter):
         - gal_id (int): FIREBox galaxy ID extracted from the HDF5 filename.
         - hdf5_path (str): Absolute path to the octant image HDF5 file.
-        - queue (multiprocessing.managers.Queue): Shared queue used to report
-          per-projection rows and progress back to the main process.
+        - queue (multiprocessing.managers.Queue): Shared queue used to
+          report per-projection rows and progress back to the main process.
         - skip_views (frozenset): Projection names already present in the
           output CSV. These projections are skipped; only a 'view' progress
           message is emitted so the progress bar stays consistent.
+        - fitter (str): Fitting backend. 'astrophot' calls AstroPhot's LM
+          optimizer; 'fit_sersic' calls sersic_tools.fit_sersic from
+          mockobservation_tools.
 
     Returns
     -------
     None
         Rows are delivered via queue messages rather than as a return value.
-        Failed fits send NaN for b_a, PA, n, Re, and Ie so that downstream
-        code can filter them out rather than silently consuming NaN values.
+        Fits that raise an exception send NaN for b_a, PA, n, Re, and
+        Ie_log10 so that downstream code can filter them out rather than
+        silently consuming NaN values. AstroPhot fits reporting
+        non-convergence do not raise and are not NaN'd out; their real
+        fitted values are kept, with the non-convergence noted separately
+        in the 'converged' column.
     '''
-    import mockobservation_tools.sersic_tools as sersic_tools
-    gal_id, hdf5_path, queue, skip_views = args
+    gal_id, hdf5_path, queue, skip_views, fitter = args
     queue.put(('start', gal_id, len(skip_views)))
     n_sent = 0
     with h5py.File(hdf5_path, 'r') as f:
@@ -72,33 +153,27 @@ def _process_galaxy(args):
                 continue
             band_r = f[proj_name]['band_r'][()]
             try:
-                # Promote OptimizeWarning to an exception so that fits that
-                # converge to a degenerate solution fall into the except
-                # branch rather than returning garbage popt values.
-                with warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        'error',
-                        category=scipy.optimize.OptimizeWarning,
+                if fitter == 'astrophot':
+                    b_a, PA, n, Re, Ie, converged = _fit_astrophot(
+                        band_r, fov, pixels,
                     )
-                    popt, _ = sersic_tools.fit_sersic(
-                        image=band_r,
-                        FOV=fov,
-                        sersic_type='sersic2D',
-                    )
-                # popt order: [amplitude, r_eff, n, x_0, y_0, ellip, theta]
+                else:
+                    b_a, PA, n, Re, Ie = _fit_sersic_2d(band_r, fov)
                 row = {
                     'galaxyID': gal_id,
                     'FOV': fov,
                     'pixel': pixels,
                     'view': proj_name,
                     'band': 'band_r',
-                    'b_a': 1 - popt[5],      # axis ratio = 1 - ellipticity
-                    'PA': popt[6] % np.pi,    # position angle in [0, pi)
-                    'n': popt[2],
-                    'Re': popt[1],
-                    'Ie': popt[0],
+                    'b_a': b_a,
+                    'PA': PA,
+                    'n': n,
+                    'Re': Re,
+                    'Ie_log10': Ie,
                 }
-            except (RuntimeError, scipy.optimize.OptimizeWarning):
+                if fitter == 'astrophot':
+                    row['converged'] = converged
+            except Exception:
                 # Write NaN fit columns so the row still exists in the CSV
                 # and can be identified as a failed fit.
                 row = {
@@ -111,8 +186,10 @@ def _process_galaxy(args):
                     'PA': np.nan,
                     'n': np.nan,
                     'Re': np.nan,
-                    'Ie': np.nan,
+                    'Ie_log10': np.nan,
                 }
+                if fitter == 'astrophot':
+                    row['converged'] = np.nan
             queue.put(('row', gal_id, row))
             n_sent += 1
             queue.put(('view', gal_id, len(skip_views) + n_sent))
@@ -167,8 +244,8 @@ def _run_fitting_pass(worker_args, out_path, label):
     Parameters
     ----------
     worker_args: list of tuple
-        Each tuple is (gal_id, hdf5_path, queue, skip_views) as accepted
-        by _process_galaxy.
+        Each tuple is (gal_id, hdf5_path, queue, skip_views, fitter) as
+        accepted by _process_galaxy.
     out_path: pathlib.Path
         CSV file to append rows to. Must already exist with a header.
     label: str
@@ -266,8 +343,8 @@ def _run_fitting_pass(worker_args, out_path, label):
     # Inject the managed queue into each worker arg tuple (replacing the
     # placeholder queue that was set to None before this call).
     worker_args = [
-        (gal_id, hdf5_path, queue, skip_views)
-        for gal_id, hdf5_path, _, skip_views in worker_args
+        (gal_id, hdf5_path, queue, skip_views, fitter)
+        for gal_id, hdf5_path, _, skip_views, fitter in worker_args
     ]
 
     with (
@@ -310,9 +387,9 @@ def _run_fitting_pass(worker_args, out_path, label):
     return n_attempted, n_success, n_failed, failed_pairs
 
 
-def gen(resume: bool = False):
+def gen(resume: bool = False, fitter: str = 'astrophot'):
     '''
-    Fit Sersic2D profiles to the octant projections of all galaxies in
+    Fit Sersic profiles to the octant projections of all galaxies in
     octant_img_dir and write the results to a CSV in project_data_dir. Each
     projection row is written to disk immediately after its fit completes,
     so an interrupted run loses at most the projection currently in flight.
@@ -329,13 +406,12 @@ def gen(resume: bool = False):
     (galaxyID, view) pairs that were expected but are absent from the CSV
     and runs a backfill pass to fill them in.
 
-    Output file naming follows these rules:
-    - If no output file exists yet, writes to
-      AstroPhot_octant_allgals_bandr_Sersic.csv.
-    - If that file exists and resume is False, writes to the next available
-      versioned name (_v2, _v3, ...) so prior results are never overwritten.
-    - If resume is True, appends to the highest-versioned existing file and
-      skips (galaxyID, view) pairs already present in it.
+    Output file naming encodes the fitter:
+    - fitter='astrophot': AstroPhot_octant_allgals_bandr_Sersic[_vN].csv
+    - fitter='fit_sersic': FitSersic_octant_allgals_bandr_Sersic[_vN].csv
+    If no versioned file exists, writes to the base name. If one exists and
+    resume is False, writes to the next version (_v2, _v3, ...) so prior
+    results are never overwritten.
 
     Parameters
     ----------
@@ -344,6 +420,9 @@ def gen(resume: bool = False):
         (galaxyID, view) pairs already present in it, and append new rows
         to that same file. When False (default), start a new versioned file
         if any output file already exists.
+    fitter: str
+        Fitting backend. 'astrophot' uses AstroPhot's LM optimizer (default).
+        'fit_sersic' uses sersic_tools.fit_sersic from mockobservation_tools.
 
     Returns
     -------
@@ -359,7 +438,8 @@ def gen(resume: bool = False):
     # Find the highest-versioned existing output file, if any. The base file
     # (no version suffix) counts as v1. This determines both the resume target
     # and the starting point for the next version number.
-    out_stem = 'AstroPhot_octant_allgals_bandr_Sersic'
+    prefix = 'AstroPhot' if fitter == 'astrophot' else 'FitSersic'
+    out_stem = f'{prefix}_octant_allgals_bandr_Sersic'
     ver_re = re.compile(
         r'^' + re.escape(out_stem) + r'(?:_v(\d+))?\.csv$'
     )
@@ -389,7 +469,10 @@ def gen(resume: bool = False):
     # concurrent instance of gen() sees the file and starts a new version
     # rather than colliding with this one.
     if not out_path.exists():
-        pd.DataFrame(columns=CSV_COLUMNS).to_csv(out_path, index=False)
+        columns = (
+            ASTROPHOT_CSV_COLUMNS if fitter == 'astrophot' else CSV_COLUMNS
+        )
+        pd.DataFrame(columns=columns).to_csv(out_path, index=False)
 
     # Discover all octant image HDF5 files and extract galaxy IDs from their
     # filenames (pattern: object_<galaxyID>_*.hdf5).
@@ -405,7 +488,8 @@ def gen(resume: bool = False):
         (int(fname.split('_')[1].split('.')[0]),
          os.path.join(octant_img_dir, fname),
          None,
-         frozenset())
+         frozenset(),
+         fitter)
         for fname in hdf5_files
     ]
 
@@ -439,11 +523,31 @@ def gen(resume: bool = False):
     # entirely; partially done galaxies are re-queued with skip_views set to
     # the projections already in the CSV.
     if resume and out_path.exists():
+        # Guard against resuming a file that was actually produced by a
+        # different fitter than requested here: check both its name and
+        # its columns against what this fitter would write.
+        if not out_path.name.startswith(f'{prefix}_'):
+            raise ValueError(
+                f"{out_path.name} does not start with '{prefix}_', which"
+                f' fitter={fitter!r} requires. Refusing to resume: this'
+                f' file was likely produced by a different fitter.'
+            )
+        expected_columns = (
+            ASTROPHOT_CSV_COLUMNS if fitter == 'astrophot' else CSV_COLUMNS
+        )
+        existing_columns = pd.read_csv(out_path, nrows=0).columns.tolist()
+        if existing_columns != expected_columns:
+            raise ValueError(
+                f'{out_path.name} has columns {existing_columns}, which'
+                f' does not match the columns fitter={fitter!r} would'
+                f' write ({expected_columns}). Refusing to resume: this'
+                f' file was likely produced by a different fitter.'
+            )
         existing = pd.read_csv(out_path, usecols=['galaxyID', 'view'])
         done_pairs = set(zip(existing['galaxyID'], existing['view']))
         new_worker_args = []
         n_skipped = 0
-        for gal_id, hdf5_path, q, _ in worker_args:
+        for gal_id, hdf5_path, q, _, _ in worker_args:
             skip = frozenset(
                 v for v in OCTANT_PROJECTIONS
                 if (gal_id, v) in done_pairs
@@ -451,10 +555,12 @@ def gen(resume: bool = False):
             if len(skip) == len(OCTANT_PROJECTIONS):
                 n_skipped += 1
             else:
-                new_worker_args.append((gal_id, hdf5_path, q, skip))
+                new_worker_args.append(
+                    (gal_id, hdf5_path, q, skip, fitter)
+                )
         worker_args = new_worker_args
         n_partial = sum(
-            1 for _, _, _, s in worker_args if s
+            1 for _, _, _, s, _ in worker_args if s
         )
         print(
             f'Resume mode: skipping {n_skipped} completed galaxies,'
@@ -478,20 +584,22 @@ def gen(resume: bool = False):
     existing = pd.read_csv(out_path, usecols=['galaxyID', 'view'])
     done_pairs = set(zip(existing['galaxyID'], existing['view']))
     backfill_args = []
-    for gal_id, hdf5_path, _, _ in original_worker_args:
+    for gal_id, hdf5_path, _, _, _ in original_worker_args:
         missing = frozenset(
             v for v in OCTANT_PROJECTIONS
             if (gal_id, v) not in done_pairs
         )
         if missing:
-            backfill_args.append((gal_id, hdf5_path, None, missing))
+            backfill_args.append(
+                (gal_id, hdf5_path, None, missing, fitter)
+            )
 
     if backfill_args:
         print(
             f'\nWarning: {len(backfill_args)} galaxies have missing'
             f' projections after the main pass. Running backfill.'
         )
-        for gal_id, _, _, missing in backfill_args:
+        for gal_id, _, _, missing, _ in backfill_args:
             for view in sorted(missing):
                 print(f'  object_{gal_id} {view}')
         bf_attempted, bf_success, bf_failed, bf_pairs = _run_fitting_pass(

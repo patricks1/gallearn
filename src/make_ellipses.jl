@@ -1,7 +1,12 @@
 import Random
 import HDF5
-import PyCall
 import Distributions
+
+include("GalLearnConfig.jl")
+using .GalLearnConfig
+
+conf = GalLearnConfig.read_config()
+data_path = conf["gallearn_paths"]["project_data_dir"]
 
 function generate_ellipse_mask(height, width, center, axes, angle)
     mask = falses(height, width)
@@ -41,9 +46,6 @@ function generate_ellipses(num_ellipses, img_size)
 end
 
 function save_ellipses_to_h5(filename, X, ys)
-    push!(PyCall.pyimport("sys")."path", PyCall.pwd())
-    paths = PyCall.pyimport("paths")
-    data_path = paths.data
     nothings = zeros(size(ys)[1])
     HDF5.h5open(joinpath(data_path, filename), "w") do file
         HDF5.write(file, "X", X)

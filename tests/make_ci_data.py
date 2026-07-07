@@ -262,19 +262,15 @@ def make_scan_dir_stubs(ids):
 def make_octant_image_files(ids):
     '''
     Build downsampled (64x64) octant HDF5 fixtures for the given galaxy IDs
-    and write them to tests/test_data/octant_images/. Then run _process_galaxy
-    on each fixture and save the Sersic fit results to
-    tests/test_data/octant_shapes_reference.csv as the stored regression
-    reference (flat CSV with columns: galaxyID, FOV, pixel, view, band, b_a,
-    PA, n, Re, Ie).
+    and write them to tests/test_data/octant_images/.
 
     FOV is kept at its original value -- each galaxy spans the same physical
     extent in kpc regardless of pixel resolution. make_octant_image_files
-    overwrites the 'pixels' HDF5 attribute to 64. Therefore, note that the
-    pixel count in these fixtures differs from the original production files.
+    overwrites the 'pixels' HDF5 attribute to 64, so the pixel count in
+    these fixtures differs from the original production files.
 
-    Consumed by: tests/test_gen_octant_shapes.py
-    (test_process_galaxy_regression, test_resume_partial_galaxy).
+    Consumed by: make_octant_shapes_reference and
+    tests/test_gen_octant_shapes.py (test_resume_partial_galaxy).
 
     Parameters
     ----------
@@ -285,7 +281,6 @@ def make_octant_image_files(ids):
     -------
     None
     '''
-    import queue as queue_mod
     import scipy.ndimage
     from gallearn import gen_octant_shapes
 
@@ -298,7 +293,6 @@ def make_octant_image_files(ids):
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
     target_pixels = 64
-    all_rows = []
 
     for gal_id in ids:
         matches = sorted(
@@ -327,18 +321,63 @@ def make_octant_image_files(ids):
                     ).astype(np.float32)
                     grp.create_dataset(band, data=small)
 
+    return None
+
+
+def make_octant_shapes_reference(ids, fitter):
+    '''
+    Run _process_galaxy on each fixture HDF5 in tests/test_data/octant_images/
+    using the given fitter and write the results to a reference CSV.
+
+    The reference CSV name encodes the fitter:
+    - 'fit_sersic' -> octant_shapes_fitsersic_reference.csv
+    - 'astrophot'  -> octant_shapes_astrophot_reference.csv
+
+    Consumed by: tests/test_gen_octant_shapes.py
+    (test_fit_sersic, test_astrophot).
+
+    Parameters
+    ----------
+    ids: list of int
+        Galaxy IDs whose fixture HDF5s to run _process_galaxy on.
+    fitter: str
+        Fitting backend passed to _process_galaxy. 'astrophot' calls
+        AstroPhot's LM optimizer; 'fit_sersic' calls sersic_tools.fit_sersic
+        from mockobservation_tools.
+
+    Returns
+    -------
+    None
+    '''
+    import queue as queue_mod
+    from gallearn import gen_octant_shapes
+
+    out_dir = TEST_DATA_DIR / 'octant_images'
+    if fitter == 'astrophot':
+        ref_name = 'octant_shapes_astrophot_reference.csv'
+    else:
+        ref_name = 'octant_shapes_fitsersic_reference.csv'
+
+    all_rows = []
+    for gal_id in ids:
+        matches = sorted(out_dir.glob(
+            f'object_{gal_id}_*_ugrband_*.hdf5'
+        ))
+        if not matches:
+            raise FileNotFoundError(
+                f'No fixture HDF5 for galaxy {gal_id} in {out_dir}'
+            )
+        dst = matches[0]
         q = queue_mod.SimpleQueue()
         gen_octant_shapes._process_galaxy(
-            (gal_id, str(dst), q, frozenset())
+            (gal_id, str(dst), q, frozenset(), fitter)
         )
         while not q.empty():
             kind, _, payload = q.get()
             if kind == 'row':
                 all_rows.append(payload)
 
-    ref_path = TEST_DATA_DIR / 'octant_shapes_reference.csv'
-    pd.DataFrame(all_rows).to_csv(ref_path, index=False)
-
+    pd.DataFrame(all_rows).to_csv(TEST_DATA_DIR / ref_name, index=False)
     return None
 
 
@@ -456,3 +495,5 @@ if __name__ == '__main__':
     make_shapes_data(ids)
     make_scan_dir_stubs(fixture_ids)
     make_octant_image_files(fixture_ids)
+    make_octant_shapes_reference(fixture_ids, fitter='fit_sersic')
+    make_octant_shapes_reference(fixture_ids, fitter='astrophot')
