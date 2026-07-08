@@ -202,7 +202,7 @@ function read_sfr_tgt(sfr_type)
     if sfr_type == "sfr"
         fname = "sfrs.csv"
     elseif sfr_type == "avg_sfr"
-        fname = "avg_sfrs.csv"
+        fname = "avg_sfrs_1.0Gyr_no_bound_filter.csv"
     end
     y_df = CSV.read(joinpath(tgt_sfr_dir, fname), DataFrame)
     y_df.id .= "object_" .* string.(y_df.id)
