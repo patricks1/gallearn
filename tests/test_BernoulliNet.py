@@ -3,10 +3,6 @@ import torch
 import numpy as np
 import pytest
 
-@pytest.mark.filterwarnings(
-        "ignore:The behavior of DataFrame concatenation with empty or all-NA"
-        " entries is deprecated:FutureWarning"
-    )
 def test_BernoulliNet():
     '''
     Verify that we can instantiate a BernoulliNet.
@@ -16,7 +12,7 @@ def test_BernoulliNet():
     data_fname = gallearn.config.config['gallearn_paths']['dataset']
     data_dict = gallearn.preprocessing.load_data(data_fname)
     X = data_dict['X']
-    rs = gallearn.cnn.get_radii(data_dict)
+    rs = data_dict['Re']
 
     resnet18 = torchvision.models.resnet18()
     classifier = gallearn.cnn.BernoulliNet(

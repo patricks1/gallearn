@@ -2,79 +2,6 @@ import torch.nn as nn
 import torch
 import datetime
 
-def get_radii(d):
-    import h5py
-    import os
-    import numpy as np
-    import pandas as pd
-
-    from . import config
-
-    dtype_dict = {'galaxyID': int}
-    df_Re_host = pd.read_csv(
-        config.config[f'{__package__}_paths']['host_2d_shapes'],
-        #dtype=dtype_dict
-    )
-    assert not df_Re_host.duplicated(
-        subset=['galaxyID', 'view', 'band']
-    ).any(), (
-        'The host shapes file has duplicate rows..'
-    )
-    df_Re_sat = pd.read_csv(
-        config.config[f'{__package__}_paths']['sat_2d_shapes'],
-        dtype=dtype_dict
-    )
-    assert not df_Re_sat.duplicated(
-        subset=['galaxyID', 'view', 'band']
-    ).any(), 'The satellite shapes file has duplicate rows.'
-    df_Re_octant = pd.read_csv(
-        config.config[f'{__package__}_paths']['octant_shapes'],
-        dtype=dtype_dict,
-    )
-    assert not df_Re_octant.duplicated(
-        subset=['galaxyID', 'view', 'band']
-    ).any(), 'The octant shapes file has duplicate rows.'
-    df_Re = pd.concat([df_Re_host, df_Re_sat, df_Re_octant], axis=0)
-    df_Re.rename(
-        columns={'galaxyID': 'id', 'view': 'orientation'},
-        inplace=True
-    )
-    # Need to isolate the r-band, otherwise there will be id-oreintation
-    # duplicates.
-    df_Re = df_Re.loc[df_Re['band'] == 'band_r']
-    assert not df_Re.duplicated(
-        subset=['id', 'orientation']
-    ).any(), (
-        'The combined host + satellite shapes DataFrame has duplicate rows.'
-    )
-
-    ids_X = np.char.replace(
-        d['obs_sorted'].astype(str),
-        'object_',
-        ''
-    ).astype(int)
-    df_X = pd.DataFrame({'id': ids_X, 'orientation': d['orientations']})
-
-    df = df_X.merge(
-        df_Re,
-        left_on=['id', 'orientation'],
-        right_on=['id', 'orientation'],
-        how='left',
-        # There should not be any duplicate rows in either df_X or df_Re.
-        validate='one_to_one'
-    )
-
-    # Ensure that the DataFrame from which we'll grab the radii is lined up
-    # exactly with the inputted dictionary.
-    pd.testing.assert_frame_equal(df_X, df[['id', 'orientation']])
-
-    rs = torch.tensor(
-        df['Re'].values,
-        dtype=torch.float32
-    ).unsqueeze(1)
-
-    return rs 
-
 
 def save_wandb_id(wandb):
     from . import config
@@ -1244,7 +1171,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
         1.e11,
         return_distrib=True
     )
-    rs = get_radii(d)[:Nfiles]
+    rs = d['Re'][:Nfiles]
 
     # Compute normalization stats for X via chunked pass
     # (never loads the full image tensor into memory).

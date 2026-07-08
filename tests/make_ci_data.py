@@ -85,10 +85,17 @@ def make_sfr_data(seed=42):
     sampled rows so the __main__ block can call pick_fixture_ids and
     make_shapes_data.
 
-    The HDF5 this function writes is consumed by test_data_utils.py::
-    test_get_radii and test_BernoulliNet.py::test_BernoulliNet via
-    preprocessing.load_data(). The __main__ block also passes the returned
-    ids to pick_fixture_ids and make_shapes_data.
+    The HDF5 this function writes is consumed by
+    test_BernoulliNet.py::test_BernoulliNet via preprocessing.load_data().
+    The __main__ block also passes the returned ids to pick_fixture_ids
+    and make_shapes_data.
+
+    The source dataset predates Dataset.jl writing an 'Re' key, so this
+    function fabricates a synthetic 'Re' dataset (same seeded rng as the
+    row sampling above) instead of copying one from the source. Once a
+    production dataset built with the current Dataset.jl exists, this
+    fabrication can be replaced by just letting the source-copy loop below
+    pick up the real 'Re' key like every other key.
 
     Parameters
     ----------
@@ -130,6 +137,9 @@ def make_sfr_data(seed=42):
                         orientation.decode('utf-8')
                         for orientation in test_literal
                     ])
+            if 'Re' not in f_source.keys():
+                Re = rng.uniform(0.5, 5.0, size=(10, 1))
+                f_test.create_dataset('Re', data=Re)
     return ids, orientations
 
 
@@ -141,11 +151,13 @@ def make_shapes_data(ids, seed=42):
     as decoys. Writes one CSV per source file to tests/test_data/ under the
     same filename as the source.
 
-    Consumed by: test_gen_octant_shapes.py::test_resume_partial_galaxy (via
+    Consumed by: test_gen_octant_shapes.py::test_resume_partial_galaxy, via
     gen_octant_shapes.gen(), which reads host_2d_shapes and sat_2d_shapes to
-    build the eligible galaxy ID set) and test_data_utils.py::test_get_radii
-    and test_BernoulliNet.py::test_BernoulliNet (via cnn.get_radii(), which
-    joins on (galaxyID, view) against all three shape CSVs to look up Re).
+    build the eligible galaxy ID set. (Re used to come from a Python-side
+    join against these three CSVs via cnn.get_radii(); that join now
+    happens in Julia's Dataset.read_2d_shapes(), so test_BernoulliNet.py
+    no longer depends on these CSVs, only on the 'Re' key make_sfr_data
+    fabricates directly into the sampled HDF5.)
 
     Parameters
     ----------
@@ -169,7 +181,7 @@ def make_shapes_data(ids, seed=42):
         dtype_dict = {'galaxyID': int}
         shapes_df = pd.read_csv(path, dtype=dtype_dict)
         # Filter to band_r so each (galaxyID, view) appears only once, which
-        # is what cnn.get_radii() requires for its join.
+        # is what Dataset.read_2d_shapes() requires for its join.
         shapes_df = shapes_df.loc[shapes_df['band'] == 'band_r']
 
         df_sample = shapes_df[shapes_df['galaxyID'].isin(key_ids)]

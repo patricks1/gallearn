@@ -18,8 +18,9 @@ octant_img_dir = ""
 gallearn_dir = ""
 tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
 tgt_sfr_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/"
-tgt_2d_host_path = ""
-tgt_2d_sat_path = ""
+host_2d_shapes_path = ""
+sat_2d_shapes_path = ""
+octant_2d_shapes_path = ""
 output_dir = ""
 maps_dir = ""
 
@@ -29,8 +30,9 @@ function __init__()
     global host_direc = conf["gallearn_paths"]["host_image_dir"]
     global octant_img_dir = conf["gallearn_paths"]["octant_img_dir"]
     global gallearn_dir = conf["gallearn_paths"]["project_data_dir"]
-    global tgt_2d_host_path = conf["gallearn_paths"]["host_2d_shapes"]
-    global tgt_2d_sat_path = conf["gallearn_paths"]["sat_2d_shapes"]
+    global host_2d_shapes_path = conf["gallearn_paths"]["host_2d_shapes"]
+    global sat_2d_shapes_path = conf["gallearn_paths"]["sat_2d_shapes"]
+    global octant_2d_shapes_path = conf["gallearn_paths"]["octant_shapes"]
     global output_dir = conf["gallearn_paths"]["project_data_dir"]
     global maps_dir = conf["gallearn_paths"]["vmaps_dir"]
 end
@@ -120,50 +122,65 @@ function load_file(path, projs, fname, all_bands, Nbands, res)
     return img_data, ids_chunk, Vector{String}(projs), fnames_chunk
 end
 
-function read_2d_tgt()
-    function csv_read(tgt_path)
-        # Header for host file is
-        #     galaxyID
-        #     FOV
-        #     pixel
-        #     view
-        #     band
-        #     b_a
-        #     PA
-        #     n
-        #     Re
-        #     Ie
+function read_2d_shapes()
+    function csv_read(path)
+        # Header for the host file is
+        #     galaxyID, FOV, pixel, view, band, b_a, PA, n, Re, Ie
         # Header for the satellite file is
-        #     galaxyID
-        #     FOV
-        #     pixel
-        #     view
-        #     band
-        #     b_a
-        #     PA
-        #     n
-        #     Re
-        #     Ie
-        #     Mstar_ahf_cat
-        #     flag
-        dat = CSV.read(
-            tgt_path,
-            DataFrame,
-            header=1
-        )
+        #     galaxyID, FOV, pixel, view, band, b_a, PA, n, Re, Ie,
+        #     Mstar_ahf_cat, flag
+        # Header for the octant file, from the current
+        # gen_octant_shapes.py, is
+        #     galaxyID, FOV, pixel, view, band, b_a, PA, n, Re, Ie_log10
+        # plus a trailing `converged` column when the astrophot fitter
+        # produced it. Both fitters write Ie_log10 (log10 of Ie); only
+        # `converged` differs between them. Older octant files predating
+        # the Ie_log10 rename instead have a plain `Ie` column, and so do
+        # the host and satellite files above. In all of these cases the
+        # column named `Ie` actually holds log10(Ie); the plain name just
+        # predates the later rename. None of this affects Re, which is
+        # what this function is here for, but it matters if this code
+        # ever starts reading Ie too.
+        dat = CSV.read(path, DataFrame, header=1)
         return dat
     end
-    host_dat = csv_read(tgt_2d_host_path)
-    sat_dat = csv_read(tgt_2d_sat_path)
-    # Remove the Mstar_ahf_cat and flag columns from sat_dat because those
-    # columns aren't in host_dat, and we need to combine the two.
-    DataFrames.select!(sat_dat, DataFrames.Not([:Mstar_ahf_cat, :flag]))
-    dat = vcat(host_dat, sat_dat)
+    host_dat = csv_read(host_2d_shapes_path)
+    sat_dat = csv_read(sat_2d_shapes_path)
+    octant_dat = csv_read(octant_2d_shapes_path)
+
+    # Keep only the columns common to all three sources: sat has extra
+    # Mstar_ahf_cat/flag columns, and octant may have Ie_log10 + converged
+    # instead of Ie, depending on which fitter produced it (see headers
+    # above).
+    common_cols = [
+        :galaxyID, :FOV, :pixel, :view, :band, :b_a, :PA, :n, :Re
+    ]
+    host_dat = DataFrames.select(host_dat, common_cols)
+    sat_dat = DataFrames.select(sat_dat, common_cols)
+    octant_dat = DataFrames.select(octant_dat, common_cols)
+    dat = vcat(host_dat, sat_dat, octant_dat)
 
     dat.galaxyID .= "object_" .* string.(dat.galaxyID)
     DataFrames.rename!(dat, :galaxyID => :Simulation)
 
     dat = dat[dat.band .== "band_r", :]
+
+    # Drop rows with no usable radius (failed or not-yet-run fits write
+    # blank/NaN Re), regardless of which of the three CSVs they came
+    # from.
+    has_re = map(re -> !ismissing(re) && !isnan(re), dat.Re)
+    dat = dat[has_re, :]
+
+    # A galaxy+view should appear at most once across the combined shape
+    # CSVs; a duplicate means two different fits produced conflicting Re
+    # values for the same projection, which is a real data problem.
+    dupe_counts = DataFrames.combine(
+        DataFrames.groupby(dat, [:Simulation, :view]),
+        DataFrames.nrow => :n
+    )
+    @assert all(dupe_counts.n .== 1) (
+        "Duplicate galaxy+view rows in the combined shape CSVs."
+    )
 
     return dat
 end
@@ -242,7 +259,7 @@ function load_images(
         all_bands = true
         Nbands = 3
     elseif tgt_type == "2d"
-        y_df = read_2d_tgt()
+        y_df = read_2d_shapes()
         all_bands = false
         Nbands = 1
     elseif tgt_type in ("sfr", "avg_sfr")
@@ -450,6 +467,12 @@ function load_images(
     end
 
     if tgt_type in ["2d", "3d"]
+        # id_mask, orientation_mask, and mask are each
+        # (length(ids_X), nrow(y_df)): rows are loaded images, columns
+        # are target-dataframe rows, and an entry is true where that
+        # image and that target row refer to the same galaxy
+        # (id_mask), the same projection (orientation_mask), or both
+        # (mask).
         id_mask = falses(length(ids_X), size(y_df)[1])
         orientation_mask = copy(id_mask)
         for i in 1:length(ids_X)
@@ -458,6 +481,7 @@ function load_images(
         end
         mask = id_mask .& orientation_mask
     elseif tgt_type in ("sfr", "avg_sfr")
+        # mask is (length(ids_X), nrow(y_df)); see comment above.
         mask = falses(length(ids_X), size(y_df)[1])
         for i in 1:length(ids_X)
             # For every id_X, generate a vector of booleans corresponding
@@ -482,7 +506,65 @@ function load_images(
     # Ensure the galaxies match between X and y_df
     @assert all(ids_X .== y_df[:, "Simulation"])
 
-    return ids_X, X, fnames_sorted, y_df, orientations
+    # Separate, independent lookup for Re. Unlike the target match above,
+    # Re is an auxiliary input feature, not the training target, and a
+    # missing radius is expected while Sersic fits are still in progress,
+    # so we drop the image instead of crashing the run.
+    shapes = read_2d_shapes()
+    # re_mask is (length(ids_X), nrow(shapes)): rows are loaded images
+    # (the target match above has already filtered these down), columns
+    # are rows of `shapes`, true where the image and shapes row are the
+    # same galaxy + projection.
+    re_mask = falses(length(ids_X), nrow(shapes))
+    for i in 1:length(ids_X)
+        id_match = shapes[!, "Simulation"] .== ids_X[i]
+        orient_match = shapes[!, "view"] .== orientations[i]
+        re_mask[i, :] .= id_match .& orient_match
+    end
+    re_match_counts = vec(sum(re_mask, dims=2))
+    # read_2d_shapes() already asserts there are no duplicate
+    # Simulation+view rows in `shapes`, which guarantees every column
+    # group above has at most one true entry per row. This assertion is
+    # therefore redundant given that guarantee; it exists only to catch
+    # a bug in the matching logic above should that guarantee ever stop
+    # holding, not to catch new duplicate radius data.
+    @assert all(re_match_counts .<= 1)
+    re_keep = re_match_counts .== 1
+    n_dropped = sum(.!re_keep)
+    if n_dropped > 0
+        println(
+            "Dropping $(n_dropped) of $(length(re_keep)) images with " *
+            "no matching radius in host_2d_shapes/sat_2d_shapes/" *
+            "octant_shapes."
+        ); flush(stdout)
+    end
+    re_indices = findfirst.(eachrow(re_mask))
+
+    X = X[re_keep, :, :, :]
+    ids_X = ids_X[re_keep]
+    orientations = orientations[re_keep]
+    fnames_sorted = fnames_sorted[re_keep]
+    y_df = y_df[re_keep, :]
+    # Re is an auxiliary input feature, not a training target, so we
+    # keep it separate from y_df instead of merging it in.
+    matched_shapes = shapes[re_indices[re_keep], :]
+    Re_X = matched_shapes[:, "Re"]
+
+    # Sanity-check the Re lookup as carefully as the old Python-side
+    # get_radii() checked its CSV join: every kept image must line up
+    # with its shapes row on both galaxy and orientation, and X, ids_X,
+    # orientations, fnames_sorted, y_df, and Re_X must all come out the
+    # same length.
+    @assert all(ids_X .== matched_shapes[:, "Simulation"])
+    @assert all(orientations .== matched_shapes[:, "view"])
+    n = length(ids_X)
+    @assert size(X, 1) == n
+    @assert length(orientations) == n
+    @assert length(fnames_sorted) == n
+    @assert nrow(y_df) == n
+    @assert length(Re_X) == n
+
+    return ids_X, X, fnames_sorted, y_df, orientations, Re_X
 end
 
 function load_vmap(id, res)
@@ -508,7 +590,7 @@ end
 
 function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
     println("build_training_data: calling load_images..."); flush(stdout)
-    ids_X, X, files, y_df, orientations_X = load_images(
+    ids_X, X, files, y_df, orientations_X, Re_X = load_images(
         Nfiles=Nfiles,
         res=res,
         tgt_type=tgt_type
@@ -587,15 +669,18 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
             # in PyTorch (row-major) order. Julia writes column-major
             # data to HDF5, and h5py reverses all axes on read. Writing
             # X as (W, H, C, N) means h5py reads (N, C, H, W). Writing
-            # ys as (features, N) means h5py reads (N, features).
+            # ys as (features, N) means h5py reads (N, features). Re
+            # follows the same (features, N) -> (N, features) pattern.
             X_out = permutedims(X, (4, 3, 2, 1))
             ys_out = permutedims(ys, (2, 1))
+            Re_out = permutedims(reshape(Re_X, (:, 1)), (2, 1))
             for (label, data) in [
                         ["X", X_out],
                         ["obs_sorted", ids_X],
                         ["orientations", orientations_X],
                         ["file_names", files],
                         ["ys_sorted", ys_out],
+                        ["Re", Re_out],
                     ]
                 println(
                     "Saving "
@@ -607,7 +692,7 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
         end
     end
 
-    return ids_X, y_df, ys, X, files, orientations_X
+    return ids_X, y_df, ys, X, files, orientations_X, Re_X
 end
 
 end # module Dataset

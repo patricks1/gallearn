@@ -568,7 +568,7 @@ def main(
     targets, valid_indices, target_stats = prepare_targets(
         task, d, N
     )
-    rs = cnn.get_radii(d)[:N]
+    rs = d['Re'][:N]
 
     # Compute per-channel image scaling stats via chunked pass
     # over HDF5 (never loads the full image tensor).

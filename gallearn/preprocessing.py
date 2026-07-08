@@ -51,12 +51,14 @@ def load_data(fname):
         # file
         # still has Julia order (1, N).
         ys_sorted = torch.FloatTensor(np.array(f['ys_sorted']))
+        Re = torch.FloatTensor(np.array(f['Re']))
     d = {
         'X': X,
         'obs_sorted': obs_sorted,
         'orientations': orientations,
         'file_names': file_names,
-        'ys_sorted': ys_sorted
+        'ys_sorted': ys_sorted,
+        'Re': Re
     }
     end = time.time()
     elapsed = end - start
@@ -73,8 +75,8 @@ def load_metadata(fname):
     '''
     Load everything except X from the HDF5 file. Returns a tuple
     (d, N, hdf5_path) where d is a dict with keys 'ys_sorted',
-    'obs_sorted', 'orientations', 'file_names', N is the number of samples,
-    and hdf5_path is the full path to the HDF5 file.
+    'obs_sorted', 'orientations', 'file_names', 'Re', N is the number of
+    samples, and hdf5_path is the full path to the HDF5 file.
     '''
     import os
     import numpy as np
@@ -94,11 +96,13 @@ def load_metadata(fname):
         ys_sorted = torch.FloatTensor(
             np.array(f['ys_sorted'])
         )
+        Re = torch.FloatTensor(np.array(f['Re']))
     d = {
         'obs_sorted': obs_sorted,
         'orientations': orientations,
         'file_names': file_names,
-        'ys_sorted': ys_sorted
+        'ys_sorted': ys_sorted,
+        'Re': Re
     }
 
     return d, N, hdf5_path

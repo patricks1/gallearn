@@ -518,8 +518,11 @@ def gen(resume: bool = False, fitter: str = 'astrophot'):
     ]
 
     # Load the galaxy IDs that have standard-axis (non-octant) Sersic fits.
-    # We only run octant fitting for these galaxies because get_radii in
-    # cnn.py needs the paired standard-axis Re to be meaningful.
+    # A galaxy only appears in host_2d_shapes or sat_2d_shapes if the
+    # host/satellite selection step included it in the curated sample, so
+    # we only run octant fitting for galaxies that pass that filter too;
+    # fitting octant shapes for a galaxy outside the curated sample would
+    # waste compute on a galaxy nothing downstream will ever use.
     host_ids = pd.read_csv(
         config.config[f'{__package__}_paths']['host_2d_shapes'],
         usecols=['galaxyID'],
