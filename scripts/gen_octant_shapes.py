@@ -18,4 +18,4 @@ if __name__ == '__main__':
         ),
     )
     args = parser.parse_args()
-    gallearn.gen_octant_shapes.gen(resume=args.resume)
+    gallearn.gen_octant_shapes.gen(resume=args.resume, fitter='astrophot')

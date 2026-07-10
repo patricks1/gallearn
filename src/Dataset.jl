@@ -57,6 +57,11 @@ function tick_progress(n, total, label, t_start)
             "($(fmt_time(elapsed)) elapsed, " *
             "$(fmt_time(remaining)) remaining)"
         )
+        # Flush so the \r progress line shows up live in the Slurm .out
+        # instead of sitting in the block buffer until it fills. This runs
+        # only once per whole-percent tick (~100 times per phase), so the
+        # extra flushes are negligible.
+        flush(stdout)
     end
 end
 
@@ -97,13 +102,17 @@ function load_file(path, projs, fname, all_bands, Nbands, res)
     underscores = findall(isequal('_'), fname)
     obj_id = fname[1:underscores[2]-1]
     n_projs = length(projs)
-    img_data = zeros(n_projs, Nbands, res, res)
+    # Float32 halves the memory of the image arrays versus the Float64
+    # default. The network consumes Float32 anyway (h5py reads it and
+    # torch wraps it as a FloatTensor), so nothing downstream loses
+    # precision.
+    img_data = zeros(Float32, n_projs, Nbands, res, res)
     HDF5.h5open(path, "r") do file
         for (pi, proj) in enumerate(projs)
             # Ternary: load r, g, u bands for multi-band targets, or
             # only r for single-band targets.
             bands_list = all_bands ? ["r", "g", "u"] : ["r"]
-            img = zeros(Nbands, res, res)
+            img = zeros(Float32, Nbands, res, res)
             for (bi, band) in enumerate(bands_list)
                 band_data = read(file, proj * "/band_" * band)
                 # h5py wrote (H, W); Julia reverses axes on read to (W, H).
@@ -253,7 +262,7 @@ function load_images(
     ]
     is_bad = [any(occursin(baddy, f) for baddy in baddies) for f in files]
 
-    println("Reading target dataframe..."); flush(stdout)
+    println("\nReading target dataframe..."); flush(stdout)
     if tgt_type == "3d"
         y_df = read_3d_tgt()
         all_bands = true
@@ -286,8 +295,8 @@ function load_images(
         for f in files
     ]
     println(
-        "File mask built: $(sum(in_tgt)) of $(length(files)) files " *
-        "matched target dataframe."
+        "File mask built: $(sum(in_tgt)) of $(length(files)) image files " *
+        "have a matching row in the target $tgt_type dataframe."
     ); flush(stdout)
 
     good_files = files[.!is_bad .& in_tgt]
@@ -315,11 +324,12 @@ function load_images(
     # lock contention. The main process listens on prog1 and updates the
     # progress line as workers complete.
     println(
-        "Pass 1: scanning $(Nfiles) files using $(nworkers()) workers..."
+        "\nPass 1: scanning $(Nfiles) files to filter for <= 2000 px using " *
+        "$(nworkers()) workers..."
     ); flush(stdout)
-    println("Creating RemoteChannel..."); flush(stdout)
+    println("  Creating RemoteChannel..."); flush(stdout)
     prog1 = RemoteChannel(() -> Channel{Nothing}(Nfiles))
-    println("RemoteChannel created. Starting pmap..."); flush(stdout)
+    println("  RemoteChannel created. Starting pmap..."); flush(stdout)
     t_p1 = time()
     p1_task = @async pmap(good_paths[1:Nfiles]) do path
         result = scan_file(path)
@@ -407,7 +417,13 @@ function load_images(
     offsets = cumsum([1; counts[1:end-1]])
     N_rows = sum(counts)
 
-    X = zeros(N_rows, Nbands, res, res)
+    # Allocate one extra channel (Nbands + 1) up front to hold the
+    # velocity map that build_training_data writes in later. Reserving the
+    # channel here and filling it in place avoids an X = cat(X, VMAP) that
+    # would transiently duplicate the whole array. The reserved channel
+    # stays zero until build_training_data fills it. Float32 halves the
+    # memory versus the Float64 default (see load_file).
+    X = zeros(Float32, N_rows, Nbands + 1, res, res)
     ids_X = Vector{String}(undef, N_rows)
     fnames_sorted = Vector{String}(undef, N_rows)
     orientations = Vector{String}(undef, N_rows)
@@ -447,13 +463,15 @@ function load_images(
         base_row = offsets[fi]
         for pi in 1:counts[fi]
             row = base_row + pi - 1
-            X[row, :, :, :] = img_chunk[pi, :, :, :]
+            # Channels 1:Nbands are the image bands; the last channel is
+            # reserved for the velocity map (filled in build_training_data).
+            X[row, 1:Nbands, :, :] = img_chunk[pi, :, :, :]
             ids_X[row] = ids_chunk[pi]
             orientations[row] = orients_chunk[pi]
             fnames_sorted[row] = fnames_chunk[pi]
         end
     end
-    println("Done loading images. X shape: $(size(X))")
+    println("  Done loading images. X shape: $(size(X))")
 
     if logandscale
         # Turn zeros into the smallest value greater than zero to avoid
@@ -533,7 +551,7 @@ function load_images(
     n_dropped = sum(.!re_keep)
     if n_dropped > 0
         println(
-            "Dropping $(n_dropped) of $(length(re_keep)) images with " *
+            "\nDropping $(n_dropped) of $(length(re_keep)) images with " *
             "no matching radius in host_2d_shapes/sat_2d_shapes/" *
             "octant_shapes."
         ); flush(stdout)
@@ -589,42 +607,63 @@ function load_vmap(id, res)
 end
 
 function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
-    println("build_training_data: calling load_images..."); flush(stdout)
+    println("\n" * "="^60); println("BEGIN load_images")
+    println("="^60); flush(stdout)
+    t_load = time()
     ids_X, X, files, y_df, orientations_X, Re_X = load_images(
         Nfiles=Nfiles,
         res=res,
         tgt_type=tgt_type
     )
-    # Add in velocity map.
-    VMAP = zeros(length(ids_X), 1, res, res)
-    orientations = unique(orientations_X)
+    println("="^60)
+    println("END load_images ($(fmt_time(time() - t_load)))")
+    println("="^60); flush(stdout)
+
+    # The workers did all their reads inside load_images (pass 1 and pass
+    # 2). Nothing below uses them (the vmap loop is @threads in the main
+    # process), and idle workers hold onto whatever heap they grew, so
+    # shut them down here to reclaim that memory before the memory-heavy
+    # assembly. Then force a GC: Julia sizes its heap from its own
+    # allocation history and does not see the Slurm cgroup limit, so
+    # collecting the now-dead load_images intermediates here keeps the
+    # next big allocation from tipping the node into swap.
+    if nprocs() > 1
+        rmprocs(workers())
+    end
+    GC.gc()
+
+    # Add the velocity map by writing it into the reserved last channel of
+    # X that load_images left as zeros, rather than X = cat(X, VMAP), which
+    # would transiently duplicate the whole array.
+    vmap_channel = size(X, 2)
     ids_set = unique(ids_X)
     n_ids = length(ids_set)
 
-    # Each galaxy reads its own vmap file and writes to non-overlapping rows
-    # of VMAP (each (id, orientation) pair maps to a unique row), so
-    # @threads requires no locking here.
-    println("Loading vmaps...")
+    # Each thread handles one galaxy and writes the reserved channel of
+    # only the rows that belong to that galaxy (the rows where
+    # ids_X == id). Every row belongs to exactly one galaxy, so two
+    # threads never write the same row and @threads needs no locking.
+    println("\nLoading vmaps..."); flush(stdout)
     vmap_done = Threads.Atomic{Int}(0)
     vmap_start = time()
     Threads.@threads for id in ids_set
         id_int = parse(Int, replace(id, "object_" => ""))
         vmap = load_vmap(id_int, res)
         if !isnothing(vmap)
-            for orientation in orientations
-                is_id = ids_X .== id
-                is_orient = orientations_X .== orientation
-                is_i = is_id .& is_orient
-                i = findall(is_i)
-                @assert length(i) == 1
-                i = i[1]
-                VMAP[i, 1, :, :] = vmap[orientation]["vmap"]
+            # Fill this galaxy's rows directly. Each row already carries
+            # its own orientation, so iterate the galaxy's rows rather
+            # than every global orientation. This handles a galaxy that
+            # load_images left with only some projections (it drops any
+            # (galaxy, projection) image that has no matching radius)
+            # without special-casing the missing ones.
+            for row in findall(ids_X .== id)
+                orientation = orientations_X[row]
+                X[row, vmap_channel, :, :] = vmap[orientation]["vmap"]
             end
         end
         tick_progress!(vmap_done, n_ids, "Loading vmaps", vmap_start)
     end
     println() # Advance past the \r progress line.
-    X  = cat(X, VMAP; dims=2)
     println("X shape: $(size(X))")
 
     if tgt_type == "3d"

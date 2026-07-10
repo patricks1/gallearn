@@ -210,6 +210,12 @@ def create_model(
     -------
     nn.Module
     """
+    # --model and --task are independent axes on purpose. Every model
+    # here emits a single scalar, and the task (in main) picks the loss,
+    # so any model can pair with any task. Current practice is bernoulli
+    # for the classifier and resnet for the regressor, but keeping them
+    # decoupled leaves other pairings available to experiment with.
+    # cnn.py also defines Net and BottleNeck, not wired in here yet.
     if model_type == 'bernoulli':
         backbone = torchvision.models.resnet18()
         model = cnn.BernoulliNet(
