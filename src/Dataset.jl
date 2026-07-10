@@ -180,6 +180,12 @@ function read_2d_shapes()
     has_re = map(re -> !ismissing(re) && !isnan(re), dat.Re)
     dat = dat[has_re, :]
 
+    # CSV.jl types Re as Union{Missing, Float64} whenever any row is
+    # blank. The filter above dropped every missing (and NaN) Re, so
+    # narrow the column to plain Float64. HDF5 cannot write a
+    # Union{Missing, T} eltype, and Re rides through to the saved dataset.
+    dat.Re = DataFrames.disallowmissing(dat.Re)
+
     # A galaxy+view should appear at most once across the combined shape
     # CSVs; a duplicate means two different fits produced conflicting Re
     # values for the same projection, which is a real data problem.
