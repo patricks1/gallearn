@@ -3,6 +3,7 @@ from . import (
     config,
     gen_octant_images,
     preprocessing,
+    train,
     visual_checks,
 )
 
@@ -18,5 +19,6 @@ __all__ = [
     'config',
     'gen_octant_images',
     'preprocessing',
+    'train',
     'visual_checks',
 ]
