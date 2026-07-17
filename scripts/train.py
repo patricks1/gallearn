@@ -10,22 +10,27 @@ if __name__ == '__main__':
         '--task',
         type=str,
         choices=['classifier', 'regressor'],
-        required=True,
+        default=None,
         help=(
             'Task type: classifier (quenched vs'
             ' star-forming) or regressor (sSFR prediction'
-            ' on star-forming galaxies)'
+            ' on star-forming galaxies). Required unless'
+            ' --resume names a checkpoint that already'
+            ' recorded one; must be omitted when --resume'
+            ' is given'
         ),
     )
     parser.add_argument(
         '--model',
         type=str,
         choices=['standard', 'resnet'],
-        required=True,
+        default=None,
         help=(
             'Model architecture: standard (torchvision'
             ' ResNet-18 backbone) or resnet (custom'
-            ' ResNet)'
+            ' ResNet). Required unless --resume names a'
+            ' checkpoint that already recorded one; must be'
+            ' omitted when --resume is given'
         ),
     )
     parser.add_argument(
@@ -46,8 +51,11 @@ if __name__ == '__main__':
         type=str,
         default=None,
         help=(
-            'Name for this training run'
-            ' (default: timestamp)'
+            'Name for this training run (default: timestamp,'
+            ' or a wandb-generated name if --wandb y). Must be'
+            ' omitted when --resume is given, since a resumed'
+            ' run reuses the checkpoint\'s own recorded'
+            ' run_name'
         ),
     )
     parser.add_argument(
@@ -77,11 +85,14 @@ if __name__ == '__main__':
     parser.add_argument(
         '-w', '--wandb',
         type=str,
-        choices=['n', 'y', 'r'],
-        default='n',
+        choices=['n', 'y'],
+        default=None,
         help=(
-            'Wandb mode: n=none, y=new run, r=resume'
-            ' (default: %(default)s)'
+            'Wandb mode: n=none, y=new run (default: n). Must be'
+            ' omitted when --resume is given: a resumed run'
+            ' automatically continues its checkpoint\'s own wandb'
+            ' run if it had one, or continues without wandb'
+            ' otherwise'
         ),
     )
     parser.add_argument(

@@ -200,10 +200,16 @@ split` (see "Splitting the dataset" above) and is required on a fresh
 run; there is no separate `--dataset` flag, since the split file's own
 recorded `dataset_path` determines which dataset the run trains
 against. A `--resume <checkpoint>` run reuses the checkpoint's own
-recorded dataset, split, and train/val row indices instead, and
-rejects `--split` if it's also given, so a resumed run can never
-silently continue training against a different split than the one it
-started with.
+recorded dataset, split, train/val row indices, task, model
+architecture, and run name instead, and rejects `--split`, `--task`,
+`--model`, and `--run-name` if any is also given, so a resumed run
+can never silently continue as a different split, architecture, or
+run than the one it started as. `--wandb` is rejected the same way:
+a resumed run automatically continues its checkpoint's own wandb run
+if it had one (by the run id recorded in the checkpoint), or
+continues without wandb if it didn't, so there's no `--wandb r` mode
+to forget and no way for a resumed run to silently drop a stretch of
+metrics or land on the wrong chart.
 
 `--pretrained` only affects `--model standard`: it starts the
 ResNet-18 backbone from ImageNet weights instead of a random init.
@@ -211,7 +217,7 @@ ResNet-18 backbone from ImageNet weights instead of a random init.
 torchvision architecture with published weights.
 
 Other options include `--epochs`, `--batch-size`, `--lr`, `--seed`,
-`--wandb {n,y,r}`, `--run-name`, `--resume <checkpoint>`, and
+`--wandb {n,y}`, `--run-name`, `--resume <checkpoint>`, and
 `--no-scheduler`. It handles checkpoint save/resume, a
 ReduceLROnPlateau scheduler, and optional Weights & Biases logging.
 

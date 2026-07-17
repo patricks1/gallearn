@@ -480,15 +480,15 @@ def weights_init(module):
 
 
 def main(
-        task,
-        model_type,
+        task=None,
+        model_type=None,
         split_file_path=None,
         run_name=None,
         n_epochs=100,
         batch_size=32,
         lr=1e-3,
         seed=42,
-        wandb_mode='n',
+        wandb_mode=None,
         resume_from=None,
         use_scheduler=True,
         pretrained=False,
@@ -498,10 +498,14 @@ def main(
 
     Parameters
     ----------
-    task : str
-        'classifier' or 'regressor'. Required.
-    model_type : str
-        'standard' or 'resnet'. Required.
+    task : str, optional
+        'classifier' or 'regressor'. Required for a fresh run; must
+        be omitted when resume_from is given, since a resumed run
+        reuses the checkpoint's own recorded task.
+    model_type : str, optional
+        'standard' or 'resnet'. Required for a fresh run; must be
+        omitted when resume_from is given, since a resumed run
+        reuses the checkpoint's own recorded model_type.
     split_file_path : str, optional
         Path to a train/val split JSON. gallearn.splitting.write_split
         writes this file. A fresh run requires split_file_path
@@ -519,7 +523,12 @@ def main(
         gallearn.dataset_lock.lock_dataset (e.g. via
         scripts/lock_dataset.py); main() raises otherwise.
     run_name : str, optional
-        Name for this run. If None, uses timestamp.
+        Name for this run. If None on a fresh run, uses a timestamp
+        (or wandb's generated name, if wandb_mode='y'). Must be
+        omitted when resume_from is given, since a resumed run
+        reuses the checkpoint's own recorded run_name (needed to
+        find its run directory and, if wandb_mode='r', to resume the
+        same wandb run rather than starting a new one).
     n_epochs : int
         Number of epochs to train.
     batch_size : int
@@ -528,8 +537,17 @@ def main(
         Learning rate.
     seed : int
         Random seed.
-    wandb_mode : str
-        'n' for no wandb, 'y' for new run, 'r' for resume.
+    wandb_mode : str, optional
+        'n' for no wandb, 'y' for a new run. Defaults to 'n' on a
+        fresh run. Must be omitted when resume_from is given: a
+        resumed run automatically continues its checkpoint's own
+        wandb run if it had one (i.e. wandb_run_id is set in its
+        train_config), or continues without wandb otherwise. There
+        is no way to force wandb on or off for a resumed run
+        independent of whether its checkpoint used it, since
+        wandb_mode='r' as a distinct caller-chosen mode was a
+        footgun: forgetting it silently dropped a stretch of metrics
+        with no way to recover them.
     resume_from : str, optional
         Path to checkpoint to resume from. A resumed run always
         reuses the checkpoint's own recorded dataset and
@@ -574,11 +592,48 @@ def main(
                 ' checkpoint\'s already-filtered cached train_idxs'
                 ' rather than rebuilding them.'
             )
+        if task is not None or model_type is not None:
+            raise ValueError(
+                'task and model_type have no effect when resume_from'
+                ' is given. A resumed run always reuses the'
+                ' checkpoint\'s own recorded task and model_type,'
+                ' since building a different architecture than the'
+                ' checkpoint\'s weights would either fail to load or'
+                ' silently produce a mismatched model. Omit --task'
+                ' and --model when passing --resume.'
+            )
+        if run_name is not None:
+            raise ValueError(
+                'run_name has no effect when resume_from is given.'
+                ' A resumed run always reuses the checkpoint\'s own'
+                ' recorded run_name, both to find its run directory'
+                ' and, if it had one, to resume the same wandb run.'
+                ' Omit --run-name when passing --resume.'
+            )
+        if wandb_mode is not None:
+            raise ValueError(
+                'wandb_mode has no effect when resume_from is given.'
+                ' A resumed run automatically continues its'
+                ' checkpoint\'s own wandb run if it had one, or'
+                ' continues without wandb otherwise, so there\'s no'
+                ' way to forget to reattach it. Omit --wandb when'
+                ' passing --resume.'
+            )
         checkpoint = load_checkpoint(resume_from)
         saved_config = checkpoint.get('train_config', {})
         dataset = saved_config.get('dataset')
         split_fname = saved_config.get('split_fname')
+        task = saved_config.get('task')
+        model_type = saved_config.get('model_type')
+        run_name = saved_config.get('run_name')
+        wandb_run_id = saved_config.get('wandb_run_id')
+        wandb_mode = 'r' if wandb_run_id is not None else 'n'
     else:
+        if task is None or model_type is None:
+            raise ValueError(
+                'task and model_type are required unless resuming'
+                ' from a checkpoint that already recorded them.'
+            )
         if split_file_path is None:
             raise ValueError(
                 'split_file_path is required unless resuming from a'
@@ -586,6 +641,9 @@ def main(
                 ' with scripts/split.py split, then pass it with'
                 ' --split.'
             )
+        wandb_run_id = None
+        if wandb_mode is None:
+            wandb_mode = 'n'
         with open(split_file_path) as f:
             split_dict = json.load(f)
         dataset = split_dict['metadata']['dataset_path']
@@ -616,6 +674,8 @@ def main(
         'seed': seed,
         'pretrained': pretrained,
         'train_orientations': train_orientations,
+        'run_name': run_name,
+        'wandb_run_id': wandb_run_id,
     }
 
     # Task-specific settings
@@ -643,12 +703,25 @@ def main(
             project = 'gallearn_quenched_classifier'
         else:
             project = 'sfr_gallearn'
-        wandb.init(
-            project=project,
-            name=run_name,
-            config=train_config,
-            resume='must' if wandb_mode == 'r' else None,
-        )
+        if wandb_mode == 'r':
+            # wandb resumes by id, not by name; without the
+            # original run's id, resume='must' fails even if name
+            # matches an existing run, since a name isn't guaranteed
+            # unique. wandb_mode is only ever set to 'r' above when
+            # the checkpoint recorded a wandb_run_id, so it's always
+            # available here.
+            wandb.init(
+                project=project,
+                id=wandb_run_id,
+                resume='must',
+            )
+        else:
+            wandb.init(
+                project=project,
+                name=run_name,
+                config=train_config,
+            )
+            train_config['wandb_run_id'] = wandb.run.id
         if run_name is None:
             run_name = wandb.run.name
 
@@ -656,6 +729,7 @@ def main(
         run_name = datetime.datetime.now().strftime(
             '%Y%m%d_%H%M%S'
         )
+    train_config['run_name'] = run_name
 
     run_dir = os.path.join(
         config.config['gallearn_paths']['project_data_dir'],
