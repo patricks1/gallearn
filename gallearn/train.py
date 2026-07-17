@@ -393,8 +393,8 @@ def save_checkpoint(
         Directory to save checkpoint.
     train_idxs : torch.Tensor
         Training set indices, resolved from the split file this run
-        used (train_config['split_file_path']). A resumed run reuses
-        these directly rather than re-resolving split_file_path, so
+        used (train_config['split_fname']). A resumed run reuses
+        these directly rather than re-resolving the split, so
         this checkpoint field is what actually determines a later
         resumed run's training rows, not just a record of them.
     val_idxs : torch.Tensor
@@ -463,7 +463,7 @@ def main(
         run_name=None,
         n_epochs=100,
         batch_size=32,
-        lr=1e-4,
+        lr=1e-3,
         seed=42,
         wandb_mode='n',
         resume_from=None,
@@ -533,7 +533,7 @@ def main(
         checkpoint = load_checkpoint(resume_from)
         saved_config = checkpoint.get('train_config', {})
         dataset = saved_config.get('dataset')
-        split_file_path = saved_config.get('split_file_path')
+        split_fname = saved_config.get('split_fname')
     else:
         if split_file_path is None:
             raise ValueError(
@@ -545,6 +545,15 @@ def main(
         with open(split_file_path) as f:
             split_dict = json.load(f)
         dataset = split_dict['metadata']['dataset_path']
+        # A resumed run never reopens the split file (see below), so
+        # nothing downstream needs the literal path split_file_path
+        # was passed in as, which is often absolute and specific to
+        # whatever machine started the run. Recording just the
+        # filename keeps train_config, checkpoints, and wandb config
+        # portable across machines, matching how 'dataset' above is
+        # always a bare filename resolved through project_data_dir
+        # rather than a stored path.
+        split_fname = os.path.basename(split_file_path)
 
     # Raises if dataset has no recorded hash lock yet, or if its
     # content has drifted since locking, so a checkpoint's cached
@@ -556,7 +565,7 @@ def main(
     train_config = {
         'task': task,
         'model_type': model_type,
-        'split_file_path': split_file_path,
+        'split_fname': split_fname,
         'dataset': dataset,
         'batch_size': batch_size,
         'lr': lr,
