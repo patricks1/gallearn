@@ -17,7 +17,6 @@ host_direc = ""
 octant_img_dir = ""
 gallearn_dir = ""
 tgt_3d_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/luke_protodata"
-tgt_sfr_dir = "/DFS-L/DATA/cosmo/pstaudt/gallearn/"
 host_2d_shapes_path = ""
 sat_2d_shapes_path = ""
 octant_2d_shapes_path = ""
@@ -219,7 +218,7 @@ function read_sfr_tgt(sfr_type)
     elseif sfr_type == "avg_sfr"
         fname = "avg_sfrs_1.0Gyr_no_bound_filter.csv"
     end
-    y_df = CSV.read(joinpath(tgt_sfr_dir, fname), DataFrame)
+    y_df = CSV.read(joinpath(gallearn_dir, fname), DataFrame)
     y_df.id .= "object_" .* string.(y_df.id)
     DataFrames.rename!(y_df, :id => :Simulation)
     return y_df

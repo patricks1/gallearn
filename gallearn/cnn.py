@@ -1181,7 +1181,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     )
 
     N_all = len(ys)
-    print('{0:0.0f} galaxies in data'.format(N_all))
+    print('{0:0.0f} galaxy images in data'.format(N_all))
     N_test = max(1, int(0.15 * N_all))
     N_train = N_all - N_test
 

@@ -165,17 +165,19 @@ split's `train_galaxies`/`val_galaxies` lists actually name.
 Then write a train/val split over whatever galaxies the test lock
 excludes:
 
-    python scripts/split.py split --dataset <dataset filename> \
-        --split-name <name>
+    python scripts/split.py split --dataset <dataset filename>
 
-This writes `splits/split_<name>.json`. A split is not stratified,
-and unlike the test lock's single growing lineage, several splits are
-meant to be simultaneously current: each is an independent random
-train/val partition of the same non-locked galaxies, one per
-experiment, and none supersedes another (rerun with a different
-`--split-name` to get another one). Once written, a split file is
-immutable, since a checkpoint or a resumed run may already reference
-it; `scripts/split.py split` refuses to overwrite a split file that
+This writes `splits/split_<name>.json`. `--split-name` sets `<name>`
+explicitly; omit it and `<name>` defaults to `<dataset filename's
+stem>_v<N>`, N one more than the highest existing split version for
+that dataset in `splits/`. A split is not stratified, and unlike the
+test lock's single growing lineage, several splits are meant to be
+simultaneously current: each is an independent random train/val
+partition of the same non-locked galaxies, one per experiment, and
+none supersedes another (rerun, or pass a different `--split-name`,
+to get another one). Once written, a split file is immutable, since a
+checkpoint or a resumed run may already reference it;
+`scripts/split.py split` refuses to overwrite a split file that
 already exists at the target name.
 
 ## Training the network

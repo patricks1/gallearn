@@ -151,8 +151,10 @@ def prepare_targets(task, d, N):
     n_star_forming = sf_mask.sum().item()
     n_quenched = N - n_star_forming
     print(
-        'Class balance: {0:.0f} quenched, '
-        '{1:.0f} star-forming'.format(n_quenched, n_star_forming)
+        'Class balance: {0:.0f} quenched images, '
+        '{1:.0f} star-forming images'.format(
+            n_quenched, n_star_forming
+        )
     )
 
     if task == 'classifier':
@@ -176,7 +178,7 @@ def prepare_targets(task, d, N):
         }
         print(
             'Regressor: training on {0:.0f}'
-            ' star-forming galaxies'.format(
+            ' star-forming galaxy images'.format(
                 len(valid_indices)
             )
         )
@@ -610,7 +612,7 @@ def main(
     # Load metadata (not the full image tensor)
     print('Loading metadata...')
     d, N, hdf5_path = preprocessing.load_metadata(dataset)
-    print('{0} galaxies in data'.format(N))
+    print('{0} galaxy images in data'.format(N))
 
     # Prepare targets based on task
     targets, valid_indices, target_stats = prepare_targets(
@@ -759,7 +761,6 @@ def main(
                 mode='min',
                 factor=0.5,
                 patience=5,
-                verbose=True,
             )
         )
     else:
@@ -787,7 +788,14 @@ def main(
         )
 
         if scheduler is not None:
+            lr_before = scheduler.get_last_lr()[0]
             scheduler.step(val_metrics['loss'])
+            lr_after = scheduler.get_last_lr()[0]
+            if lr_after != lr_before:
+                print(
+                    'Epoch {0:3d} | Reducing learning rate to'
+                    ' {1:.3e}.'.format(epoch, lr_after)
+                )
 
         # Logging
         if task == 'classifier':

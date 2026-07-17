@@ -328,3 +328,29 @@ def test_write_split_refuses_to_overwrite(locked_ci_dataset):
         splitting.write_split(
             dataset_fname, val_fraction=0.3, split_name='dup',
         )
+
+
+def test_write_split_default_name_versions_per_dataset(
+        locked_ci_dataset):
+    '''Verify that write_split, when split_name is omitted, names
+    each split '<dataset stem>_v<N>' and increments N per call for
+    the same dataset rather than colliding or reusing versions.'''
+    dataset_fname = locked_ci_dataset
+    stem = pathlib.Path(dataset_fname).stem
+    splitting.update_test_lock(
+        dataset_fname,
+        target_fraction=0.2,
+        n_mass_bins=2,
+        n_ssfr_bins=2,
+        avg_sfr_csv=splitting.AVG_SFR_CSV,
+    )
+
+    splitting.write_split(dataset_fname, val_fraction=0.3, seed=1)
+    splitting.write_split(dataset_fname, val_fraction=0.3, seed=2)
+
+    assert (
+        splitting.SPLITS_DIR / 'split_{0}_v1.json'.format(stem)
+    ).exists()
+    assert (
+        splitting.SPLITS_DIR / 'split_{0}_v2.json'.format(stem)
+    ).exists()

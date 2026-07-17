@@ -1,3 +1,215 @@
+def plot_mass_ssfr_distributions(
+        dataset_fname,
+        test_lock_path=None,
+        avg_sfr_csv=None,
+        n_bins=30):
+    """
+    Plot log10(Mstar) and log10(ssfr) histograms comparing the full
+    galaxy population, the population excluding the locked test set,
+    and the locked test set itself, so a stratified test lock's
+    representativeness is visible directly rather than only implied
+    by the lock file's recorded bin_allocations counts.
+
+    Excludes galaxies missing from avg_sfr_csv from every panel
+    (their mass is unknown). log10 is undefined for a quenched
+    galaxy's ssfr (<= 0), so the sSFR panel represents each group's
+    quenched galaxies as a single 'Quenched' bar instead of placing
+    them on the continuous log10(ssfr) axis, matching how
+    stratify_galaxies treats quenched galaxies as their own stratum
+    rather than a point on the star-forming mass/sSFR grid. The
+    'Quenched' bar and the continuous histogram share one
+    normalization per group (both divide by that group's total
+    galaxy count, not just its star-forming count), so the bar's
+    area and the histogram's area sum to 1 and are directly
+    comparable.
+
+    Parameters
+    ----------
+    dataset_fname : str
+        Training HDF5 filename, as passed to
+        preprocessing.load_metadata. Must already be locked via
+        gallearn.dataset_lock.lock_dataset (e.g. via
+        scripts/lock_dataset.py).
+    test_lock_path : str or pathlib.Path, optional
+        Path to a specific test_lock_v<N>.json. Defaults to
+        splitting.latest_test_lock_path(), the highest version
+        currently in splitting.SPLITS_DIR.
+    avg_sfr_csv : str or pathlib.Path, optional
+        Path to the avg_sfrs CSV, passed to
+        splitting.load_avg_sfr_csv. Defaults to
+        splitting.AVG_SFR_CSV.
+    n_bins : int, optional
+        Number of histogram bins per panel. Default 30.
+
+    Returns
+    -------
+    None
+    """
+    import json
+
+    import numpy as np
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker
+
+    from . import dataset_lock
+    from . import preprocessing
+    from . import splitting
+
+    if avg_sfr_csv is None:
+        avg_sfr_csv = splitting.AVG_SFR_CSV
+
+    if test_lock_path is None:
+        test_lock_path = splitting.latest_test_lock_path()
+        if test_lock_path is None:
+            raise ValueError(
+                'No test lock exists yet in {0}. Run'
+                ' `scripts/split.py test-lock`'
+                ' first.'.format(splitting.SPLITS_DIR)
+            )
+    with open(test_lock_path) as f:
+        test_lock = json.load(f)
+    locked_galaxies = set(test_lock['locked_galaxies'])
+
+    dataset_lock.verify_dataset(dataset_fname)
+    d, N, _ = preprocessing.load_metadata(dataset_fname)
+    galaxy_index = splitting.build_galaxy_index(d['obs_sorted'][:N])
+    ssfrs = splitting.galaxy_ssfr(galaxy_index, d['ys_sorted'][:N])
+    masses = splitting.load_avg_sfr_csv(avg_sfr_csv)
+
+    galaxy_ids = sorted(galaxy_index)
+    known_ids = [g for g in galaxy_ids if g in masses]
+    n_unknown = len(galaxy_ids) - len(known_ids)
+    if n_unknown > 0:
+        print(
+            'Excluding {0} galaxies with no mass in {1} from the'
+            ' plot.'.format(n_unknown, avg_sfr_csv)
+        )
+
+    log_mass = {g: np.log10(masses[g]) for g in known_ids}
+    log_ssfr = {
+        g: np.log10(ssfrs[g]) for g in known_ids if ssfrs[g] > 0.
+    }
+
+    groups = {
+        'population': known_ids,
+        'population excl. test': [
+            g for g in known_ids if g not in locked_galaxies
+        ],
+        'test': [g for g in known_ids if g in locked_galaxies],
+    }
+
+    mass_edges = np.histogram_bin_edges(
+        list(log_mass.values()), bins=n_bins,
+    )
+    ssfr_edges = np.histogram_bin_edges(
+        list(log_ssfr.values()), bins=n_bins,
+    )
+    ssfr_bin_width = ssfr_edges[1] - ssfr_edges[0]
+    # Placed a few bin widths left of the star-forming range, with a
+    # dashed separator, so it reads as a distinct category rather
+    # than a point on the continuous log10(ssfr) axis.
+    quenched_x = ssfr_edges[0] - 3. * ssfr_bin_width
+    separator_x = ssfr_edges[0] - 1.5 * ssfr_bin_width
+
+    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    # Sub-width per group's quenched bar so groups sit side by side
+    # inside the quenched slot, rather than fully overlapping (which
+    # could hide a shorter bar entirely behind a taller one).
+    quenched_bar_width = ssfr_bin_width / len(groups)
+
+    fig, (ax_mass, ax_ssfr) = plt.subplots(1, 2, figsize=(12, 5))
+    for i, ((label, ids), color) in enumerate(
+            zip(groups.items(), colors)):
+        mass_vals = [log_mass[g] for g in ids]
+        ax_mass.hist(
+            mass_vals,
+            bins=mass_edges,
+            density=True,
+            histtype='step',
+            linewidth=2,
+            color=color,
+            label=r'{0} $(N_{{\mathrm{{gal}}}}={1})$'.format(
+                label, len(ids)
+            ),
+        )
+
+        n_total = len(ids)
+        sf_vals = [log_ssfr[g] for g in ids if g in log_ssfr]
+        n_quenched = n_total - len(sf_vals)
+        # Weight each star-forming galaxy by 1 / (n_total *
+        # ssfr_bin_width) rather than passing density=True (which
+        # would normalize against only the star-forming count), so
+        # this histogram's area is (n_sf / n_total) and lines up with
+        # the quenched bar's area of (n_quenched / n_total) below.
+        weight = (
+            1. / (n_total * ssfr_bin_width) if n_total else 0.
+        )
+        ax_ssfr.hist(
+            sf_vals,
+            bins=ssfr_edges,
+            weights=[weight] * len(sf_vals),
+            histtype='step',
+            linewidth=2,
+            color=color,
+            label=r'{0} ($N_{{\mathrm{{gal}}}}={1}$, {2} quenched)'
+                .format(label, n_total, n_quenched),
+        )
+        quenched_frac = n_quenched / n_total if n_total else 0.
+        bar_x = (
+            quenched_x
+            - ssfr_bin_width / 2.
+            + (i + 0.5) * quenched_bar_width
+        )
+        ax_ssfr.bar(
+            bar_x,
+            quenched_frac / ssfr_bin_width,
+            width=quenched_bar_width,
+            color=color,
+        )
+
+    legend_anchor = (0.5, -0.15)
+
+    ax_mass.set_xlabel(r'$\log_{10}(M_\star / \mathrm{M}_\odot)$')
+    ax_mass.set_ylabel('Density')
+    ax_mass.set_title('Stellar mass distribution')
+    ax_mass.legend(bbox_to_anchor=legend_anchor, loc='upper center')
+
+    ax_ssfr.axvline(separator_x, color='gray', linestyle=':')
+    # Explicit ticks replace the default locator, which would
+    # otherwise autoscale to the quenched bars' and separator's x
+    # positions too and place numeric ticks in that gap, cluttering
+    # right where the dashed separator is meant to keep the quenched
+    # bars visually distinct from the real log10(ssfr) axis.
+    numeric_ticks = [
+        t for t in mpl.ticker.MaxNLocator(nbins=6).tick_values(
+            ssfr_edges[0], ssfr_edges[-1]
+        )
+        if ssfr_edges[0] <= t <= ssfr_edges[-1]
+    ]
+    ax_ssfr.set_xticks([quenched_x] + numeric_ticks)
+    ax_ssfr.set_xticklabels(
+        ['Quenched'] + ['{0:g}'.format(t) for t in numeric_ticks]
+    )
+    ax_ssfr.set_xlabel(
+        r'$\log_{10}(\mathrm{sSFR} / \mathrm{yr}^{-1})$'
+    )
+    ax_ssfr.set_ylabel('Density')
+    ax_ssfr.set_title('sSFR distribution')
+    # bbox_to_anchor's y is negative (below the axes, in axes-fraction
+    # coordinates) and loc='upper center' aligns the legend's top edge
+    # (not its center) to that anchor, so the legend hangs downward
+    # below the plot instead of sitting inside it.
+    ax_ssfr.legend(bbox_to_anchor=legend_anchor, loc='upper center')
+
+    fig.tight_layout()
+    # tight_layout() doesn't reserve space for a legend placed outside
+    # the axes via bbox_to_anchor, so it can get clipped off the
+    # bottom of the figure without this.
+    fig.subplots_adjust(bottom=0.3)
+    plt.show()
+
+
 def load_gal_for_imshow(gal_id, img_orientation, d):
     """Extract and preprocess one galaxy image for matplotlib imshow.
 

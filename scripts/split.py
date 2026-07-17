@@ -106,8 +106,9 @@ if __name__ == '__main__':
         default=None,
         help=(
             'Used in the output filename'
-            ' (SPLITS_DIR/split_<split-name-or-timestamp>.json)'
-            ' in place of a timestamp'
+            ' (SPLITS_DIR/split_<split-name>.json). Defaults to'
+            ' "<dataset stem>_v<N>", N one more than the highest'
+            ' existing split version for this dataset'
         ),
     )
 
