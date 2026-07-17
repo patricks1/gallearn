@@ -6,13 +6,14 @@ Supports two tasks:
 - regressor: sSFR regression (trained on star-forming galaxies only)
 
 And two model architectures:
-- bernoulli: BernoulliNet with a torchvision ResNet-18 backbone
+- standard: StandardNet, a torchvision ResNet-18 backbone
 - resnet: custom ResNet from cnn.py
 """
 import datetime
 import json
 import os
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torchvision
@@ -195,20 +196,29 @@ def create_model(
         model_type,
         lr,
         dataset,
-        run_name):
+        run_name,
+        pretrained=False):
     """
     Create a model based on model_type.
 
     Parameters
     ----------
     model_type : str
-        'bernoulli' or 'resnet'.
+        'standard' or 'resnet'.
     lr : float
         Learning rate.
     dataset : str
         Dataset filename.
     run_name : str
         Name for this training run.
+    pretrained : bool
+        Only affects model_type='standard'. If True, its ResNet-18
+        backbone starts from ImageNet weights instead of a random
+        init, with the pretrained conv1 filters preserved for the
+        channels they already cover (see
+        cnn._replace_first_conv_in_channels). cnn.ResNet has no
+        pretrained option, since it isn't a standard torchvision
+        architecture with published weights.
 
     Returns
     -------
@@ -216,20 +226,33 @@ def create_model(
     """
     # --model and --task are independent axes on purpose. Every model
     # here emits a single scalar, and the task (in main) picks the loss,
-    # so any model can pair with any task. Current practice is bernoulli
+    # so any model can pair with any task. Current practice is standard
     # for the classifier and resnet for the regressor, but keeping them
     # decoupled leaves other pairings available to experiment with.
     # cnn.py also defines Net and BottleNeck, not wired in here yet.
-    if model_type == 'bernoulli':
-        backbone = torchvision.models.resnet18()
-        model = cnn.BernoulliNet(
+    if model_type == 'standard':
+        if pretrained:
+            backbone = torchvision.models.resnet18(
+                weights=torchvision.models.ResNet18_Weights.DEFAULT,
+            )
+        else:
+            backbone = torchvision.models.resnet18()
+        model = cnn.StandardNet(
             lr=lr,
             momentum=0.9,
             backbone=backbone,
             dataset=dataset,
             in_channels=4,
+            pretrained=pretrained,
         )
     elif model_type == 'resnet':
+        if pretrained:
+            raise ValueError(
+                "pretrained has no effect on model_type='resnet',"
+                " since it isn't a standard architecture with"
+                " published weights. Use model_type='standard' for"
+                " a pretrained run."
+            )
         model = cnn.ResNet(
             run_name,
             N_out_channels=1,
@@ -244,7 +267,7 @@ def create_model(
         )
     else:
         raise ValueError(
-            "model_type must be 'bernoulli' or 'resnet', "
+            "model_type must be 'standard' or 'resnet', "
             "got '{0}'".format(model_type)
         )
     return model
@@ -467,7 +490,9 @@ def main(
         seed=42,
         wandb_mode='n',
         resume_from=None,
-        use_scheduler=True):
+        use_scheduler=True,
+        pretrained=False,
+        train_orientations=None):
     """
     Main training function.
 
@@ -476,7 +501,7 @@ def main(
     task : str
         'classifier' or 'regressor'. Required.
     model_type : str
-        'bernoulli' or 'resnet'. Required.
+        'standard' or 'resnet'. Required.
     split_file_path : str, optional
         Path to a train/val split JSON. gallearn.splitting.write_split
         writes this file. A fresh run requires split_file_path
@@ -514,6 +539,18 @@ def main(
         silently ignoring it.
     use_scheduler : bool
         Whether to use a ReduceLROnPlateau scheduler.
+    pretrained : bool
+        Only affects model_type='standard'. See
+        create_model's pretrained parameter.
+    train_orientations : list of str, optional
+        If given, restricts the training set to rows whose
+        orientation is in this list (e.g. ['projection_xy',
+        'projection_yz', 'projection_zx']), leaving the val set's
+        composition untouched. For ablating how much projection
+        diversity affects generalization, holding everything else
+        (dataset, split, scaling stats, val set) fixed; not meant
+        for routine use, so there is no --train-orientations CLI
+        flag, only this argument.
     """
     device = get_device()
     print('Using device: {0}'.format(device))
@@ -529,6 +566,13 @@ def main(
                 ' checkpoint\'s own recorded dataset, split, and'
                 ' cached train/val indices. Omit --split when'
                 ' passing --resume.'
+            )
+        if train_orientations is not None:
+            raise ValueError(
+                'train_orientations has no effect when resume_from'
+                ' is given, since a resumed run reuses the'
+                ' checkpoint\'s already-filtered cached train_idxs'
+                ' rather than rebuilding them.'
             )
         checkpoint = load_checkpoint(resume_from)
         saved_config = checkpoint.get('train_config', {})
@@ -570,6 +614,8 @@ def main(
         'batch_size': batch_size,
         'lr': lr,
         'seed': seed,
+        'pretrained': pretrained,
+        'train_orientations': train_orientations,
     }
 
     # Task-specific settings
@@ -668,6 +714,13 @@ def main(
         train_idxs = split_train_idxs[valid_mask[split_train_idxs]]
         val_idxs = split_val_idxs[valid_mask[split_val_idxs]]
 
+    if train_orientations is not None:
+        orientations = d['orientations'][:N]
+        keep_mask = torch.from_numpy(
+            np.isin(orientations[train_idxs.numpy()], train_orientations)
+        )
+        train_idxs = train_idxs[keep_mask]
+
     print(
         'Train: {0}, Val: {1}'.format(
             len(train_idxs), len(val_idxs)
@@ -715,7 +768,7 @@ def main(
 
     # Create model
     model = create_model(
-        model_type, lr, dataset, run_name
+        model_type, lr, dataset, run_name, pretrained=pretrained
     )
     model = model.to(device)
 

@@ -20,10 +20,10 @@ if __name__ == '__main__':
     parser.add_argument(
         '--model',
         type=str,
-        choices=['bernoulli', 'resnet'],
+        choices=['standard', 'resnet'],
         required=True,
         help=(
-            'Model architecture: bernoulli (torchvision'
+            'Model architecture: standard (torchvision'
             ' ResNet-18 backbone) or resnet (custom'
             ' ResNet)'
         ),
@@ -95,6 +95,15 @@ if __name__ == '__main__':
         action='store_true',
         help='Disable the learning rate scheduler',
     )
+    parser.add_argument(
+        '--pretrained',
+        action='store_true',
+        help=(
+            'Only affects --model standard. Start its ResNet-18'
+            ' backbone from ImageNet weights instead of a random'
+            ' init'
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -110,4 +119,5 @@ if __name__ == '__main__':
         wandb_mode=args.wandb,
         resume_from=args.resume,
         use_scheduler=not args.no_scheduler,
+        pretrained=args.pretrained,
     )

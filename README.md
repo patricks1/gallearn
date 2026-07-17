@@ -192,7 +192,7 @@ and architecture and covers all four combinations:
 - `--task classifier` — star-forming vs quenched (BCE loss, F1 metric).
 - `--task regressor` — sSFR on the star-forming subset (MSE loss, with
   asinh-scaled targets).
-- `--model bernoulli` — torchvision ResNet-18 backbone (`BernoulliNet`).
+- `--model standard` — torchvision ResNet-18 backbone (`StandardNet`).
 - `--model resnet` — the custom ResNet from `cnn.py`.
 
 `--split <path>` names a train/val split JSON from `scripts/split.py
@@ -205,6 +205,11 @@ rejects `--split` if it's also given, so a resumed run can never
 silently continue training against a different split than the one it
 started with.
 
+`--pretrained` only affects `--model standard`: it starts the
+ResNet-18 backbone from ImageNet weights instead of a random init.
+`cnn.ResNet` has no pretrained option, since it isn't a standard
+torchvision architecture with published weights.
+
 Other options include `--epochs`, `--batch-size`, `--lr`, `--seed`,
 `--wandb {n,y,r}`, `--run-name`, `--resume <checkpoint>`, and
 `--no-scheduler`. It handles checkpoint save/resume, a
@@ -212,13 +217,13 @@ ReduceLROnPlateau scheduler, and optional Weights & Biases logging.
 
 Run it as:
 
-    python scripts/train.py --task classifier --model bernoulli \
+    python scripts/train.py --task classifier --model standard \
         --split splits/split_<name>.json
 
 `gallearn/train.py` exposes the training logic as a plain, importable
 `main()` with no argparse, so it can also be driven from a notebook or
 REPL via `gallearn.train.main(...)`. `cnn.py` holds the model
-definitions (`BernoulliNet`, `ResNet`, `BasicResBlock`) that `train.py`
+definitions (`StandardNet`, `ResNet`, `BasicResBlock`) that `train.py`
 imports. It also still carries an older standalone `main()` that
 `scripts/run_cnn.py` launches; `gallearn/train.py` supersedes that
 driver.

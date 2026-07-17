@@ -3,9 +3,9 @@ import torch
 import numpy as np
 import pytest
 
-def test_BernoulliNet():
+def test_StandardNet():
     '''
-    Verify that we can instantiate a BernoulliNet.
+    Verify that we can instantiate a StandardNet.
     '''
     import gallearn
 
@@ -15,7 +15,7 @@ def test_BernoulliNet():
     rs = data_dict['Re']
 
     resnet18 = torchvision.models.resnet18()
-    classifier = gallearn.cnn.BernoulliNet(
+    classifier = gallearn.cnn.StandardNet(
         lr=1.e-4,
         momentum=0.5,
         backbone=resnet18,

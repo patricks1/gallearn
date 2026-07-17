@@ -258,11 +258,25 @@ class Net(nn.Module):
         return None
 
 
-def _replace_first_conv_in_channels(module, in_channels):
+def _replace_first_conv_in_channels(
+        module, in_channels, preserve_weights=False):
     """
     Recursively find the first Conv2d layer in a module and replace it
     with a new Conv2d that has the specified in_channels.
     Returns True if a replacement was made, False otherwise.
+
+    preserve_weights : bool
+        If True, copy the old conv's weights into the first
+        min(old_in_channels, in_channels) channels of the new conv
+        instead of leaving it randomly initialized, so a pretrained
+        backbone keeps its pretrained conv1 filters for the channels
+        it already had (e.g. the 3 image bands), and only the extra
+        channels (e.g. a velocity map) start from scratch. Extra
+        channels are initialized to the mean of the old conv's
+        weights across its input channels, rather than a fresh
+        Kaiming init, so their initial output scale roughly matches
+        the pretrained channels' instead of starting uncorrelated
+        with everything the rest of the pretrained network expects.
     """
     for name, child in module.named_children():
         if isinstance(child, nn.Conv2d):
@@ -277,9 +291,26 @@ def _replace_first_conv_in_channels(module, in_channels):
                 bias=child.bias is not None,
                 padding_mode=child.padding_mode,
             )
+            if preserve_weights:
+                old_in_channels = child.in_channels
+                n_copy = min(old_in_channels, in_channels)
+                with torch.no_grad():
+                    new_conv.weight[:, :n_copy] = (
+                        child.weight[:, :n_copy]
+                    )
+                    if in_channels > old_in_channels:
+                        mean_weight = child.weight.mean(
+                            dim=1, keepdim=True
+                        )
+                        new_conv.weight[:, old_in_channels:] = (
+                            mean_weight
+                        )
+                    if child.bias is not None:
+                        new_conv.bias[:] = child.bias
             setattr(module, name, new_conv)
             return True
-        if _replace_first_conv_in_channels(child, in_channels):
+        if _replace_first_conv_in_channels(
+                child, in_channels, preserve_weights=preserve_weights):
             return True
     return False
 
@@ -322,7 +353,7 @@ def _make_backbone_feature_extractor(module):
     return False
 
 
-class BernoulliNet(nn.Module):
+class StandardNet(nn.Module):
     def __init__(
                 self,
                 lr,
@@ -330,10 +361,11 @@ class BernoulliNet(nn.Module):
                 backbone,
                 dataset,
                 in_channels=None,
+                pretrained=False,
             ):
         from . import preprocessing
 
-        super(BernoulliNet, self).__init__()
+        super(StandardNet, self).__init__()
         self.lr = lr
         self.momentum = momentum
         self.backbone = backbone
@@ -342,7 +374,13 @@ class BernoulliNet(nn.Module):
         _make_backbone_feature_extractor(self.backbone)
 
         if in_channels is not None:
-            if not _replace_first_conv_in_channels(self.backbone, in_channels):
+            # pretrained backbones ship conv1 weights fit to their
+            # original 3-channel input; preserve those in the new
+            # conv rather than discarding them, so pretraining still
+            # helps the very first layer instead of only layer1+.
+            if not _replace_first_conv_in_channels(
+                    self.backbone, in_channels,
+                    preserve_weights=pretrained):
                 raise ValueError("No Conv2d layer found in backbone")
 
         self.scaling_function = preprocessing.sasinh_imgs_sscale_vmaps

@@ -86,7 +86,7 @@ def make_sfr_data(seed=42):
     make_shapes_data.
 
     The HDF5 this function writes is consumed by
-    test_BernoulliNet.py::test_BernoulliNet via preprocessing.load_data().
+    test_StandardNet.py::test_StandardNet via preprocessing.load_data().
     The __main__ block also passes the returned ids to pick_fixture_ids
     and make_shapes_data.
 
@@ -155,7 +155,7 @@ def make_shapes_data(ids, seed=42):
     gen_octant_shapes.gen(), which reads host_2d_shapes and sat_2d_shapes to
     build the eligible galaxy ID set. (Re used to come from a Python-side
     join against these three CSVs via cnn.get_radii(); that join now
-    happens in Julia's Dataset.read_2d_shapes(), so test_BernoulliNet.py
+    happens in Julia's Dataset.read_2d_shapes(), so test_StandardNet.py
     no longer depends on these CSVs, only on the 'Re' key make_sfr_data
     fabricates directly into the sampled HDF5.)
 
