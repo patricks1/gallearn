@@ -1,8 +1,10 @@
 from . import (
     cnn,
     config,
+    dataset_lock,
     gen_octant_images,
     preprocessing,
+    splitting,
     train,
     visual_checks,
 )
@@ -17,8 +19,10 @@ except ImportError:
 __all__ = [
     'cnn',
     'config',
+    'dataset_lock',
     'gen_octant_images',
     'preprocessing',
+    'splitting',
     'train',
     'visual_checks',
 ]

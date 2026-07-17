@@ -103,14 +103,85 @@ times that footprint must fit node RAM. Too many workers swap-thrash the
 node; lower `NWORKERS` on memory-light nodes rather than raising `--mem`
 past what the node has.
 
+## Splitting the dataset
+
+Training never sees a plain random split. A locked, stratified test set
+holds out a fixed set of galaxies permanently, and every training run
+consumes a separate, explicit train/val split file, so a run's exact
+train/val galaxies are always traceable to one JSON file rather than a
+seed.
+
+Splitting keys galaxies by id, not by HDF5 row index, since
+`src/Dataset.jl`'s `load_images` assembles its file list from unsorted
+directory listings, so a given row index can point at a different
+galaxy after a rebuild under the same filename. To catch that, lock
+every dataset by content hash first:
+
+    python scripts/lock_dataset.py --dataset <dataset filename>
+
+This records the dataset file's sha256 under `dataset_hashes/` in the
+repo. `gallearn.splitting` and `gallearn.train` refuse to run against a
+dataset that has no lock yet, or whose current content no longer
+matches its lock (`gallearn/dataset_lock.py`).
+
+With the dataset locked, create or top up the locked test set:
+
+    python scripts/split.py test-lock --dataset <dataset filename>
+
+This draws galaxies into the test set with stratified sampling on
+stellar mass and sSFR, so the locked set tracks the population's
+mass/SFR distribution rather than a plain random draw. Locking is
+append-only: rerunning it later, after the dataset has grown, only
+ever adds newly eligible galaxies on top of the existing lock, never
+reassigning or dropping one already locked. Each run writes a new,
+immutable `splits/test_lock_v<N>.json` rather than editing the
+previous version. The test lock excludes every projection of a locked
+galaxy from training, not just the specific rows present when the
+galaxy first entered the lock.
+
+`test-lock` only finds something new to add when:
+
+- the dataset contains galaxy ids it didn't contain before, or
+- you raise `--test-fraction` above what's currently locked.
+
+Rebuilding the dataset with only new projections of galaxies already
+present, locked or not, gives `test-lock` nothing new to select:
+`test-lock` skips a galaxy already in the lock, and for a galaxy not
+yet locked, a previous run already counted it toward its stratum's
+target, so the same `--test-fraction` won't pull it in either.
+
+If you need more test rows, you need to expand image generation to
+accept more viewing directions, Sersic-fitting
+those new images (`scripts/gen_octant_shapes.py`), and rebuilding and
+re-locking the dataset (`scripts/transform_images.jl`). Any such new
+rows would land in test automatically, without a `test-lock` rerun,
+since `scripts/split.py split` only pulls rows for the galaxies a
+split's `train_galaxies`/`val_galaxies` lists actually name.
+
+Then write a train/val split over whatever galaxies the test lock
+excludes:
+
+    python scripts/split.py split --dataset <dataset filename> \
+        --split-name <name>
+
+This writes `splits/split_<name>.json`. A split is not stratified,
+and unlike the test lock's single growing lineage, several splits are
+meant to be simultaneously current: each is an independent random
+train/val partition of the same non-locked galaxies, one per
+experiment, and none supersedes another (rerun with a different
+`--split-name` to get another one). Once written, a split file is
+immutable, since a checkpoint or a resumed run may already reference
+it; `scripts/split.py split` refuses to overwrite a split file that
+already exists at the target name.
+
 ## Training the network
 
 The network takes the image tensor (bands plus velocity map) and the
 Sersic radius `Re` as a late-stage auxiliary input.
 
-`gallearn/train.py` is the unified training entry point. It selects the
-task and architecture from the command line and covers all four
-combinations:
+`scripts/train.py` is the unified training entry point. It parses the
+command line and calls `gallearn.train.main()`, which selects the task
+and architecture and covers all four combinations:
 
 - `--task classifier` — star-forming vs quenched (BCE loss, F1 metric).
 - `--task regressor` — sSFR on the star-forming subset (MSE loss, with
@@ -118,19 +189,33 @@ combinations:
 - `--model bernoulli` — torchvision ResNet-18 backbone (`BernoulliNet`).
 - `--model resnet` — the custom ResNet from `cnn.py`.
 
-Other options include `--dataset`, `--epochs`, `--batch-size`, `--lr`,
-`--seed`, `--wandb {n,y,r}`, `--run-name`, `--resume <checkpoint>`, and
-`--disable-scheduler`. It handles checkpoint save/resume, a
+`--split <path>` names a train/val split JSON from `scripts/split.py
+split` (see "Splitting the dataset" above) and is required on a fresh
+run; there is no separate `--dataset` flag, since the split file's own
+recorded `dataset_path` determines which dataset the run trains
+against. A `--resume <checkpoint>` run reuses the checkpoint's own
+recorded dataset, split, and train/val row indices instead, and
+rejects `--split` if it's also given, so a resumed run can never
+silently continue training against a different split than the one it
+started with.
+
+Other options include `--epochs`, `--batch-size`, `--lr`, `--seed`,
+`--wandb {n,y,r}`, `--run-name`, `--resume <checkpoint>`, and
+`--no-scheduler`. It handles checkpoint save/resume, a
 ReduceLROnPlateau scheduler, and optional Weights & Biases logging.
 
-Run it as a module, since it uses package-relative imports:
+Run it as:
 
-    python -m gallearn.train --task classifier --model bernoulli
+    python scripts/train.py --task classifier --model bernoulli \
+        --split splits/split_<name>.json
 
-`cnn.py` holds the model definitions (`BernoulliNet`, `ResNet`,
-`BasicResBlock`) that `train.py` imports. It also still carries an older
-standalone `main()` that the example `run_cnn.sh` launches; `train.py`
-supersedes that driver. Training runs as a Slurm job.
+`gallearn/train.py` exposes the training logic as a plain, importable
+`main()` with no argparse, so it can also be driven from a notebook or
+REPL via `gallearn.train.main(...)`. `cnn.py` holds the model
+definitions (`BernoulliNet`, `ResNet`, `BasicResBlock`) that `train.py`
+imports. It also still carries an older standalone `main()` that
+`scripts/run_cnn.py` launches; `gallearn/train.py` supersedes that
+driver.
 
 ## Tests
 

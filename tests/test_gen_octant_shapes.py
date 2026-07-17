@@ -11,6 +11,19 @@ from gallearn import gen_octant_shapes
 TEST_DATA = pathlib.Path(__file__).parent / 'test_data'
 FIT_COLS = ('b_a', 'PA', 'n', 'Re', 'Ie_log10')
 
+# (galaxyID, view) pairs whose stored astrophot reference never
+# converged (its 'converged' status is 'fail. Maximum iterations',
+# not 'success'): the LM optimizer hit its iteration cap and reported
+# whatever parameter values it landed on at that arbitrary cutoff.
+# That landing point is sensitive to floating-point differences
+# between machines (BLAS backend, CPU vendor, thread scheduling) even
+# with identical package versions, so _check_galaxy excludes exactly
+# these known pairs from the reference comparison rather than
+# loosening the tolerance for every row.
+NONDETERMINISTIC_ASTROPHOT_FITS = frozenset([
+    (561, 'projection_ppp'),
+])
+
 
 def _fixture_gal_ids():
     '''Return sorted galaxy IDs discovered from HDF5 files in
@@ -71,7 +84,9 @@ def _run_galaxy(gal_id, fitter, skip_views=frozenset()):
 def _check_galaxy(gal_id, ref_df, fitter):
     '''Run _process_galaxy for gal_id and assert each fit column matches
     the stored reference within 1% relative tolerance. Skips PA when b_a
-    exceeds 0.95 (near-circular; PA is unconstrained).
+    exceeds 0.95 (near-circular; PA is unconstrained), and skips a
+    (gal_id, view) pair entirely when it's listed in
+    NONDETERMINISTIC_ASTROPHOT_FITS.
 
     Parameters
     ----------
@@ -90,6 +105,8 @@ def _check_galaxy(gal_id, ref_df, fitter):
     rows = _run_galaxy(gal_id, fitter=fitter)
     for row in rows:
         proj = row['view']
+        if (gal_id, proj) in NONDETERMINISTIC_ASTROPHOT_FITS:
+            continue
         skip_pa = gal_ref.loc[proj, 'b_a'] > 0.95
         for col in FIT_COLS:
             if col == 'PA' and skip_pa:

@@ -29,13 +29,16 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
-        '--dataset',
+        '--split',
         type=str,
-        default=(
-            gallearn.config.config['gallearn_paths']['dataset']
-        ),
+        default=None,
         help=(
-            'Dataset filename (default: %(default)s)'
+            'Path to a train/val split JSON, from'
+            ' scripts/split.py split. Its recorded dataset_path'
+            ' determines the dataset this run trains against.'
+            ' Required unless --resume names a checkpoint that'
+            ' already recorded one; must be omitted when --resume'
+            ' is given.'
         ),
     )
     parser.add_argument(
@@ -98,7 +101,7 @@ if __name__ == '__main__':
     gallearn.train.main(
         task=args.task,
         model_type=args.model,
-        dataset=args.dataset,
+        split_file_path=args.split,
         run_name=args.run_name,
         n_epochs=args.epochs,
         batch_size=args.batch_size,

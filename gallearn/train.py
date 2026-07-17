@@ -10,6 +10,7 @@ And two model architectures:
 - resnet: custom ResNet from cnn.py
 """
 import datetime
+import json
 import os
 
 import torch
@@ -18,7 +19,9 @@ import torchvision
 
 from . import cnn
 from . import config
+from . import dataset_lock
 from . import preprocessing
+from . import splitting
 
 
 def get_device():
@@ -302,20 +305,20 @@ def train_epoch(
 @torch.no_grad()
 def evaluate(
         model,
-        test_loader,
+        val_loader,
         loss_fn,
         device,
         metrics_fn,
         task):
     """
-    Evaluate the model on test data.
+    Evaluate the model on validation data.
 
     Parameters
     ----------
     model : nn.Module
         The model to evaluate.
-    test_loader : DataLoader
-        Test data loader.
+    val_loader : DataLoader
+        Validation data loader.
     loss_fn : callable
         Loss function.
     device : torch.device
@@ -334,7 +337,7 @@ def evaluate(
     all_outputs = []
     all_targets = []
 
-    for images, rs, targets in test_loader:
+    for images, rs, targets in val_loader:
         images = images.to(device)
         rs = rs.to(device)
         targets = targets.to(device)
@@ -349,7 +352,7 @@ def evaluate(
     all_outputs = torch.cat(all_outputs)
     all_targets = torch.cat(all_targets)
     metrics = metrics_fn(all_outputs, all_targets)
-    metrics['loss'] = total_loss / len(test_loader)
+    metrics['loss'] = total_loss / len(val_loader)
 
     if task == 'classifier':
         preds = (torch.sigmoid(all_outputs) > 0.5).int()
@@ -365,10 +368,10 @@ def save_checkpoint(
         model,
         epoch,
         train_metrics,
-        test_metrics,
+        val_metrics,
         run_dir,
         train_idxs,
-        test_idxs,
+        val_idxs,
         train_config,
         target_stats=None):
     """
@@ -382,14 +385,19 @@ def save_checkpoint(
         Current epoch number.
     train_metrics : dict
         Training metrics for this epoch.
-    test_metrics : dict
-        Test metrics for this epoch.
+    val_metrics : dict
+        Validation metrics for this epoch.
     run_dir : str
         Directory to save checkpoint.
     train_idxs : torch.Tensor
-        Training set indices (for reproducible splits).
-    test_idxs : torch.Tensor
-        Test set indices (for reproducible splits).
+        Training set indices, resolved from the split file this run
+        used (train_config['split_file_path']). A resumed run reuses
+        these directly rather than re-resolving split_file_path, so
+        this checkpoint field is what actually determines a later
+        resumed run's training rows, not just a record of them.
+    val_idxs : torch.Tensor
+        Validation set indices, resolved from the same split file.
+        Same as train_idxs: a resumed run reuses this directly.
     train_config : dict
         Training configuration.
     target_stats : dict, optional
@@ -405,9 +413,9 @@ def save_checkpoint(
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': model.optimizer.state_dict(),
         'train_metrics': train_metrics,
-        'test_metrics': test_metrics,
+        'val_metrics': val_metrics,
         'train_idxs': train_idxs.cpu(),
-        'test_idxs': test_idxs.cpu(),
+        'val_idxs': val_idxs.cpu(),
         'train_config': train_config,
     }
     if target_stats is not None:
@@ -449,12 +457,11 @@ def weights_init(module):
 def main(
         task,
         model_type,
-        dataset=config.config['gallearn_paths']['dataset'],
+        split_file_path=None,
         run_name=None,
         n_epochs=100,
         batch_size=32,
         lr=1e-4,
-        test_fraction=0.15,
         seed=42,
         wandb_mode='n',
         resume_from=None,
@@ -468,8 +475,22 @@ def main(
         'classifier' or 'regressor'. Required.
     model_type : str
         'bernoulli' or 'resnet'. Required.
-    dataset : str
-        Dataset filename.
+    split_file_path : str, optional
+        Path to a train/val split JSON. gallearn.splitting.write_split
+        writes this file. A fresh run requires split_file_path
+        (main() raises if split_file_path is still None after
+        checking resume_from), so every fresh run says explicitly
+        which split it uses. Omit split_file_path when passing
+        resume_from. The split file's own 'metadata.dataset_path'
+        entry determines which dataset this run trains against, so
+        there is no separate dataset argument that could disagree
+        with it. main() resolves the split's galaxy lists against
+        the loaded dataset itself, so the true test set
+        (gallearn.splitting.SPLITS_DIR's locked test_lock_v<N>.json
+        files) never enters this function. The dataset named in
+        split_file_path must already be locked via
+        gallearn.dataset_lock.lock_dataset (e.g. via
+        scripts/lock_dataset.py); main() raises otherwise.
     run_name : str, optional
         Name for this run. If None, uses timestamp.
     n_epochs : int
@@ -478,27 +499,65 @@ def main(
         Batch size.
     lr : float
         Learning rate.
-    test_fraction : float
-        Fraction of data for testing.
     seed : int
         Random seed.
     wandb_mode : str
         'n' for no wandb, 'y' for new run, 'r' for resume.
     resume_from : str, optional
-        Path to checkpoint to resume from.
+        Path to checkpoint to resume from. A resumed run always
+        reuses the checkpoint's own recorded dataset and
+        split_file_path, plus its already-resolved train/val row
+        indices, instead of resolving them again, so main() raises
+        if the caller also passes split_file_path rather than
+        silently ignoring it.
     use_scheduler : bool
         Whether to use a ReduceLROnPlateau scheduler.
     """
     device = get_device()
     print('Using device: {0}'.format(device))
 
+    # Load checkpoint if resuming
+    checkpoint = None
+    split_dict = None
+    if resume_from is not None:
+        if split_file_path is not None:
+            raise ValueError(
+                'split_file_path has no effect when resume_from is'
+                ' given. A resumed run always reuses the'
+                ' checkpoint\'s own recorded dataset, split, and'
+                ' cached train/val indices. Omit --split when'
+                ' passing --resume.'
+            )
+        checkpoint = load_checkpoint(resume_from)
+        saved_config = checkpoint.get('train_config', {})
+        dataset = saved_config.get('dataset')
+        split_file_path = saved_config.get('split_file_path')
+    else:
+        if split_file_path is None:
+            raise ValueError(
+                'split_file_path is required unless resuming from a'
+                ' checkpoint that already recorded one. Create one'
+                ' with scripts/split.py split, then pass it with'
+                ' --split.'
+            )
+        with open(split_file_path) as f:
+            split_dict = json.load(f)
+        dataset = split_dict['metadata']['dataset_path']
+
+    # Raises if dataset has no recorded hash lock yet, or if its
+    # content has drifted since locking, so a checkpoint's cached
+    # train_idxs/val_idxs (raw row indices) can't silently end up
+    # pointing at different rows than the ones they were resolved
+    # against originally.
+    dataset_lock.verify_dataset(dataset)
+
     train_config = {
         'task': task,
         'model_type': model_type,
+        'split_file_path': split_file_path,
         'dataset': dataset,
         'batch_size': batch_size,
         'lr': lr,
-        'test_fraction': test_fraction,
         'seed': seed,
     }
 
@@ -518,22 +577,6 @@ def main(
             "task must be 'classifier' or 'regressor', "
             "got '{0}'".format(task)
         )
-
-    # Load checkpoint if resuming
-    checkpoint = None
-    if resume_from is not None:
-        checkpoint = load_checkpoint(resume_from)
-        saved_config = checkpoint.get('train_config', {})
-        if saved_config:
-            if saved_config.get('dataset') != dataset:
-                print(
-                    'Warning: dataset mismatch. '
-                    'Checkpoint: {0}, '
-                    'Current: {1}'.format(
-                        saved_config.get('dataset'),
-                        dataset,
-                    )
-                )
 
     # Initialize wandb if requested (before setting run_name
     # so wandb can generate one).
@@ -583,28 +626,40 @@ def main(
         preprocessing.compute_scaling_stats(hdf5_path, N)
     )
 
-    # Train/test split over valid_indices only
-    N_valid = len(valid_indices)
-    N_test = max(1, int(test_fraction * N_valid))
-    N_train = N_valid - N_test
-
-    if checkpoint is not None and 'train_idxs' in checkpoint:
-        print('Using train/test split from checkpoint')
+    # A resumed run reuses the checkpoint's cached train_idxs/
+    # val_idxs rather than re-resolving split_dict, even though
+    # dataset_lock.verify_dataset already guarantees the dataset's
+    # content: split files, unlike test locks, are not immutable, so
+    # a resumed run could otherwise pick up content someone rewrote
+    # at split_file_path after the original run (e.g. a rerun of
+    # scripts/split.py split with a different seed at the same
+    # --output), switching a resumed run's train/val rows
+    # mid-experiment with no warning. The checkpoint's cached indices
+    # can't drift that way, since a resumed run never loads split_dict
+    # at all.
+    if checkpoint is not None:
         train_idxs = checkpoint['train_idxs']
-        test_idxs = checkpoint['test_idxs']
+        val_idxs = checkpoint['val_idxs']
     else:
-        generator = torch.Generator(device='cpu')
-        if seed is not None:
-            generator.manual_seed(seed)
-        perm = torch.randperm(
-            N_valid, generator=generator
+        # Resolve the split file's galaxy-level train/val assignment
+        # against this dataset's rows, then narrow to valid_indices,
+        # so e.g. the regressor still drops a train/val galaxy's
+        # quenched rows even though the split itself only knows
+        # about galaxies.
+        galaxy_index = splitting.build_galaxy_index(
+            d['obs_sorted'][:N]
         )
-        train_idxs = valid_indices[perm[:N_train]]
-        test_idxs = valid_indices[perm[N_train:]]
+        split_train_idxs, split_val_idxs = (
+            splitting.resolve_split_indices(split_dict, galaxy_index)
+        )
+        valid_mask = torch.zeros(N, dtype=torch.bool)
+        valid_mask[valid_indices] = True
+        train_idxs = split_train_idxs[valid_mask[split_train_idxs]]
+        val_idxs = split_val_idxs[valid_mask[split_val_idxs]]
 
     print(
-        'Train: {0}, Test: {1}'.format(
-            len(train_idxs), len(test_idxs)
+        'Train: {0}, Val: {1}'.format(
+            len(train_idxs), len(val_idxs)
         )
     )
 
@@ -618,14 +673,14 @@ def main(
         targets[train_idxs],
         rs[train_idxs],
     )
-    test_dataset = preprocessing.LazyGalaxyDataset(
+    val_dataset = preprocessing.LazyGalaxyDataset(
         hdf5_path,
-        test_idxs,
+        val_idxs,
         scaling_means,
         scaling_stds,
         stretch,
-        targets[test_idxs],
-        rs[test_idxs],
+        targets[val_idxs],
+        rs[val_idxs],
     )
 
     N_workers = 4
@@ -638,8 +693,8 @@ def main(
         persistent_workers=N_workers > 0,
         generator=torch.Generator(device='cpu'),
     )
-    test_loader = torch.utils.data.DataLoader(
-        test_dataset,
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
         batch_size=batch_size,
         shuffle=False,
         num_workers=N_workers,
@@ -726,13 +781,13 @@ def main(
             model, train_loader, loss_fn, device,
             metrics_fn,
         )
-        test_metrics = evaluate(
-            model, test_loader, loss_fn, device,
+        val_metrics = evaluate(
+            model, val_loader, loss_fn, device,
             metrics_fn, task,
         )
 
         if scheduler is not None:
-            scheduler.step(test_metrics['loss'])
+            scheduler.step(val_metrics['loss'])
 
         # Logging
         if task == 'classifier':
@@ -743,15 +798,15 @@ def main(
                 'Epoch {0:3d} | '
                 'Train Loss: {1:.4f}, '
                 'Acc: {2:.3f} | '
-                'Test Loss: {3:.4f}, '
+                'Val Loss: {3:.4f}, '
                 'Acc: {4:.3f}, '
                 'Macro F1: {5:.3f}'.format(
                     epoch,
                     train_metrics['loss'],
                     train_metrics['accuracy'],
-                    test_metrics['loss'],
-                    test_metrics['accuracy'],
-                    test_metrics['macro_f1'],
+                    val_metrics['loss'],
+                    val_metrics['accuracy'],
+                    val_metrics['macro_f1'],
                 )
             )
         else:
@@ -759,15 +814,15 @@ def main(
                 'Epoch {0:3d} | '
                 'Train Loss: {1:.4f}, '
                 'RMSE: {2:.4f} | '
-                'Test Loss: {3:.4f}, '
+                'Val Loss: {3:.4f}, '
                 'RMSE: {4:.4f}, '
                 'MAE: {5:.4f}'.format(
                     epoch,
                     train_metrics['loss'],
                     train_metrics['rmse'],
-                    test_metrics['loss'],
-                    test_metrics['rmse'],
-                    test_metrics['mae'],
+                    val_metrics['loss'],
+                    val_metrics['rmse'],
+                    val_metrics['mae'],
                 )
             )
 
@@ -777,7 +832,7 @@ def main(
             log_dict = {
                 'epoch': epoch,
                 'train/loss': train_metrics['loss'],
-                'test/loss': test_metrics['loss'],
+                'val/loss': val_metrics['loss'],
                 'learning rate': (
                     model.optimizer.param_groups[0]['lr']
                 ),
@@ -786,8 +841,8 @@ def main(
                 from sklearn.metrics import ConfusionMatrixDisplay
                 fig, ax = plt.subplots()
                 ConfusionMatrixDisplay.from_predictions(
-                    test_metrics['labels'],
-                    test_metrics['preds'],
+                    val_metrics['labels'],
+                    val_metrics['preds'],
                     display_labels=['quenched', 'star-forming'],
                     normalize='true',
                     ax=ax,
@@ -798,55 +853,55 @@ def main(
                         train_metrics['accuracy']
                     ),
                     'train/f1': train_metrics['f1'],
-                    'test/accuracy': (
-                        test_metrics['accuracy']
+                    'val/accuracy': (
+                        val_metrics['accuracy']
                     ),
-                    'test/precision': (
-                        test_metrics['precision']
+                    'val/precision': (
+                        val_metrics['precision']
                     ),
-                    'test/recall': (
-                        test_metrics['recall']
+                    'val/recall': (
+                        val_metrics['recall']
                     ),
-                    'test/specificity': (
-                        test_metrics['specificity']
+                    'val/specificity': (
+                        val_metrics['specificity']
                     ),
-                    'test/f1': test_metrics['f1'],
-                    'test/f1_quenched': (
-                        test_metrics['f1_quenched']
+                    'val/f1': val_metrics['f1'],
+                    'val/f1_quenched': (
+                        val_metrics['f1_quenched']
                     ),
-                    'test/macro_f1': test_metrics['macro_f1'],
-                    'test/confusion_matrix': wandb.Image(fig),
+                    'val/macro_f1': val_metrics['macro_f1'],
+                    'val/confusion_matrix': wandb.Image(fig),
                 })
                 plt.close(fig)
             else:
                 log_dict.update({
                     'train/rmse': train_metrics['rmse'],
                     'train/mae': train_metrics['mae'],
-                    'test/rmse': test_metrics['rmse'],
-                    'test/mae': test_metrics['mae'],
-                    'test/r2': test_metrics['r2'],
+                    'val/rmse': val_metrics['rmse'],
+                    'val/mae': val_metrics['mae'],
+                    'val/r2': val_metrics['r2'],
                 })
             wandb.log(log_dict)
 
         # Save checkpoint if best metric
-        test_value = test_metrics[best_metric_key]
+        val_value = val_metrics[best_metric_key]
         is_best = (
-            (higher_is_better and test_value > best_metric)
+            (higher_is_better and val_value > best_metric)
             or (
                 not higher_is_better
-                and test_value < best_metric
+                and val_value < best_metric
             )
         )
         if is_best:
-            best_metric = test_value
+            best_metric = val_value
             path = save_checkpoint(
                 model,
                 epoch,
                 train_metrics,
-                test_metrics,
+                val_metrics,
                 run_dir,
                 train_idxs,
-                test_idxs,
+                val_idxs,
                 train_config,
                 target_stats=target_stats,
             )
@@ -862,15 +917,15 @@ def main(
         model,
         epoch,
         train_metrics,
-        test_metrics,
+        val_metrics,
         run_dir,
         train_idxs,
-        test_idxs,
+        val_idxs,
         train_config,
         target_stats=target_stats,
     )
     print(
-        '\nTraining complete. Best test {0}: {1:.4f}'.format(
+        '\nTraining complete. Best validation {0}: {1:.4f}'.format(
             best_metric_key, best_metric
         )
     )
