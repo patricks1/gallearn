@@ -24,7 +24,11 @@ The repo spans two languages:
    images, velocity maps, and shape/SFR tables and writes one HDF5 file:
    the image tensor `X` (image bands plus a velocity-map channel), the
    `ssfr` targets, and `Re`.
-3. **Train** (Python). Load the HDF5 dataset and train the CNN.
+3. **Split the dataset** (Python). Lock the dataset by content hash,
+   create or top up the locked test set, and write a train/val split
+   (see "Splitting the dataset" below).
+4. **Train** (Python). Load the HDF5 dataset and the train/val split,
+   and train the CNN.
 
 ## Configuration
 
