@@ -67,20 +67,33 @@ if __name__ == '__main__':
     parser.add_argument(
         '--batch-size',
         type=int,
-        default=32,
-        help='Batch size (default: %(default)s)',
+        default=None,
+        help=(
+            'Batch size (default: 32). Must be omitted when'
+            ' --resume is given, since a resumed run reuses the'
+            ' checkpoint\'s own recorded batch_size'
+        ),
     )
     parser.add_argument(
         '--lr',
         type=float,
-        default=1e-3,
-        help='Learning rate (default: %(default)s)',
+        default=None,
+        help=(
+            'Learning rate (default: 1e-3). Must be omitted when'
+            ' --resume is given: a resumed run\'s optimizer state'
+            ' already carries whatever lr the scheduler had'
+            ' decayed to'
+        ),
     )
     parser.add_argument(
         '--seed',
         type=int,
-        default=42,
-        help='Random seed (default: %(default)s)',
+        default=None,
+        help=(
+            'Random seed (default: 42). Must be omitted when'
+            ' --resume is given, since a resumed run reuses the'
+            ' checkpoint\'s own recorded seed and shuffling state'
+        ),
     )
     parser.add_argument(
         '-w', '--wandb',
@@ -104,19 +117,31 @@ if __name__ == '__main__':
     parser.add_argument(
         '--no-scheduler',
         action='store_true',
-        help='Disable the learning rate scheduler',
+        default=None,
+        help=(
+            'Disable the learning rate scheduler. Must be omitted'
+            ' when --resume is given, since a resumed run reuses'
+            ' the checkpoint\'s own recorded use_scheduler'
+        ),
     )
     parser.add_argument(
         '--pretrained',
         action='store_true',
+        default=None,
         help=(
             'Only affects --model standard. Start its ResNet-18'
             ' backbone from ImageNet weights instead of a random'
-            ' init'
+            ' init. Must be omitted when --resume is given, since'
+            ' a resumed run reuses the checkpoint\'s own recorded'
+            ' pretrained'
         ),
     )
 
     args = parser.parse_args()
+
+    use_scheduler = (
+        None if args.no_scheduler is None else not args.no_scheduler
+    )
 
     gallearn.train.main(
         task=args.task,
@@ -129,6 +154,6 @@ if __name__ == '__main__':
         seed=args.seed,
         wandb_mode=args.wandb,
         resume_from=args.resume,
-        use_scheduler=not args.no_scheduler,
+        use_scheduler=use_scheduler,
         pretrained=args.pretrained,
     )

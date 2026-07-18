@@ -398,6 +398,7 @@ def save_checkpoint(
         train_idxs,
         val_idxs,
         train_config,
+        train_generator_state,
         target_stats=None):
     """
     Save a training checkpoint.
@@ -425,6 +426,12 @@ def save_checkpoint(
         Same as train_idxs: a resumed run reuses this directly.
     train_config : dict
         Training configuration.
+    train_generator_state : torch.ByteTensor
+        train_loader's shuffling generator's RNG state
+        (train_generator.get_state()), captured after this epoch's
+        batches were drawn. A resumed run restores this via
+        set_state() before training, so it continues the exact
+        shuffle sequence an uninterrupted run would have drawn next.
     target_stats : dict, optional
         Target scaling stats for regressor (means, stds,
         stretch). None for classifier.
@@ -442,6 +449,7 @@ def save_checkpoint(
         'train_idxs': train_idxs.cpu(),
         'val_idxs': val_idxs.cpu(),
         'train_config': train_config,
+        'train_generator_state': train_generator_state,
     }
     if target_stats is not None:
         checkpoint['target_stats'] = target_stats
@@ -485,13 +493,13 @@ def main(
         split_file_path=None,
         run_name=None,
         n_epochs=100,
-        batch_size=32,
-        lr=1e-3,
-        seed=42,
+        batch_size=None,
+        lr=None,
+        seed=None,
         wandb_mode=None,
         resume_from=None,
-        use_scheduler=True,
-        pretrained=False,
+        use_scheduler=None,
+        pretrained=None,
         train_orientations=None):
     """
     Main training function.
@@ -530,13 +538,37 @@ def main(
         find its run directory and, if wandb_mode='r', to resume the
         same wandb run rather than starting a new one).
     n_epochs : int
-        Number of epochs to train.
-    batch_size : int
-        Batch size.
-    lr : float
-        Learning rate.
-    seed : int
-        Random seed.
+        Number of epochs to train, counting from start_epoch (1 on a
+        fresh run, checkpoint['epoch'] + 1 on a resumed run). Unlike
+        every other parameter here, this is deliberately not
+        restored from or checked against the checkpoint on resume:
+        resuming specifically to run a different number of further
+        epochs than originally requested is an expected, ordinary
+        use case, not a mismatch to guard against.
+    batch_size : int, optional
+        Batch size. Defaults to 32 on a fresh run. Must be omitted
+        when resume_from is given, since a resumed run reuses the
+        checkpoint's own recorded batch_size: it directly determines
+        how many optimizer steps happen per epoch, so training with
+        a different batch_size than the checkpoint's is a real
+        training-dynamics change, not a cosmetic one.
+    lr : float, optional
+        Learning rate. Defaults to 1e-3 on a fresh run. Must be
+        omitted when resume_from is given. A resumed run's optimizer
+        state (loaded from the checkpoint) already carries whatever
+        lr the scheduler had decayed to, which silently overrides
+        any lr passed here anyway; guarding against passing it
+        avoids the false impression that --lr does something on a
+        resumed run.
+    seed : int, optional
+        Random seed, controlling model weight initialization (via
+        torch.manual_seed) and train_loader's shuffling order (via
+        its generator). Defaults to 42 on a fresh run. Must be
+        omitted when resume_from is given, since a resumed run
+        restores the checkpoint's own recorded seed along with the
+        shuffling generator's exact saved RNG state (see
+        train_generator_state in save_checkpoint), rather than
+        re-seeding from scratch.
     wandb_mode : str, optional
         'n' for no wandb, 'y' for a new run. Defaults to 'n' on a
         fresh run. Must be omitted when resume_from is given: a
@@ -555,11 +587,24 @@ def main(
         indices, instead of resolving them again, so main() raises
         if the caller also passes split_file_path rather than
         silently ignoring it.
-    use_scheduler : bool
-        Whether to use a ReduceLROnPlateau scheduler.
-    pretrained : bool
-        Only affects model_type='standard'. See
-        create_model's pretrained parameter.
+    use_scheduler : bool, optional
+        Whether to use a ReduceLROnPlateau scheduler. Defaults to
+        True on a fresh run. Must be omitted when resume_from is
+        given, since a resumed run reuses the checkpoint's own
+        recorded use_scheduler: switching it off partway through
+        would silently freeze whatever lr the scheduler had already
+        decayed to, and switching it on for a checkpoint trained
+        without one would start decaying from an lr no scheduler
+        has ever evaluated a plateau against.
+    pretrained : bool, optional
+        Only affects model_type='standard'. See create_model's
+        pretrained parameter. Defaults to False on a fresh run. Must
+        be omitted when resume_from is given. Functionally inert on
+        resume either way, since model.load_state_dict() overwrites
+        whatever initial weights create_model produced regardless of
+        this flag; restored and guarded anyway so train_config's
+        record of it can't disagree with what the checkpoint's
+        weights actually are.
     train_orientations : list of str, optional
         If given, restricts the training set to rows whose
         orientation is in this list (e.g. ['projection_xy',
@@ -619,6 +664,55 @@ def main(
                 ' way to forget to reattach it. Omit --wandb when'
                 ' passing --resume.'
             )
+        if batch_size is not None:
+            raise ValueError(
+                'batch_size has no effect when resume_from is given.'
+                ' A resumed run always reuses the checkpoint\'s own'
+                ' recorded batch_size, since it directly determines'
+                ' how many optimizer steps happen per epoch, and a'
+                ' mismatch here is a real training-dynamics change,'
+                ' not a cosmetic one. Omit --batch-size when passing'
+                ' --resume.'
+            )
+        if lr is not None:
+            raise ValueError(
+                'lr has no effect when resume_from is given. A'
+                ' resumed run\'s optimizer state already carries'
+                ' whatever lr the scheduler had decayed to, which'
+                ' silently overrides any lr passed here anyway.'
+                ' Omit --lr when passing --resume.'
+            )
+        if seed is not None:
+            raise ValueError(
+                'seed has no effect when resume_from is given. A'
+                ' resumed run restores the checkpoint\'s own'
+                ' recorded seed along with the shuffling generator\'s'
+                ' exact saved RNG state, rather than re-seeding from'
+                ' scratch. Omit --seed when passing --resume.'
+            )
+        if use_scheduler is not None:
+            raise ValueError(
+                'use_scheduler has no effect when resume_from is'
+                ' given. A resumed run always reuses the'
+                ' checkpoint\'s own recorded use_scheduler: switching'
+                ' it off partway through would silently freeze'
+                ' whatever lr the scheduler had already decayed to,'
+                ' and switching it on for a checkpoint trained'
+                ' without one would start decaying from an lr no'
+                ' scheduler has evaluated a plateau against. Omit'
+                ' --no-scheduler when passing --resume.'
+            )
+        if pretrained is not None:
+            raise ValueError(
+                'pretrained has no effect when resume_from is given,'
+                ' since model.load_state_dict() overwrites whatever'
+                ' initial weights create_model produced regardless'
+                ' of this flag. A resumed run always reuses the'
+                ' checkpoint\'s own recorded pretrained, so'
+                ' train_config\'s record of it can\'t disagree with'
+                ' what the checkpoint\'s weights actually are. Omit'
+                ' --pretrained when passing --resume.'
+            )
         checkpoint = load_checkpoint(resume_from)
         saved_config = checkpoint.get('train_config', {})
         dataset = saved_config.get('dataset')
@@ -628,6 +722,11 @@ def main(
         run_name = saved_config.get('run_name')
         wandb_run_id = saved_config.get('wandb_run_id')
         wandb_mode = 'r' if wandb_run_id is not None else 'n'
+        batch_size = saved_config.get('batch_size')
+        lr = saved_config.get('lr')
+        seed = saved_config.get('seed')
+        use_scheduler = saved_config.get('use_scheduler')
+        pretrained = saved_config.get('pretrained')
     else:
         if task is None or model_type is None:
             raise ValueError(
@@ -644,6 +743,16 @@ def main(
         wandb_run_id = None
         if wandb_mode is None:
             wandb_mode = 'n'
+        if batch_size is None:
+            batch_size = 32
+        if lr is None:
+            lr = 1e-3
+        if seed is None:
+            seed = 42
+        if use_scheduler is None:
+            use_scheduler = True
+        if pretrained is None:
+            pretrained = False
         with open(split_file_path) as f:
             split_dict = json.load(f)
         dataset = split_dict['metadata']['dataset_path']
@@ -672,6 +781,7 @@ def main(
         'batch_size': batch_size,
         'lr': lr,
         'seed': seed,
+        'use_scheduler': use_scheduler,
         'pretrained': pretrained,
         'train_orientations': train_orientations,
         'run_name': run_name,
@@ -821,6 +931,19 @@ def main(
         rs[val_idxs],
     )
 
+    # train_loader's shuffling order is controlled entirely by this
+    # generator (num_workers doesn't add any further randomness: the
+    # batch composition is decided by the sampler in the main
+    # process before dispatching to workers). A resumed run restores
+    # its checkpoint's exact saved state, so it draws the same next
+    # shuffle an uninterrupted run would have, rather than a
+    # perturbation from replaying an earlier point in the sequence.
+    train_generator = torch.Generator(device='cpu')
+    if checkpoint is not None and 'train_generator_state' in checkpoint:
+        train_generator.set_state(checkpoint['train_generator_state'])
+    else:
+        train_generator.manual_seed(seed)
+
     N_workers = 4
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
@@ -829,7 +952,7 @@ def main(
         drop_last=True,
         num_workers=N_workers,
         persistent_workers=N_workers > 0,
-        generator=torch.Generator(device='cpu'),
+        generator=train_generator,
     )
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
@@ -839,6 +962,13 @@ def main(
         persistent_workers=N_workers > 0,
         generator=torch.Generator(device='cpu'),
     )
+
+    # Seeds model weight initialization: create_model's backbone
+    # (torchvision's own init when pretrained=False) and, below,
+    # weights_init's Kaiming init both draw from the global RNG.
+    # Harmless on a resumed run, since load_state_dict overwrites
+    # whatever initial weights result regardless.
+    torch.manual_seed(seed)
 
     # Create model
     model = create_model(
@@ -1047,6 +1177,7 @@ def main(
                 train_idxs,
                 val_idxs,
                 train_config,
+                train_generator.get_state(),
                 target_stats=target_stats,
             )
             print(
@@ -1066,6 +1197,7 @@ def main(
         train_idxs,
         val_idxs,
         train_config,
+        train_generator.get_state(),
         target_stats=target_stats,
     )
     print(

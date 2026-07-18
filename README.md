@@ -199,17 +199,23 @@ and architecture and covers all four combinations:
 split` (see "Splitting the dataset" above) and is required on a fresh
 run; there is no separate `--dataset` flag, since the split file's own
 recorded `dataset_path` determines which dataset the run trains
-against. A `--resume <checkpoint>` run reuses the checkpoint's own
-recorded dataset, split, train/val row indices, task, model
-architecture, and run name instead, and rejects `--split`, `--task`,
-`--model`, and `--run-name` if any is also given, so a resumed run
-can never silently continue as a different split, architecture, or
-run than the one it started as. `--wandb` is rejected the same way:
-a resumed run automatically continues its checkpoint's own wandb run
-if it had one (by the run id recorded in the checkpoint), or
-continues without wandb if it didn't, so there's no `--wandb r` mode
-to forget and no way for a resumed run to silently drop a stretch of
-metrics or land on the wrong chart.
+against.
+
+`--resume <checkpoint>` reuses everything about the original run
+instead of taking it again on the command line: dataset, split,
+train/val row indices, task, model architecture, run name, wandb run
+(if any), batch size, lr, seed (plus the exact saved RNG state of
+`train_loader`'s shuffling, so a resumed run draws the same next
+shuffle an uninterrupted run would have, rather than perturbing a
+converged model with a differently-ordered epoch), whether a
+scheduler is used, and `--pretrained`. `--resume` rejects every one
+of `--split`, `--task`, `--model`, `--run-name`, `--wandb`,
+`--batch-size`, `--lr`, `--seed`, `--no-scheduler`, and `--pretrained`
+if any is also given, so a resumed run can never silently continue
+under different settings than the run it's continuing. `--epochs` is
+the one exception: it's how many further epochs to run from wherever
+the checkpoint left off, so it's expected to vary freely on each
+resume.
 
 `--pretrained` only affects `--model standard`: it starts the
 ResNet-18 backbone from ImageNet weights instead of a random init.
