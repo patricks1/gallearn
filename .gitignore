@@ -31,6 +31,10 @@ gallearn/_version.py
 *.out
 slurm.epilog-*
 
+# astrophot writes this to the cwd unconditionally at import time
+# (astrophot/config.py's logging.basicConfig), no way to opt out
+AstroPhot.log
+
 # ignore commit message scratch files
 commit.txt
 

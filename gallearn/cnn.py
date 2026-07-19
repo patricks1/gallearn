@@ -162,7 +162,7 @@ class Net(nn.Module):
         x = self.backbone(x)
         x = self.avgpool(x)
         x = x.flatten(start_dim=1) # 8
-        x = nn.functional.dropout(x, 0.2)
+        x = nn.functional.dropout(x, 0.2, training=self.training)
         x = torch.cat((x, rs), dim=1)
         x = self.head(x)
         
@@ -620,7 +620,11 @@ class ResNet(nn.Module):
         # Head
         x = self.avgpool(x)
         x = x.flatten(start_dim=1)
-        x = torch.nn.functional.dropout(x, 0.5)
+        x = torch.nn.functional.dropout(
+            x,
+            0.5,
+            training=self.training,
+        )
         x = torch.cat((x, rs), dim=1)
         x = self.head(x)
 
