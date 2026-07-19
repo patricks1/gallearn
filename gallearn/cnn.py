@@ -54,7 +54,7 @@ class Net(nn.Module):
         import os
         import numpy as np
 
-        super(Net, self).__init__()
+        super().__init__()
 
         self.state_path = os.path.join(
             config.config[f'{__package__}_paths']['project_data_dir'],
@@ -365,7 +365,7 @@ class StandardNet(nn.Module):
             ):
         from . import preprocessing
 
-        super(StandardNet, self).__init__()
+        super().__init__()
         self.lr = lr
         self.momentum = momentum
         self.backbone = backbone
@@ -453,7 +453,7 @@ class ResNet(nn.Module):
         import os
         from . import preprocessing
 
-        super(ResNet, self).__init__()
+        super().__init__()
 
         self.run_name = run_name
 
