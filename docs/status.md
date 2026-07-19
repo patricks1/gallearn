@@ -21,17 +21,29 @@ no images) gets val R² ≈ 0-0.04, so the regressor's R² ≈ 0.24-0.28 is
 several times better than a trivial baseline. The images carry real
 signal; this isn't a network learning nothing.
 
-We've tested lr, pretraining, and projection count each in a
-controlled way (see log below), and every one of them lands in the
-same narrow R² band, with every non-pretrained run peaking very
-early (epoch 15-26 of 50) then degrading. That consistency itself is
-the finding: none of those three is the bottleneck. The working
-hypothesis is now model capacity relative to the ~1500-galaxy
-dataset; see "Next candidates" at the bottom.
+We've tested lr, pretraining, projection count, dropout, and a first
+capacity sweep (head width on `cnn.ResNet`) each in a controlled way
+(see log below), and every one of them lands in the same narrow R²
+band, with every non-pretrained run peaking very early (epoch 15-26
+of 50) then degrading. That consistency itself is the finding: none
+of those five is the bottleneck. We also checked whether the sSFR
+targets themselves are simply too noisy to predict well: they are
+not, at least not from plain particle-count shot noise, which is far
+too small to explain the ceiling on its own (see "sSFR target noise
+check" in the log). Two architecture candidates remain genuinely
+untested: backbone capacity (the head-width sweep only touched the
+head, which held most of the parameters but isn't the whole
+capacity story) and dropout placement (moving it into the conv
+backbone instead of just before the head); see "Next candidates" at
+the bottom.
 
 We found and fixed two real infrastructure bugs along the way
 (resume not restoring most run settings; eval-mode dropout silently
-active during validation); see the log for what they affected.
+active during validation); see the log for what they affected. The
+capacity sweep also taught a methodological lesson the hard way: its
+first-seed result looked like a real effect and mostly turned out to
+be noise on reseed, so every capacity/regularization experiment from
+here on runs at least two seeds per point from the start.
 
 ## Experiment log
 
@@ -238,6 +250,188 @@ enough independent data points pointing the same way that a
 dedicated dropout on/off run isn't worth a ~35 min slot next to the
 capacity sweep below, which targets a genuinely untested axis.
 
+### Capacity sweep: head width (2026-07-19)
+
+`cnn.ResNet`'s head (`nn.LazyLinear(2048)` down through 1024, 256,
+128, 64, to `N_out_channels`) turned out to hold about 87% of the
+whole model's parameters (~2.68M of ~2.99M total). `n_blocks_list`
+and `out_channels_list`, the two knobs the "Next candidates" section
+originally pointed at, barely move total capacity at all by
+comparison. So the real capacity-reduction lever here is the head's
+width, not the conv backbone. We shrank the head across three
+points, holding the backbone fixed at `n_blocks_list=[1,1,1,1]`,
+`out_channels_list=[16,32,64,128]`, same split, lr=1e-3,
+batch_size=64, 50 epochs, `--model resnet`:
+
+| head widths | total params | seed 42 val loss / R² | seed 7 val loss / R² |
+|---|---|---|---|
+| large (2048/1024/256/128/64) | ~2.99M | 0.7324 / 0.256 | 0.7216 / 0.267 |
+| medium (512/256/128/64/32) | ~554K | 0.6924 / 0.306 | 0.7423 / 0.251 |
+| small (128/64/32/16/8) | ~339K | 0.6957 / 0.299 | 0.7104 / 0.287 |
+| tiny (32/16/8/4) | ~316K | 0.7919 / 0.200 | not run |
+
+(The large row's seed 42 result is `dropout_ab_fixed_resnet` from
+the dropout A/B above, reused as the capacity anchor since it's the
+exact same architecture and hyperparameters.)
+
+At seed 42, medium and small both beat large by a real-looking
+margin (R² 0.30-0.31 vs. 0.26, val loss down to 0.69), landing
+outside the 0.71-0.76 band every other experiment in this doc lands
+in, our first result that wasn't obviously noise. Tiny undershot
+large instead, suggesting a non-monotonic capacity/generalization
+curve with a sweet spot somewhere between ~339K and ~554K params.
+
+Reseeding large, medium, and small at seed 7 to check: the medium
+result didn't survive at all (0.7423, now the worst of the three,
+worse than large). Small still beat large in both seeds (0.6957 <
+0.7324 at seed 42, 0.7104 < 0.7216 at seed 7), but the margin shrank
+sharply (0.037 to 0.011), and every seed 7 number landed back inside
+the historical 0.71-0.76 band.
+
+**Verdict**: this sweep did not find a robust capacity effect. The
+medium result was seed noise dressed up as a finding, the exact trap
+this doc has been careful to check for elsewhere (see the dropout
+A/B's noise-signature discussion above), and it slipped past here
+because we only ran one seed per point at first. Small-head's edge
+over large-head is directionally consistent across both seeds but
+small and inconsistent enough in magnitude that it doesn't clear the
+bar this doc has used everywhere else to call something a real
+effect. Capacity, at least via head width at these three points,
+joins lr, pretraining, projection count, and dropout as tested and
+ruled out as the dominant lever.
+
+**Mechanism, and a comparison we initially got wrong**: tiny's best
+checkpoint (epoch 44, train loss 0.55) looked, at first glance, like
+it fit the training set about as well as large's best checkpoint
+(epoch 19, train loss 0.62), which would be a strange result: worse
+capacity fitting just as well but generalizing worse. That
+comparison is confounded, though, since it compares each run at its
+own best-val epoch, and those landed at very different points in
+training. Pulling all four runs' train and val loss at a matched
+epoch (19, large's best) instead:
+
+| model | train loss @ epoch 19 | val loss @ epoch 19 |
+|---|---|---|
+| large | 0.621 | 0.732 |
+| medium | 0.680 | 0.855 |
+| small | 0.686 | 0.786 |
+| tiny | 0.723 | 0.836 |
+
+At a fixed point in training, large fits best and tiny fits worst,
+exactly what raw capacity would predict. There's no paradox: bigger
+models fit faster and start overfitting (val loss degrading) sooner,
+so their best-val checkpoint lands early (large peaks at epoch 19);
+smaller models fit more slowly and take longer to reach the point of
+overfitting, so their best-val checkpoint lands later (tiny peaks at
+epoch 44). That explains the spread in the "best epoch" column
+above without needing any special-case explanation for tiny, and it
+means tiny's weak result is consistent with genuine undercapacity,
+not a fluke, once compared at a matched epoch instead of each run's
+own best checkpoint.
+
+### sSFR target noise check (2026-07-19)
+
+Every experiment above assumed the sSFR targets themselves are
+clean. We checked that assumption directly. `sfr` comes from
+`get_avg_sfrs` in UCITools' `ProcessFIREBox.jl`, and it is a literal
+sum of individual star particle masses formed within the last 1 Gyr,
+read from each galaxy's `particles_within_Rvir_object_<id>.hdf5`
+file on the raw FIREbox data (Greenplanet). For a galaxy with few
+young star particles, that sum is essentially a small-count total,
+carrying real Poisson-like shot noise from the simulation's finite
+star-particle mass resolution, not a bug, a genuine discreteness
+limit.
+
+We wrote a one-off script (`sfr_particle_counts.jl`, living on
+Greenplanet in `~/projects/gallearn/scripts/`, not committed to this
+repo) that reads every galaxy's raw particle file, counts
+`n_young_particles` (star particles with `stellar_tform` in the last
+1 Gyr, the same window `get_avg_sfrs` uses), and joins that back onto
+`avg_sfrs_1.0Gyr_no_bound_filter.csv`.
+
+Over the 1378 star-forming galaxies (`ssfr > 0`) in that CSV:
+
+- Median `n_young_particles` is 1372, but the distribution has a
+  long low tail: 7.1% of star-forming galaxies have fewer than 10
+  young particles, 16.9% fewer than 50, 22.9% fewer than 100.
+- Propagating simple counting-statistics shot noise (`1/√N` relative
+  noise on `sfr`) into log10(sSFR) space and comparing it against
+  the actual spread of log10(sSFR) across the star-forming
+  population (std ≈ 0.405 dex) gives an implied noise ceiling of R²
+  ≈ 0.96 (mean case) to R² ≈ 0.999 (median case).
+
+That's far above the ~0.24-0.31 ceiling every experiment in this doc
+has hit, so particle-count shot noise alone does not explain the
+generalization ceiling. There is a real trend (galaxies with under
+10 young particles show std 0.55 dex in log-sSFR vs. 0.34 dex for
+galaxies with over 1000), but it isn't large enough, or concentrated
+in enough of the population, to drag the whole-population ceiling
+down to what we observe.
+
+**Caveat**: `1/√N` is the simplest possible noise model, pure
+Poisson counting statistics on particle count. It's a lower bound on
+target noise, not a full accounting. Real star formation
+stochasticity (bursty or correlated star formation, IMF sampling,
+feedback-driven fluctuations within the 1 Gyr window) could exceed
+simple shot noise. This check rules out the simplest version of the
+target-noise hypothesis as sufficient on its own; it does not rule
+out target noise entirely.
+
+**Verdict**: like every other lever tested in this doc, target noise
+(at least via this specific, most conservative mechanism) does not
+explain the ceiling. The mystery stays open: either the remaining
+architecture axes (backbone capacity, dropout placement) matter more
+than every other axis tested so far, or the noise floor is real but
+comes from a more subtle source than raw particle-count discreteness,
+or the images genuinely do not carry enough information to do much
+better than R² ≈ 0.3 on this target. This doc cannot rule any of
+those three in or out yet.
+
+## Post-mortem: pretrained initialization
+
+We hoped pretrained ImageNet weights would give `StandardNet`'s
+ResNet-18 backbone a head start on useful low-level features (edges,
+textures, shapes) that could transfer to galaxy morphology, cutting
+training time and possibly improving generalization by starting from
+a less arbitrary point in weight space than random init.
+
+That didn't pan out either. From "Controlled regressor experiments"
+above:
+
+| run | best epoch | train loss | val loss | val R² |
+|---|---|---|---|---|
+| baseline (scratch) | 15 | 0.62 | 0.716 | 0.276 |
+| pretrained (50 ep) | 50 (still improving) | 0.017 | 0.744 | 0.250 |
+
+Pretrained landed slightly worse on val R² than the scratch baseline
+(0.250 vs. 0.276), while its train loss collapsed to near-zero
+(0.017 vs. 0.62), a much larger train/val gap than any scratch run
+showed. It was also still improving on train loss at epoch 50,
+unlike every scratch run, which peaked on val loss early (epoch
+15-26) and then degraded. Pretraining let the model fit the training
+set faster and further, but that extra capacity to fit didn't
+translate into better generalization; if anything, it sharpened the
+overfitting signature.
+
+**Verdict**: pretrained ImageNet weights aren't delivering a
+generalization benefit here. The likely reason is exactly the
+concern raised before ever trying it: ImageNet's classes (everyday
+objects, animals, scenes) share little structurally with galaxy
+images (diffuse light profiles, no hard object boundaries,
+single-channel-per-band astronomical imaging plus a velocity map),
+so the transferable low-level features pretraining usually helps
+with may just not be the bottleneck for this task. What pretraining
+does reliably give the model is a head start on fitting quickly,
+useful if training time were the constraint, but training time isn't
+what's limiting the regressor: it already peaks within 15-26 epochs
+from scratch. One caveat worth remembering: we only have one clean
+pretrained data point (the initial 50-epoch run); the resumed
+continuation past epoch 50 hit the `batch_size` resume bug (Bug 1
+above) and isn't a clean comparison, and this result hasn't had a
+reseed check the way the capacity sweep just got. This verdict rests
+on thinner evidence than the dropout or capacity ones, worth keeping
+in mind if pretraining ever comes back up as an idea.
+
 ## Post-mortem: dropout
 
 Dropout was one of the hypotheses we had real hope for. It's the
@@ -288,44 +482,63 @@ whole project's worth of runs) and didn't move the number.
 
 ## Next candidates, not yet started
 
-- **Capacity-reduction sweep on `cnn.ResNet`**: the model/data
-  capacity mismatch (~11M-parameter ResNet-18 for `StandardNet`, or
-  even `cnn.ResNet`'s smaller custom net, fit to ~1500 distinct
-  galaxies) is the most likely remaining explanation for the
-  early-peak-then-degrade pattern seen everywhere above.
-  `cnn.ResNet`'s `n_blocks_list`/`out_channels_list` are the tool
-  for this (`StandardNet` has no way to customize block count or
+- **Backbone capacity reduction on `cnn.ResNet`**: the head-width
+  sweep above only touched the head; the conv backbone (currently
+  `n_blocks_list=[1,1,1,1]`, `out_channels_list=[16,32,64,128]`, only
+  ~310K params) stayed fixed across every point tested so far and
+  found no robust effect. That leaves backbone size as a genuinely
+  untested axis, distinct from the head-width axis that came up
+  empty. `StandardNet` has no way to customize block count or
   channel width, since it's locked to whatever `torchvision.models.
-  resnet18()` gives). Note pretraining and capacity reduction don't
-  compose: shrinking a stock ResNet-18 below its stock depth/width
-  makes the pretrained ImageNet weights no longer fit, so this stays
-  a `cnn.ResNet`-only, scratch-only experiment. Run this before the
-  dropout-placement idea below, since it's the cleaner test of the
-  underlying capacity hypothesis, and it also tells us whether
-  backbone-level dropout is even worth trying next.
+  resnet18()` gives, so this stays a `cnn.ResNet`-only experiment.
+  Given how the head-width sweep's first-seed result didn't survive
+  a reseed, run at least two seeds per point from the start this
+  time, not as an afterthought.
 - **Dropout placement**: the post-mortem above found that fixing the
-  eval-mode dropout bug made no real difference, but the working
-  hypothesis (see "Verdict" in the post-mortem) is that the single
-  `p=0.5` dropout layer in `cnn.ResNet`, applied only right before
-  the head, may be too weak or too localized to constrain the conv
-  backbone where most of the capacity to memorize training galaxies
-  actually lives. If the capacity-reduction sweep above doesn't fully
-  resolve generalization on its own, try moving dropout into the conv
-  backbone itself (e.g. spatial/2D dropout between residual blocks,
-  not just before the head) as a different mechanism for constraining
-  a backbone that shrinking alone didn't fix.
+  eval-mode dropout bug made no real difference, and the head-width
+  capacity sweep didn't resolve generalization either, so this is
+  still an open, untested idea. The working hypothesis (see
+  "Verdict" in the dropout post-mortem) is that the single `p=0.5`
+  dropout layer in `cnn.ResNet`, applied only right before the head,
+  may be too weak or too localized to constrain the conv backbone
+  where most of the capacity to memorize training galaxies actually
+  lives. Try moving dropout into the conv backbone itself (e.g.
+  spatial/2D dropout between residual blocks, not just before the
+  head) as a different mechanism for constraining a backbone that
+  shrinking the head alone didn't fix.
 - Multiple val splits (`scripts/split.py split --split-name ...`) to
   get a variance estimate on val R², since a single 85/15 galaxy
-  split with ~1500 galaxies is noisy on its own, and the differences
-  between rows in the controlled-experiments table above (0.71-0.76)
-  are narrow enough that some could just be single-seed noise.
+  split with ~1500 galaxies is noisy on its own, and the head-width
+  sweep just showed directly how easily a single-seed difference can
+  look like a real effect and not be one.
+- **sSFR target noise, beyond simple shot noise**: the check above
+  ruled out plain particle-count shot noise as sufficient to explain
+  the ceiling, but explicitly did not rule out target noise from a
+  more realistic source (bursty or correlated star formation, IMF
+  sampling, feedback-driven fluctuations within the 1 Gyr averaging
+  window). A next step here would be comparing `sfr` computed over
+  different averaging windows (e.g. 1 Gyr vs. 100 Myr) for the same
+  galaxies. Real disagreement between windows, beyond what shot
+  noise alone predicts, would be direct evidence of this kind of
+  noise; this doesn't require any new training runs, only more
+  Greenplanet-side analysis like the check above.
 
 ## Bottom line
 
 Not futile. The regressor has a real, measurable signal well above a
 trivial mass/size baseline, and the classifier already generalizes
-well. We've tested lr, pretraining, and projection count each in a
-controlled way and ruled them out as the dominant lever: every one
-of them lands in the same R² ≈ 0.24-0.28 band. That's useful negative
-information. The next real candidate is model capacity relative to
-the ~1500-galaxy dataset size, not further optimizer tuning.
+well. We've tested lr, pretraining, projection count, dropout, a
+first capacity sweep (head width), and simple sSFR shot noise each
+in a controlled way and ruled them out as the dominant lever: every
+one of them lands in the same R² ≈ 0.24-0.28 band once checked
+properly (against a second seed for the architecture axes, against
+the population's own target variance for the noise check). That's
+useful negative information, and it came with a real methodological
+lesson: the head-width sweep's first-seed result looked like a
+breakthrough and mostly wasn't, so backbone capacity and dropout
+placement (the next real architecture candidates) need at least two
+seeds per point from the start, not a fast follow-up when a result
+looks promising. What remains genuinely open is whether the ceiling
+comes from an architecture axis we haven't found yet, a subtler kind
+of target noise than plain shot noise, or an information limit in
+the images themselves.
