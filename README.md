@@ -1,12 +1,48 @@
 # GalLearn
 
 Predict star formation in FIREbox galaxies from mock images with a
-convolutional neural network.
+hurdle model: a CNN classifier separates quenched galaxies (a
+structural zero in specific star formation rate) from star-forming
+ones, then a second CNN regresses specific star formation rate
+(sSFR) on the star-forming subset alone. The hurdle model is the
+whole point of GalLearn's design, not an implementation detail, see
+"Hurdle model" below.
 
 GalLearn turns simulated galaxy images (plus stellar velocity maps and
-Sersic radii) into an HDF5 training set and trains a CNN to (1) classify
-galaxies as star-forming or quenched and (2) regress the specific star
-formation rate (sSFR) of the star-forming ones.
+Sersic radii) into an HDF5 training set and trains the classifier and
+the regressor on it.
+
+## Hurdle model
+
+A meaningful fraction of galaxies have essentially no recent star
+formation: their sSFR isn't a small positive number, it's a
+structural zero. Mixed in with the rest, whose sSFR spans a wide,
+roughly continuous range, that's the textbook setup for a hurdle
+model: a classifier decides whether a galaxy sits in the zero regime
+at all, and a separate regressor only has to predict a continuous
+value for the galaxies that pass that gate.
+
+GalLearn's two-task split (classify quenched vs. star-forming, then
+regress sSFR only on the star-forming subset) is exactly this. It
+isn't two unrelated tasks sharing a repo. A single regressor trained
+on the whole population would have to compromise between correctly
+predicting a hard zero for quenched galaxies and getting the
+continuous shape right for the rest, especially since sSFR targets
+go through an asinh transform that handles zero poorly. Splitting
+the problem this way lets each stage do one job.
+
+The classifier's "quenched" boundary is fixed at a 1 Gyr sSFR window
+(`avg_sfrs_1.0Gyr_no_bound_filter.csv`) and stays there regardless of
+what timescale the regressor targets. Collapsing both stages onto a
+shorter window would blur two physically different populations
+together under one "quenched" label: galaxies with no real recent
+star formation, and galaxies that are actively star-forming but
+happened to be between bursts during a short window. `docs/status.md`
+documents an ongoing investigation into whether the regressor
+specifically benefits from a shorter-window target on the
+star-forming subset the 1 Gyr classifier already selects; that's a
+nested question about regressor-target noise, not a reason to move
+the classifier's boundary.
 
 The repo spans two languages:
 

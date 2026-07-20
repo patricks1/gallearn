@@ -120,9 +120,15 @@ def compute_regression_metrics(outputs, targets):
     }
 
 
-def prepare_targets(task, d, N):
+def compute_valid_indices(task, d, N):
     """
-    Prepare targets and valid indices based on task type.
+    Determine which HDF5 rows this task trains/evaluates on.
+
+    Deliberately cheap and leak-free: it only looks at which rows
+    have a nonzero sSFR, not at any train/val split, so it's safe to
+    call before train_idxs/val_idxs are resolved (resolving them
+    requires narrowing the split's rows down to valid ones first, see
+    main()).
 
     Parameters
     ----------
@@ -132,6 +138,54 @@ def prepare_targets(task, d, N):
         Metadata dictionary from load_metadata.
     N : int
         Number of samples in dataset.
+
+    Returns
+    -------
+    valid_indices : torch.Tensor
+        HDF5 indices to use for training/testing. For classifier
+        this is all N indices; for regressor this is the
+        star-forming subset.
+    """
+    if task == 'classifier':
+        return torch.arange(N)
+    elif task == 'regressor':
+        ssfr = d['ys_sorted'][:N]
+        sf_mask = (ssfr > 0).squeeze()
+        return torch.where(sf_mask)[0]
+    else:
+        raise ValueError(
+            "task must be 'classifier' or 'regressor', "
+            "got '{0}'".format(task)
+        )
+
+
+def prepare_targets(task, d, N, train_idxs, target_stats=None):
+    """
+    Prepare targets based on task type.
+
+    For the regressor, target-scaling statistics (means/stds fed to
+    std_asinh) are fit on train_idxs only, never on val or locked-test
+    rows, so no held-out information leaks into the scaling.
+
+    Parameters
+    ----------
+    task : str
+        'classifier' or 'regressor'.
+    d : dict
+        Metadata dictionary from load_metadata.
+    N : int
+        Number of samples in dataset.
+    train_idxs : torch.Tensor
+        Row indices to fit target-scaling statistics on (regressor
+        only; ignored for the classifier, which has none). This
+        should already be resolved against compute_valid_indices'
+        output, i.e. it may contain only star-forming rows.
+    target_stats : dict, optional
+        A resumed run's cached {'means': ..., 'stds': ...,
+        'stretch': ...}, reused directly instead of refitting from
+        train_idxs, so a resume rescales targets identically to the
+        original run bit-for-bit rather than refitting against
+        whatever train_idxs the checkpoint happens to carry.
 
     Returns
     -------
@@ -165,18 +219,25 @@ def prepare_targets(task, d, N):
     elif task == 'regressor':
         valid_indices = torch.where(sf_mask)[0]
         ssfr_sf = ssfr[valid_indices]
-        scaled, means, stds = preprocessing.std_asinh(
+        if target_stats is None:
+            _, means, stds = preprocessing.std_asinh(
+                ssfr[train_idxs],
+                1.e11,
+                return_distrib=True,
+            )
+            target_stats = {
+                'means': means,
+                'stds': stds,
+                'stretch': 1.e11,
+            }
+        scaled = preprocessing.std_asinh(
             ssfr_sf,
-            1.e11,
-            return_distrib=True,
+            target_stats['stretch'],
+            means=target_stats['means'],
+            stds=target_stats['stds'],
         )
         targets = torch.zeros_like(ssfr)
         targets[valid_indices] = scaled
-        target_stats = {
-            'means': means,
-            'stds': stds,
-            'stretch': 1.e11,
-        }
         print(
             'Regressor: training on {0:.0f}'
             ' star-forming galaxy images'.format(
@@ -399,6 +460,8 @@ def save_checkpoint(
         val_idxs,
         train_config,
         train_generator_state,
+        scaling_means,
+        scaling_stds,
         target_stats=None):
     """
     Save a training checkpoint.
@@ -432,9 +495,16 @@ def save_checkpoint(
         batches were drawn. A resumed run restores this via
         set_state() before training, so it continues the exact
         shuffle sequence an uninterrupted run would have drawn next.
+    scaling_means : torch.Tensor
+        Per-channel image scaling means, fit on train_idxs alone.
+        A resumed run reuses these directly rather than refitting,
+        so it rescales images identically to the original run.
+    scaling_stds : torch.Tensor
+        Per-channel image scaling stds, fit on train_idxs alone.
+        Same as scaling_means: a resumed run reuses this directly.
     target_stats : dict, optional
         Target scaling stats for regressor (means, stds,
-        stretch). None for classifier.
+        stretch), fit on train_idxs alone. None for classifier.
 
     Returns
     -------
@@ -450,6 +520,8 @@ def save_checkpoint(
         'val_idxs': val_idxs.cpu(),
         'train_config': train_config,
         'train_generator_state': train_generator_state,
+        'scaling_means': scaling_means,
+        'scaling_stds': scaling_stds,
     }
     if target_stats is not None:
         checkpoint['target_stats'] = target_stats
@@ -853,19 +925,10 @@ def main(
     d, N, hdf5_path = preprocessing.load_metadata(dataset)
     print('{0} galaxy images in data'.format(N))
 
-    # Prepare targets based on task
-    targets, valid_indices, target_stats = prepare_targets(
-        task, d, N
-    )
+    # Cheap, leak-free: which rows this task trains/evaluates on,
+    # before any split resolution or scaling-statistic fitting.
+    valid_indices = compute_valid_indices(task, d, N)
     rs = d['Re'][:N]
-
-    # Compute per-channel image scaling stats via chunked pass
-    # over HDF5 (never loads the full image tensor).
-    print('Computing scaling stats...')
-    stretch = 1.e-5
-    scaling_means, scaling_stds = (
-        preprocessing.compute_scaling_stats(hdf5_path, N)
-    )
 
     # A resumed run reuses the checkpoint's cached train_idxs/
     # val_idxs rather than re-resolving split_dict, even though
@@ -897,6 +960,38 @@ def main(
         valid_mask[valid_indices] = True
         train_idxs = split_train_idxs[valid_mask[split_train_idxs]]
         val_idxs = split_val_idxs[valid_mask[split_val_idxs]]
+
+    # Fit target-scaling stats (regressor only) on train_idxs alone,
+    # or reuse a resumed run's cached stats verbatim so a resume
+    # rescales targets identically to the original run rather than
+    # refitting. Same for per-channel image scaling stats, computed
+    # via a chunked pass over HDF5 that never loads the full image
+    # tensor.
+    print('Computing scaling stats...')
+    stretch = 1.e-5
+    if checkpoint is not None:
+        targets, valid_indices, target_stats = prepare_targets(
+            task,
+            d,
+            N,
+            train_idxs,
+            target_stats=checkpoint.get('target_stats'),
+        )
+        scaling_means = checkpoint['scaling_means']
+        scaling_stds = checkpoint['scaling_stds']
+    else:
+        targets, valid_indices, target_stats = prepare_targets(
+            task,
+            d,
+            N,
+            train_idxs,
+        )
+        scaling_means, scaling_stds = (
+            preprocessing.compute_scaling_stats(
+                hdf5_path,
+                train_idxs,
+            )
+        )
 
     if train_orientations is not None:
         orientations = d['orientations'][:N]
@@ -1178,6 +1273,8 @@ def main(
                 val_idxs,
                 train_config,
                 train_generator.get_state(),
+                scaling_means,
+                scaling_stds,
                 target_stats=target_stats,
             )
             print(
@@ -1198,6 +1295,8 @@ def main(
         val_idxs,
         train_config,
         train_generator.get_state(),
+        scaling_means,
+        scaling_stds,
         target_stats=target_stats,
     )
     print(

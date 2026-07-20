@@ -6,7 +6,7 @@ also a historical log: append new findings, don't delete or silently
 rewrite old ones. If something turns out to be wrong or confounded,
 say so in place and point forward, rather than removing it.
 
-Last updated: 2026-07-19.
+Last updated: 2026-07-20.
 
 ## Current understanding (read this first)
 
@@ -27,15 +27,24 @@ capacity sweep (head width on `cnn.ResNet`) each in a controlled way
 band, with every non-pretrained run peaking very early (epoch 15-26
 of 50) then degrading. That consistency itself is the finding: none
 of those five is the bottleneck. We also checked whether the sSFR
-targets themselves are simply too noisy to predict well: they are
-not, at least not from plain particle-count shot noise, which is far
-too small to explain the ceiling on its own (see "sSFR target noise
-check" in the log). Two architecture candidates remain genuinely
-untested: backbone capacity (the head-width sweep only touched the
-head, which held most of the parameters but isn't the whole
-capacity story) and dropout placement (moving it into the conv
-backbone instead of just before the head); see "Next candidates" at
-the bottom.
+targets themselves are simply too noisy to predict well. Plain
+particle-count shot noise is far too small to explain the ceiling on
+its own, but a real multi-window comparison found genuine
+astrophysical burstiness between 1 Gyr and 100 Myr windows, large
+enough that its implied ceiling (R² ≈ 0.295) landed suspiciously
+close to the observed one. That match didn't survive a direct test,
+though: retraining the regressor on a 0.3 Gyr target instead of 1 Gyr
+made generalization *worse* on both seeds tried, not better (see
+"sSFR target noise check" in the log). A crude color-only baseline
+also carries essentially no sSFR signal on its own, reinforcing that
+the CNN's real signal is likely morphological/spatial rather than a
+simple brightness/color summary, though that check used an
+uncalibrated color proxy and isn't the final word. Two architecture
+candidates remain genuinely untested: backbone capacity (the
+head-width sweep only touched the head, which held most of the
+parameters but isn't the whole capacity story) and dropout placement
+(moving it into the conv backbone instead of just before the head);
+see "Next candidates" at the bottom.
 
 We found and fixed two real infrastructure bugs along the way
 (resume not restoring most run settings; eval-mode dropout silently
@@ -387,6 +396,77 @@ or the images genuinely do not carry enough information to do much
 better than R² ≈ 0.3 on this target. This doc cannot rule any of
 those three in or out yet.
 
+**Follow-up: real multi-window comparison.** The shot-noise check
+above only bounds one specific noise mechanism. To check for real
+astrophysical burstiness (star formation genuinely fluctuating within
+the 1 Gyr window, not just particle-count discreteness), we computed
+sSFR at several averaging windows for the same galaxies, using
+`UCITools.ProcessFIREBox.get_avg_sfrs` directly (the exact function
+`avg_sfrs_1.0Gyr_no_bound_filter.csv` was built with) at ages 0.1,
+0.2, 0.3, 0.5, 0.75, and 1.0 Gyr (`sfr_window_sweep.jl`, Greenplanet,
+not committed). Comparing the 1 Gyr and 100 Myr windows for the same
+galaxies showed real disagreement well beyond what shot noise alone
+predicts: about 4.9x the shot-noise level. Propagating that
+disagreement into the same kind of ceiling estimate as above gives an
+implied R² ≈ 0.295, remarkably close to the ~0.24-0.31 ceiling every
+experiment in this doc has hit. On its face, this looked like it
+could explain the whole mystery: real burstiness between windows,
+not shot noise, degrading the achievable R² on a 1 Gyr target.
+
+**Direct test (0.3 Gyr regressor target), two seeds:** the natural
+next question was whether a shorter-window target would actually be
+*easier* to predict from these images, since a shorter window is
+closer to whatever timescale of star formation the images visually
+encode. We generated `avg_sfrs_0.3Gyr_no_bound_filter.csv` on
+Greenplanet (`gen_sfrs_0p3.jl`, mirrors production `gen_sfrs.jl`
+exactly) and retrained the regressor with the 0.3 Gyr sSFR as the
+target instead of the 1 Gyr one, keeping the classifier's 1 Gyr
+star-forming subset as-is and dropping the small number of galaxies
+that are star-forming at 1 Gyr but exactly zero at 0.3 Gyr (a
+"quick", monkeypatch-only experiment, not a dataset schema change;
+`short_window_target.py`, scratchpad, not committed). Two seeds, both
+worse than the matched-seed 1 Gyr baseline from the head-width sweep:
+
+| Seed | Target window | Val loss | Val R² |
+|------|---------------|----------|--------|
+| 42   | 1 Gyr (baseline, large head) | 0.7324 | 0.256 |
+| 42   | 0.3 Gyr | 0.8158 | 0.159 |
+| 7    | 1 Gyr (baseline, large head) | 0.7216 | 0.267 |
+| 7    | 0.3 Gyr | 0.7513 | 0.215 |
+
+**Verdict**: the burstiness hypothesis's clean numerical match (R² ≈
+0.295 implied vs. ~0.24-0.31 observed) does not survive direct
+testing. Shortening the target window made generalization worse, not
+better, on both seeds. The likely reframe: the 1 Gyr window's
+smoothing isn't the problem after all. A shorter window does carry
+more real astrophysical variance (confirming the multi-window
+comparison's finding that windows disagree by more than shot noise),
+but that variance is itself less predictable from a single image,
+not more, so the network has a harder target, not an easier one. The
+apparent numerical coincidence between the implied ceiling and the
+observed one was misleading, not causal.
+
+**Color baseline check (2026-07-19).** Separately, we checked whether
+crude image color alone carries sSFR signal, as a cheap way to test
+whether the CNN's real signal is mostly morphological/spatial rather
+than a simple color/brightness summary. Using a per-band "flux" proxy
+(sum of positive pixel values per channel, no photometric
+calibration, no aperture matching; `color_ceiling_check.py`,
+scratchpad, not committed) on the same train/val split and the same
+train-only-fit target scaling as the original ceiling check, color
+alone added essentially nothing (linear val R² -0.020, gradient
+boosting -0.020), and adding it on top of `log10(Mstar)` + `Re` only
+marginally helped the gradient boosting model (0.038 -> 0.065; linear
+stayed flat, -0.012 -> -0.009). **Caveat**: this color proxy is
+crude, an uncalibrated raw pixel sum, not a real photometric color,
+so this result says more about that proxy's weakness than about
+whether color carries no SFR information at all. A properly
+calibrated color (e.g. from the AstroPhot Sersic fit outputs, which
+likely already contain calibrated per-band flux from the same
+pipeline `Re` comes from) has not been tried and could behave
+differently; this check should not be read as ruling out color as a
+useful feature.
+
 ## Post-mortem: pretrained initialization
 
 We hoped pretrained ImageNet weights would give `StandardNet`'s
@@ -511,34 +591,40 @@ whole project's worth of runs) and didn't move the number.
   split with ~1500 galaxies is noisy on its own, and the head-width
   sweep just showed directly how easily a single-seed difference can
   look like a real effect and not be one.
-- **sSFR target noise, beyond simple shot noise**: the check above
-  ruled out plain particle-count shot noise as sufficient to explain
-  the ceiling, but explicitly did not rule out target noise from a
-  more realistic source (bursty or correlated star formation, IMF
-  sampling, feedback-driven fluctuations within the 1 Gyr averaging
-  window). A next step here would be comparing `sfr` computed over
-  different averaging windows (e.g. 1 Gyr vs. 100 Myr) for the same
-  galaxies. Real disagreement between windows, beyond what shot
-  noise alone predicts, would be direct evidence of this kind of
-  noise; this doesn't require any new training runs, only more
-  Greenplanet-side analysis like the check above.
+- ~~**sSFR target noise, beyond simple shot noise**~~: done. A real
+  multi-window comparison found genuine burstiness beyond shot noise,
+  and a direct 0.3 Gyr regressor-target experiment tested whether
+  that burstiness was the bottleneck. It made generalization worse on
+  both seeds tried, not better, so this candidate is now closed (see
+  "sSFR target noise check" in the log for the full result).
+- **Calibrated color/photometry as a feature or auxiliary signal**:
+  the color baseline check found essentially no signal from a crude,
+  uncalibrated per-band flux proxy, but flagged that a properly
+  calibrated color (e.g. from the AstroPhot Sersic fit outputs, which
+  likely already carry calibrated per-band flux) hasn't been tried
+  and could behave differently. Worth a follow-up before treating
+  "color adds nothing" as settled.
 
 ## Bottom line
 
 Not futile. The regressor has a real, measurable signal well above a
 trivial mass/size baseline, and the classifier already generalizes
 well. We've tested lr, pretraining, projection count, dropout, a
-first capacity sweep (head width), and simple sSFR shot noise each
-in a controlled way and ruled them out as the dominant lever: every
+first capacity sweep (head width), sSFR shot noise, a direct
+shorter-window sSFR target, and a crude color baseline, each in a
+controlled way, and ruled them all out as the dominant lever: every
 one of them lands in the same R² ≈ 0.24-0.28 band once checked
-properly (against a second seed for the architecture axes, against
-the population's own target variance for the noise check). That's
-useful negative information, and it came with a real methodological
-lesson: the head-width sweep's first-seed result looked like a
-breakthrough and mostly wasn't, so backbone capacity and dropout
-placement (the next real architecture candidates) need at least two
-seeds per point from the start, not a fast follow-up when a result
-looks promising. What remains genuinely open is whether the ceiling
-comes from an architecture axis we haven't found yet, a subtler kind
-of target noise than plain shot noise, or an information limit in
-the images themselves.
+properly (against a second seed for the architecture and target-window
+axes, against the population's own target variance for the noise
+check). That's useful negative information, and it came with a real
+methodological lesson: the head-width sweep's first-seed result
+looked like a breakthrough and mostly wasn't, and the multi-window
+burstiness estimate's suspiciously close numerical match to the
+observed ceiling also didn't survive a direct test, so backbone
+capacity and dropout placement (the next real architecture
+candidates) need at least two seeds per point from the start, not a
+fast follow-up when a result looks promising. What remains genuinely
+open is whether the ceiling comes from an architecture axis we
+haven't found yet, a subtler kind of target noise than window
+burstiness, an information limit in the images themselves, or a
+calibrated-color signal the crude baseline check couldn't detect.

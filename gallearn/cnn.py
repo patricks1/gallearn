@@ -1219,7 +1219,7 @@ def main(Nfiles=None, wandb_mode='n', run_name=None):
     # (never loads the full image tensor into memory).
     scaling_means, scaling_stds = preprocessing.compute_scaling_stats(
         hdf5_path,
-        Nfiles
+        torch.arange(Nfiles),
     )
 
     N_all = len(ys)
