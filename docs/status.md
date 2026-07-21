@@ -40,8 +40,9 @@ between 1 Gyr and 100 Myr windows, large enough that its implied
 ceiling (R² ≈ 0.295) landed suspiciously close to the observed one.
 That match didn't survive a direct test, though: retraining the
 regressor on a 0.3 Gyr target instead of 1 Gyr made generalization
-*worse* on both seeds tried, not better (see "sSFR target noise
-check" in the log). A crude color-only baseline also carries
+*worse* on both seeds tried, not better (see the
+[sSFR target noise check][target-noise]). A crude color-only
+baseline also carries
 essentially no sSFR signal on its own, reinforcing that the CNN's
 real signal is likely morphological/spatial rather than a simple
 brightness/color summary, though that check used an uncalibrated
@@ -50,7 +51,7 @@ untested: dropout placement (weaker motivation now that capacity
 reduction alone didn't help, but still a mechanistically different
 kind of regularizer), calibrated color/photometry, and a
 heteroscedastic regression head as a direct diagnostic for whether
-the ceiling is target noise; see "Next candidates" below.
+the ceiling is target noise; see [Next candidates][candidates].
 
 We found and fixed two real infrastructure bugs along the way
 (resume not restoring most run settings; eval-mode dropout silently
@@ -62,96 +63,23 @@ here on runs at least two seeds per point from the start.
 
 ## Next candidates, not yet started
 
-### Is a different architecture the answer? (2026-07-20)
+Everything already tested, and how it turned out, lives in the
+[experiment log][log] below. This list is only what's still open.
 
-Before the list below: is the ceiling a case of "wrong
-architecture," where something more capable (a vision transformer, a
-multi-scale encoder, a multi-branch physics-informed network) would
-unlock more signal? The evidence gathered so far argues against that
-as the primary explanation. A single strong pattern threads through
-every experiment in this doc: a wide, orthogonal set of levers
-(learning rate, ImageNet pretraining, projection count, dropout as
-currently placed, head-width capacity, particle shot noise, target
-window, color) all land in the same R² 0.24-0.31 band. If the
-network itself lacked representational power, ImageNet pretraining
-should have helped at least a little, since transfer learning gives
-a head start on general-purpose edge/texture/shape features; instead
-it sharpened overfitting (see the pretrained post-mortem below). The
-0.3 Gyr target experiment argues even more directly: a shorter
-window, closer to what a single snapshot image plausibly encodes,
-made the regressor generalize worse, not better, consistent with
-real, image-invisible stochasticity in the target itself rather than
-a network too weak to extract what's already there. No architecture,
-however capable, can predict a target's genuinely stochastic
-component from an image that doesn't encode it.
-
-That argues for keeping architecture changes targeted (backbone
-capacity, dropout placement, both below) rather than jumping to a
-fundamentally different architecture family. Three options along
-those lines, named and set aside for now, with reasons:
-
-- **Vision transformers**: typically need more data than CNNs to
-  outperform them, since they lack a CNN's built-in spatial
-  inductive bias and have to learn locality from data instead. This
-  dataset (roughly 1500-2000 galaxies) sits well below where that
-  usually pays off, so a ViT is more likely to underperform a
-  ResNet here than beat it, not a promising place to spend effort
-  first.
-- **Multi-scale encoders (FPN-style)**: the one option with a real
-  physical justification, if the discriminating signal lives at a
-  spatial scale a plain ResNet's downsampling washes out (e.g. a
-  faint diffuse component vs. a compact bright core). But nothing
-  tested so far points at scale specifically as the problem, so this
-  is speculative rather than motivated by evidence; worth revisiting
-  after the two nearer-term, already-planned levers below, not
-  before them.
-- **Multi-branch, physics-informed networks** (a separate branch for
-  a derived quantity, fused with the image branch): really just
-  "better features" wearing an architecture costume. It overlaps
-  heavily with the calibrated color/photometry candidate already
-  below, which is the same idea in a cheaper, more targeted form, so
-  it doesn't add a distinct hypothesis of its own worth testing
-  separately.
-
-### Candidate list
-
-- ~~**Backbone capacity reduction on `cnn.ResNet`**~~: done, and it
-  went the wrong way. Shrinking `out_channels_list` from
-  `[16,32,64,128]` (~310K backbone params) down to `[8,16,32,64]`
-  (~79K) and `[4,8,16,32]` (~20K), holding the small head and
-  `n_blocks_list=[1,1,1,1]` fixed, made generalization *worse* at
-  every point, on both seeds, monotonically with size (see "Capacity
-  sweep: backbone width" in the log for the full result). Capacity
-  reduction, in both directions now (pretraining added capacity and
-  hurt; shrinking the backbone removed capacity and also hurt), is
-  closed as a lever.
-- **Dropout placement**: the post-mortem below found that fixing the
-  eval-mode dropout bug made no real difference, and neither capacity
-  sweep (head width or backbone width) resolved generalization
-  either, so this is still an open, untested idea, though the
-  backbone-width result above weakens its original motivation. The
-  original working hypothesis (see "Verdict" in the dropout
-  post-mortem) was that dropout might be too weak or too localized to
-  constrain the backbone's capacity to memorize; but since simply
-  cutting that capacity directly just made things worse, not better,
-  the case for dropout has to rest on it being a different kind of
-  regularizer (a stochastic constraint applied during training, not a
-  fixed smaller function class) rather than on the backbone having
-  straightforward excess capacity to trim, since the evidence above
-  argues it doesn't. Still worth trying, but this candidate's
-  rationale has gotten weaker, not stronger, and it's no longer the
-  most promising item on this list.
-- Multiple val splits (`scripts/split.py split --split-name ...`) to
-  get a variance estimate on val R², since a single 85/15 galaxy
-  split with ~1500 galaxies is noisy on its own, and the head-width
-  sweep just showed directly how easily a single-seed difference can
-  look like a real effect and not be one.
-- ~~**sSFR target noise, beyond simple shot noise**~~: done. A real
-  multi-window comparison found genuine burstiness beyond shot noise,
-  and a direct 0.3 Gyr regressor-target experiment tested whether
-  that burstiness was the bottleneck. It made generalization worse on
-  both seeds tried, not better, so this candidate is now closed (see
-  "sSFR target noise check" in the log for the full result).
+- **Dropout placement** (running now, 2026-07-20): moving dropout
+  into the conv backbone itself (`nn.Dropout2d` after each of
+  `conv2_x`-`conv5_x`) instead of the single `p=0.5` layer right
+  before the head. The [dropout post-mortem][pm-dropout] found that
+  fixing the eval-mode dropout bug made no real difference, and
+  neither capacity sweep resolved generalization either. The
+  original hypothesis was that dropout might be too weak or too
+  localized to constrain the backbone's capacity to memorize; but
+  since [cutting that capacity directly][backbone-sweep] just made
+  things worse, the case for dropout now has to rest on it being a
+  different kind of regularizer (a stochastic constraint applied
+  during training, not a fixed smaller function class) rather than
+  on the backbone having excess capacity to trim. Worth trying, but
+  the rationale is weaker than it was.
 - **Calibrated color/photometry as a feature or auxiliary signal**:
   the color baseline check found essentially no signal from a crude,
   uncalibrated per-band flux proxy, but flagged that a properly
@@ -163,10 +91,11 @@ those lines, named and set aside for now, with reasons:
   (necessarily) a fix**: instead of predicting one point value per
   galaxy and training on MSE, have the regressor predict a mean and
   a per-galaxy variance, and train on Gaussian negative
-  log-likelihood (NLL) instead (see below for what that means and
-  why the learned variance is meaningful, not just noise). If
-  predicted variance comes out large specifically for the
-  low-particle-count, bursty galaxies the shot-noise check flagged,
+  log-likelihood (NLL) instead (see [the appendix][nll] for what
+  that means and why the learned variance is meaningful, not just
+  noise). If predicted variance comes out large specifically for the
+  low-particle-count, bursty galaxies the
+  [shot-noise check][target-noise] flagged,
   that's direct evidence the ceiling is target stochasticity rather
   than model capability, without having to build or train a new
   architecture family to find out. Checked afterward with a
@@ -175,53 +104,39 @@ those lines, named and set aside for now, with reasons:
   since a network can otherwise learn a `log(σ²)` term that trades
   off against the residual term without the resulting σ² actually
   meaning anything for a given galaxy.
-
-### What is Gaussian NLL, and how does it learn a meaningful variance?
-
-Ordinary MSE training has the regressor predict one number per
-galaxy, ŷ, and minimizes (ŷ - y)². Gaussian NLL instead has it
-predict two numbers, a mean μ and a variance σ², and treats the
-target y as if drawn from a Gaussian distribution N(μ, σ²). The loss
-is that Gaussian's negative log-likelihood:
-
-    NLL = 0.5 * log(σ²) + 0.5 * (y - μ)² / σ²
-
-There's no ground-truth "correct" σ² anywhere in the training data to
-supervise against directly. The network only ever sees this one
-scalar loss value, and gradient descent works out what σ² should be
-purely from how the two terms trade off against each other. Holding
-μ fixed, taking the derivative of NLL with respect to σ² and setting
-it to zero shows the loss is minimized, for any single example,
-exactly when σ² equals the squared error (y - μ)². So the predicted
-variance gets pulled toward matching whatever residual it actually
-produces, example by example. Averaged across many similar galaxies,
-this makes the network converge toward predicting the conditional
-variance E[(y - μ(x))² | x], the expected squared error given the
-image, which is exactly what "uncertainty" should mean here.
-
-The `log(σ²)` term is what keeps this from degenerating. Without it,
-the network could trivially shrink the residual term to zero by
-predicting σ² → ∞ everywhere the target is hard, without learning
-anything real. `log(σ²)` grows as σ² grows, so blowing up variance
-indiscriminately costs loss too, and the network only benefits from
-predicting a larger σ² where the residual term it buys back in
-return is worth more than that cost, i.e. galaxies that are
-genuinely hard to predict. In practice this is usually implemented
-by having the head output `log(σ²)` directly rather than σ² itself,
-since that guarantees positivity and avoids ever dividing by a
-variance that could hit zero.
-
-Whether this actually worked, whether the predicted uncertainty
-means anything, isn't taken on faith. It gets checked afterward with
-a calibration plot: bin val galaxies by predicted σ² and check
-whether the actual residual variance within each bin matches. That's
-also what makes this a useful diagnostic for the target-noise
-question specifically: if predicted σ² tracks the low-particle-
-count, bursty galaxies the shot-noise check already flagged, that's
-evidence the ceiling is target stochasticity; if predicted σ² comes
-out flat regardless of galaxy properties, that argues against it.
+- **Multiple val splits** (`scripts/split.py split --split-name
+  ...`) to get a variance estimate on val R², since a single 85/15
+  galaxy split with ~1500 galaxies is noisy on its own, and the
+  [head-width sweep][head-sweep] showed directly how easily a
+  single-seed difference can look like a real effect and not be one.
 
 ## Experiment log
+
+Everything tried so far, in the order it happened:
+
+- [Classifier: generalizes fine][classifier]: val F1 ≈ 0.97, not the
+  problem. All effort below is the regressor.
+- [Regressor: earliest results][earliest]: pre-split-refactor runs,
+  kept for history, confounded.
+- [Ceiling check][ceiling]: `log10(Mstar)` + `Re` with no images gets
+  val R² ≈ 0-0.04, so the CNN's ~0.24-0.31 is real signal.
+- [Controlled regressor experiments][controlled]: lr and projection
+  count tested cleanly. Neither is the lever.
+- [Bug 1: `--resume` didn't restore settings][bug1]: fixed. It
+  invalidated some earlier resumed runs.
+- [Bug 2: eval-mode dropout][bug2]: fixed. Dropout was silently
+  active during validation.
+- [Dropout bug A/B][dropout-ab]: fixing Bug 2 made no real
+  difference.
+- [Capacity sweep: head width][head-sweep]: no robust effect. The
+  first-seed result was noise, caught on reseed.
+- [Capacity sweep: backbone width][backbone-sweep]: shrinking the
+  backbone made things monotonically worse, closing capacity as a
+  lever in both directions.
+- [sSFR target noise check][target-noise]: shot noise is too small to
+  explain the ceiling. Real burstiness shows up between windows, but
+  a 0.3 Gyr target made generalization worse, not better. Also
+  covers the color baseline check.
 
 ### Classifier: generalizes fine
 
@@ -240,8 +155,7 @@ regression to a continuous sSFR value needs much finer-grained
 information and is a much harder small-N problem. This is why effort
 below is all on the regressor.
 
-### Regressor: earliest results (pre-split-refactor and early
-`--model resnet` runs)
+### Regressor: earliest results (pre-split-refactor, early resnet)
 
 wandb project `sfr_gallearn`, the earliest `resnet`-architecture
 regressor runs, predating the locked-test-set/split-file system and
@@ -328,8 +242,7 @@ aren't worthless regularization either.
 aren't comparable to the other rows, so we omit them; we include the
 val loss for reference only, not as a clean result.
 
-### Bug 1 (found 2026-07-18, fixed): `--resume` silently didn't
-restore most run settings
+### Bug 1 (2026-07-18, fixed): `--resume` didn't restore settings
 
 Resuming the pretrained run above (to let it finish converging past
 epoch 50) produced a visible train-loss jump right at the resume
@@ -364,8 +277,7 @@ run restores that generator's exact saved RNG state
 checkpoint) rather than re-seeding, so it draws the same next
 shuffle an uninterrupted run would have.
 
-### Bug 2 (found 2026-07-19, fixed): eval-mode dropout was silently
-active during validation
+### Bug 2 (2026-07-19, fixed): eval-mode dropout active in validation
 
 `cnn.ResNet` and `cnn.Net` (the latter not currently wired into
 `train.py`) both called `torch.nn.functional.dropout(x, p)` without
@@ -762,14 +674,65 @@ learning; or (b) the overfitting here may not be the "co-adapted
 feature detector" failure mode dropout specifically targets, but a
 more basic sample-size/capacity mismatch that dropout's mechanism
 doesn't address regardless of where it's placed. Guess (b) has
-gained ground since this was written: the backbone-width sweep
-directly tested cutting backbone capacity and found it made
-generalization worse, not better (see "Capacity sweep: backbone
-width" in the log), arguing against a straightforward excess-capacity
+gained ground since this was written: the
+[backbone-width sweep][backbone-sweep] directly tested cutting
+backbone capacity and found it made generalization worse, not
+better, arguing against a straightforward excess-capacity
 story for either dropout or capacity reduction to fix. Dropout had a
 real, fair shot here (correctly implemented, tested in a clean A/B,
 and cross-checked against a whole project's worth of runs) and didn't
 move the number.
+
+## Considered and set aside: a different architecture
+
+Is the ceiling a case of "wrong architecture," where something more
+capable (a vision transformer, a multi-scale encoder, a multi-branch
+physics-informed network) would unlock more signal? The evidence
+gathered so far argues against that as the primary explanation. A
+single strong pattern threads through every experiment in this doc:
+a wide, orthogonal set of levers (learning rate, ImageNet
+pretraining, projection count, dropout as currently placed, head and
+backbone capacity, particle shot noise, target window, color) all
+land in the same R² 0.24-0.31 band. If the network itself lacked
+representational power, ImageNet pretraining should have helped at
+least a little, since transfer learning gives a head start on
+general-purpose edge/texture/shape features; instead it sharpened
+overfitting (see the [pretrained post-mortem][pm-pretrained]). The
+0.3 Gyr target experiment argues even more directly: a shorter
+window, closer to what a single snapshot image plausibly encodes,
+made the regressor generalize worse, not better, consistent with
+real, image-invisible stochasticity in the target itself rather than
+a network too weak to extract what's already there. No architecture,
+however capable, can predict a target's genuinely stochastic
+component from an image that doesn't encode it.
+
+That argues for keeping architecture changes targeted (see
+[Next candidates][candidates]) rather than jumping to a
+fundamentally different architecture family. Three options along
+those lines, named and set aside for now, with reasons:
+
+- **Vision transformers**: typically need more data than CNNs to
+  outperform them, since they lack a CNN's built-in spatial
+  inductive bias and have to learn locality from data instead. This
+  dataset (roughly 1500-2000 galaxies) sits well below where that
+  usually pays off, so a ViT is more likely to underperform a
+  ResNet here than beat it, not a promising place to spend effort
+  first.
+- **Multi-scale encoders (FPN-style)**: the one option with a real
+  physical justification, if the discriminating signal lives at a
+  spatial scale a plain ResNet's downsampling washes out (e.g. a
+  faint diffuse component vs. a compact bright core). But nothing
+  tested so far points at scale specifically as the problem, so this
+  is speculative rather than motivated by evidence; worth revisiting
+  after the nearer-term levers in [Next candidates][candidates], not
+  before them.
+- **Multi-branch, physics-informed networks** (a separate branch for
+  a derived quantity, fused with the image branch): really just
+  "better features" wearing an architecture costume. It overlaps
+  heavily with the calibrated color/photometry item in
+  [Next candidates][candidates], which is the same idea in a
+  cheaper, more targeted form, so it doesn't add a distinct
+  hypothesis of its own worth testing separately.
 
 ## Bottom line
 
@@ -813,3 +776,66 @@ legitimate, useful finding, "single-snapshot images predict roughly
 this much of sSFR's variance, and the rest reflects real,
 image-invisible burstiness in star formation on sub-Gyr timescales,"
 not a dead end to be quietly abandoned.
+## Appendix: what is Gaussian NLL?
+
+Ordinary MSE training has the regressor predict one number per
+galaxy, ŷ, and minimizes (ŷ - y)². Gaussian NLL instead has it
+predict two numbers, a mean μ and a variance σ², and treats the
+target y as if drawn from a Gaussian distribution N(μ, σ²). The loss
+is that Gaussian's negative log-likelihood:
+
+    NLL = 0.5 * log(σ²) + 0.5 * (y - μ)² / σ²
+
+There's no ground-truth "correct" σ² anywhere in the training data to
+supervise against directly. The network only ever sees this one
+scalar loss value, and gradient descent works out what σ² should be
+purely from how the two terms trade off against each other. Holding
+μ fixed, taking the derivative of NLL with respect to σ² and setting
+it to zero shows the loss is minimized, for any single example,
+exactly when σ² equals the squared error (y - μ)². So the predicted
+variance gets pulled toward matching whatever residual it actually
+produces, example by example. Averaged across many similar galaxies,
+this makes the network converge toward predicting the conditional
+variance E[(y - μ(x))² | x], the expected squared error given the
+image, which is exactly what "uncertainty" should mean here.
+
+The `log(σ²)` term is what keeps this from degenerating. Without it,
+the network could trivially shrink the residual term to zero by
+predicting σ² → ∞ everywhere the target is hard, without learning
+anything real. `log(σ²)` grows as σ² grows, so blowing up variance
+indiscriminately costs loss too, and the network only benefits from
+predicting a larger σ² where the residual term it buys back in
+return is worth more than that cost, i.e. galaxies that are
+genuinely hard to predict. In practice this is usually implemented
+by having the head output `log(σ²)` directly rather than σ² itself,
+since that guarantees positivity and avoids ever dividing by a
+variance that could hit zero.
+
+Whether this actually worked, whether the predicted uncertainty
+means anything, isn't taken on faith. It gets checked afterward with
+a calibration plot: bin val galaxies by predicted σ² and check
+whether the actual residual variance within each bin matches. That's
+also what makes this a useful diagnostic for the target-noise
+question specifically: if predicted σ² tracks the low-particle-
+count, bursty galaxies the shot-noise check already flagged, that's
+evidence the ceiling is target stochasticity; if predicted σ² comes
+out flat regardless of galaxy properties, that argues against it.
+
+
+<!-- Section links, used by the lists above. -->
+
+[log]: #experiment-log
+[classifier]: #classifier-generalizes-fine
+[earliest]: #regressor-earliest-results-pre-split-refactor-early-resnet
+[ceiling]: #ceiling-check-2026-07-17
+[controlled]: #controlled-regressor-experiments-2026-07-17---2026-07-18
+[bug1]: #bug-1-2026-07-18-fixed---resume-didnt-restore-settings
+[bug2]: #bug-2-2026-07-19-fixed-eval-mode-dropout-active-in-validation
+[dropout-ab]: #dropout-bug-ab-2026-07-19-fix-made-no-real-difference
+[head-sweep]: #capacity-sweep-head-width-2026-07-19
+[backbone-sweep]: #capacity-sweep-backbone-width-2026-07-20
+[target-noise]: #ssfr-target-noise-check-2026-07-19
+[pm-dropout]: #post-mortem-dropout
+[pm-pretrained]: #post-mortem-pretrained-initialization
+[candidates]: #next-candidates-not-yet-started
+[nll]: #appendix-what-is-gaussian-nll
