@@ -56,10 +56,15 @@ baseline also carries
 essentially no sSFR signal on its own, reinforcing that the CNN's
 real signal is likely morphological/spatial rather than a simple
 brightness/color summary, though that check used an uncalibrated
-color proxy and isn't the final word. What's left genuinely
-untested is no longer architectural: calibrated color/photometry,
-and a heteroscedastic regression head as a direct diagnostic for
-whether the ceiling is target noise; see
+color proxy and isn't the final word. A [heteroscedastic head][het-head]
+tried to turn the target-noise hypothesis into direct, per-galaxy
+evidence: its predicted variance does correlate with actual error
+(Spearman ≈ 0.28, reproducible across seeds), but that correlation
+mostly evaporates once controlled for target magnitude, so it
+doesn't confirm or refute target noise, it mostly measured a simpler
+pattern instead. What's left genuinely untested: calibrated
+color/photometry, and rerunning the heteroscedastic check against
+actual burstiness data instead of squared error; see
 [Next candidates][candidates].
 
 We found and fixed two real infrastructure bugs along the way
@@ -82,23 +87,16 @@ Everything already tested, and how it turned out, lives in the
   likely already carry calibrated per-band flux) hasn't been tried
   and could behave differently. Worth a follow-up before treating
   "color adds nothing" as settled.
-- **Heteroscedastic regression head, as a diagnostic, not
-  (necessarily) a fix**: instead of predicting one point value per
-  galaxy and training on MSE, have the regressor predict a mean and
-  a per-galaxy variance, and train on Gaussian negative
-  log-likelihood (NLL) instead (see [the appendix][nll] for what
-  that means and why the learned variance is meaningful, not just
-  noise). If predicted variance comes out large specifically for the
-  low-particle-count, bursty galaxies the
-  [shot-noise check][target-noise] flagged,
-  that's direct evidence the ceiling is target stochasticity rather
-  than model capability, without having to build or train a new
-  architecture family to find out. Checked afterward with a
-  calibration plot: bin val galaxies by predicted variance and
-  confirm the actual residual variance within each bin matches it,
-  since a network can otherwise learn a `log(σ²)` term that trades
-  off against the residual term without the resulting σ² actually
-  meaning anything for a given galaxy.
+- **Heteroscedastic head, take two: correlate against burstiness
+  directly, not against squared error**. [The first attempt][het-head]
+  found predicted variance mostly tracks target magnitude, a
+  confound squared error shares. A cleaner test correlates predicted
+  variance against actual multi-window sSFR disagreement (the data
+  behind the [burstiness comparison][target-noise]) instead, which
+  isn't automatically confounded with `|target|` the same way. Needs
+  regenerating the per-galaxy particle-count/multi-window CSV on
+  Greenplanet, since the scratchpad copy from that check didn't
+  survive between sessions.
 - **Multiple val splits** (`scripts/split.py split --split-name
   ...`) to get a variance estimate on val R², since a single 85/15
   galaxy split with ~1500 galaxies is noisy on its own, and the
@@ -136,6 +134,9 @@ Everything tried so far, grouped by theme, oldest first:
   explain the ceiling. Real burstiness shows up between windows, but
   a 0.3 Gyr target made generalization worse, not better. Also
   covers the color baseline check.
+- [Heteroscedastic regression head][het-head]: predicted variance
+  correlates with actual error, but mostly because both track target
+  magnitude. Little left once that's controlled for.
 
 ### Classifier: generalizes fine
 
@@ -636,6 +637,83 @@ pipeline `Re` comes from) has not been tried and could behave
 differently; this check should not be read as ruling out color as a
 useful feature.
 
+### Heteroscedastic regression head (2026-07-20)
+
+With the architecture axis closed (see
+[Considered and set aside][considered] and the
+[backbone dropout][backbone-dropout] result), this tests the
+target-noise explanation directly instead of by elimination. The
+regressor's head now outputs two values, a mean and a log-variance
+of the asinh-scaled sSFR target, trained on `nn.GaussianNLLLoss`
+instead of MSE (see the [appendix][nll] for what that loss does and
+why the learned variance should be meaningful, not arbitrary). Same
+small head and full `[16,32,64,128]` backbone as the recent
+baseline, two seeds, otherwise identical hyperparameters.
+
+**Point accuracy, checkpointed by best NLL:**
+
+| seed | val R² |
+|---|---|
+| 42 | 0.315 (best point-R² of any run in this doc) |
+| 7 | 0.204 (clearly worse than the 0.287 MSE baseline) |
+
+Same seed-inconsistency trap as the head-width sweep: one seed looks
+like a breakthrough, the other looks like a regression. Point
+accuracy is not the reason this experiment was run, and it doesn't
+resolve anything on its own here either.
+
+**Calibration, the actual point of the experiment.** For each val
+galaxy, the predicted variance should track how large its actual
+squared error turns out to be, if the network is genuinely learning
+something about per-galaxy predictability rather than gaming the
+`log(σ²)` term. Binning val galaxies into 5 quantiles of predicted
+variance and comparing to the mean actual squared error in each bin,
+both seeds show a real, monotonic trend:
+
+| seed 42 bin | mean pred var | mean actual sq err | seed 7 bin | mean pred var | mean actual sq err |
+|---|---|---|---|---|---|
+| 0 | 0.188 | 0.216 | 0 | 0.275 | 0.339 |
+| 1 | 0.296 | 0.377 | 1 | 0.359 | 0.392 |
+| 2 | 0.374 | 0.576 | 2 | 0.489 | 0.991 |
+| 3 | 0.580 | 0.835 | 3 | 0.808 | 1.088 |
+| 4 | 1.116 | 1.409 | 4 | 1.344 | 1.278 |
+
+Spearman rank correlation between predicted variance and actual
+squared error: 0.275 (seed 42), 0.277 (seed 7). Reproducible across
+independent seeds and the right sign, so at face value this looks
+like real, if modest, calibration: the network has learned to flag
+which galaxies it's less sure about, and those galaxies really do
+have bigger errors.
+
+**But most of that correlation turned out to be a simpler pattern in
+disguise.** Predicted variance also correlates with the target's
+raw magnitude (`|target|`, Spearman 0.33-0.35 in both seeds), and
+actual squared error correlates with `|target|` even more strongly
+(0.55-0.62). That's expected on its own, asinh-standardized targets
+further from the population mean are intrinsically harder to hit
+exactly, a form of heteroscedasticity that has nothing to do with
+per-galaxy image content. Controlling for it (residualizing both
+predicted variance and squared error against `|target|` within
+quintile bins, then rank-correlating the residuals) collapses the
+correlation to 0.131 at seed 42 and 0.025 at seed 7, weak and not
+seed-consistent.
+
+**Verdict**: the network learned that extreme-target galaxies are
+harder to predict precisely, which is true but is a population-level
+fact recoverable from the target distribution alone, not a
+galaxy-specific signal the image adds. Once that's accounted for,
+there's little left, and what's left doesn't survive a reseed check
+either. This is a real result, not a null one: it fails to turn the
+target-noise hypothesis into the kind of galaxy-level evidence hoped
+for (e.g. "the model is specifically unsure about the bursty,
+low-particle-count galaxies flagged in the shot-noise check"). It
+neither confirms nor refutes target noise as the ceiling's cause,
+it just shows this particular diagnostic mostly measured something
+else. A more direct test would need to correlate predicted variance
+against actual burstiness (the multi-window sSFR comparison data)
+rather than against squared error, since squared error is exactly
+where the `|target|` confound comes from.
+
 ## Post-mortem: pretrained initialization
 
 We hoped pretrained ImageNet weights would give `StandardNet`'s
@@ -819,11 +897,12 @@ reversal, and the backbone-width and backbone-dropout sweeps both
 coming back clean and consistent instead of ambiguous).
 
 What remains open is no longer architectural. The
-[heteroscedastic regression head][nll] is the highest-value next
-step, because it tests the target-noise explanation directly rather
-than by elimination: if predicted per-galaxy variance tracks the
-bursty, low-particle-count galaxies, that converts the current
-inference into direct evidence.
+[heteroscedastic head][het-head] was meant to test the target-noise
+explanation directly rather than by elimination, and it half-worked:
+predicted variance does correlate with actual error, reproducibly
+across seeds, but mostly because both track target magnitude, a
+confound that needs a cleaner comparison (predicted variance against
+actual burstiness data, not squared error) to resolve.
 [Calibrated color/photometry][candidates] is the one feature axis
 tested only with a crude proxy so far. If those come back consistent
 with everything above, the honest conclusion isn't that this project
@@ -893,7 +972,9 @@ out flat regardless of galaxy properties, that argues against it.
 [backbone-sweep]: #capacity-sweep-backbone-width-2026-07-20
 [backbone-dropout]: #dropout-placement-dropout-in-the-backbone-2026-07-20
 [target-noise]: #ssfr-target-noise-check-2026-07-19
+[het-head]: #heteroscedastic-regression-head-2026-07-20
 [pm-dropout]: #post-mortem-dropout
 [pm-pretrained]: #post-mortem-pretrained-initialization
 [candidates]: #next-candidates-not-yet-started
+[considered]: #considered-and-set-aside-a-different-architecture
 [nll]: #appendix-what-is-gaussian-nll
