@@ -21,18 +21,28 @@ no images) gets val R² ≈ 0-0.04, so the regressor's R² ≈ 0.24-0.28 is
 several times better than a trivial baseline. The images carry real
 signal; this isn't a network learning nothing.
 
-We've tested lr, pretraining, projection count, dropout, and two
-capacity sweeps (head width and backbone width on `cnn.ResNet`) each
-in a controlled way (see log below), and every one of them lands in
-the same narrow R² band, with every non-pretrained run peaking very
-early (epoch 15-26 of 50) then degrading. That consistency itself is
-the finding: none of those six is the bottleneck. Capacity in
-particular is now closed in both directions: pretraining added
-capacity and it sharpened overfitting instead of helping, and
-directly shrinking the backbone made generalization steadily worse
-on both seeds, not better, so this isn't a case of the network
-carrying obvious unused capacity a smaller network would use more
-efficiently. We also checked whether the sSFR targets themselves are
+We've tested lr, pretraining, projection count, dropout (both
+placements), and two capacity sweeps (head width and backbone width
+on `cnn.ResNet`) each in a controlled way (see log below), and every
+one of them lands in the same narrow R² band or below it, with every
+non-pretrained run peaking very early (epoch 15-26 of 50) then
+degrading. That consistency itself is the finding: none of them is
+the bottleneck.
+
+The architecture axis is now effectively exhausted, and the way it
+closed is itself the most useful result in this doc. Capacity is
+closed in both directions: pretraining added capacity and sharpened
+overfitting, and shrinking the backbone made generalization steadily
+worse. Regularization is closed too, and more sharply: putting
+dropout throughout the conv backbone nearly eliminated the train/val
+gap and made val performance *worse*, not better. That combination
+is hard to square with an overfitting story. If excess model freedom
+were what capped val R², constraining it should have helped
+somewhere along that path, and it never did. The large train/val gap
+looks like a symptom of a target the images only partly determine,
+not the cause of the ceiling.
+
+We also checked whether the sSFR targets themselves are
 simply too noisy to predict well. Plain particle-count shot noise is
 far too small to explain the ceiling on its own, but a real
 multi-window comparison found genuine astrophysical burstiness
@@ -47,11 +57,10 @@ essentially no sSFR signal on its own, reinforcing that the CNN's
 real signal is likely morphological/spatial rather than a simple
 brightness/color summary, though that check used an uncalibrated
 color proxy and isn't the final word. What's left genuinely
-untested: dropout placement (weaker motivation now that capacity
-reduction alone didn't help, but still a mechanistically different
-kind of regularizer), calibrated color/photometry, and a
-heteroscedastic regression head as a direct diagnostic for whether
-the ceiling is target noise; see [Next candidates][candidates].
+untested is no longer architectural: calibrated color/photometry,
+and a heteroscedastic regression head as a direct diagnostic for
+whether the ceiling is target noise; see
+[Next candidates][candidates].
 
 We found and fixed two real infrastructure bugs along the way
 (resume not restoring most run settings; eval-mode dropout silently
@@ -66,20 +75,6 @@ here on runs at least two seeds per point from the start.
 Everything already tested, and how it turned out, lives in the
 [experiment log][log] below. This list is only what's still open.
 
-- **Dropout placement** (running now, 2026-07-20): moving dropout
-  into the conv backbone itself (`nn.Dropout2d` after each of
-  `conv2_x`-`conv5_x`) instead of the single `p=0.5` layer right
-  before the head. The [dropout post-mortem][pm-dropout] found that
-  fixing the eval-mode dropout bug made no real difference, and
-  neither capacity sweep resolved generalization either. The
-  original hypothesis was that dropout might be too weak or too
-  localized to constrain the backbone's capacity to memorize; but
-  since [cutting that capacity directly][backbone-sweep] just made
-  things worse, the case for dropout now has to rest on it being a
-  different kind of regularizer (a stochastic constraint applied
-  during training, not a fixed smaller function class) rather than
-  on the backbone having excess capacity to trim. Worth trying, but
-  the rationale is weaker than it was.
 - **Calibrated color/photometry as a feature or auxiliary signal**:
   the color baseline check found essentially no signal from a crude,
   uncalibrated per-band flux proxy, but flagged that a properly
@@ -112,7 +107,7 @@ Everything already tested, and how it turned out, lives in the
 
 ## Experiment log
 
-Everything tried so far, in the order it happened:
+Everything tried so far, grouped by theme, oldest first:
 
 - [Classifier: generalizes fine][classifier]: val F1 ≈ 0.97, not the
   problem. All effort below is the regressor.
@@ -133,6 +128,10 @@ Everything tried so far, in the order it happened:
 - [Capacity sweep: backbone width][backbone-sweep]: shrinking the
   backbone made things monotonically worse, closing capacity as a
   lever in both directions.
+- [Dropout placement: dropout in the backbone][backbone-dropout]:
+  nearly closed the train/val gap and made val *worse*, the
+  strongest evidence yet that the ceiling isn't an overfitting
+  problem.
 - [sSFR target noise check][target-noise]: shot noise is too small to
   explain the ceiling. Real burstiness shows up between windows, but
   a 0.3 Gyr target made generalization worse, not better. Also
@@ -458,6 +457,56 @@ near or below the capacity floor needed to represent the mapping at
 all, not above some capacity ceiling that regularization or shrinking
 needs to bring down.
 
+### Dropout placement: dropout in the backbone (2026-07-20)
+
+The last untested architecture lever. `cnn.ResNet` has a single
+`p=0.5` dropout right before the head, and the standing hypothesis
+(see the [dropout post-mortem][pm-dropout]) was that this is too
+weak or too localized to constrain the conv backbone, where the
+capacity to memorize training galaxies actually lives. This test
+adds `nn.Dropout2d(p=0.2)` after each of `conv2_x`-`conv5_x`,
+keeping the existing pre-head dropout, the small head, and the full
+`[16,32,64,128]` backbone. `nn.Dropout2d` zeroes whole channels
+(spatial dropout), the right granularity for conv feature maps, and
+being a real `nn.Module` it respects `model.eval()` automatically,
+so it cannot reintroduce [Bug 2][bug2]. Two seeds, same split,
+lr=1e-3, batch_size=64, 50 epochs:
+
+| config | seed | final train loss | best val loss | val R² |
+|---|---|---|---|---|
+| baseline (pre-head dropout only) | 42 | 0.372 | 0.6957 | 0.299 |
+| baseline | 7 | 0.462 | 0.7104 | 0.287 |
+| + `Dropout2d(0.2)` in backbone | 42 | 0.710 | 0.7954 | 0.206 |
+| + `Dropout2d(0.2)` in backbone | 7 | 0.710 | 0.7903 | 0.209 |
+
+(The seed 42 run crashed at epoch 22 when its environment restarted
+and resumed from its epoch-18 checkpoint, so its wandb history has 54
+rows, epochs 19-22 twice. The resume restores the generator state, so
+the replayed epochs match; the numbers above are unaffected.)
+
+**Verdict**: backbone dropout worked exactly as a regularizer is
+supposed to, and that made things worse. It clearly did its
+mechanical job: final train loss rose from 0.372/0.462 to 0.710 on
+both seeds, and the train/val gap collapsed from about 0.32 to about
+0.085, close to eliminated. But val loss got *worse* (0.795/0.790 vs.
+0.696/0.710) and val R² dropped from ~0.29 to ~0.21. The model went
+from overfitting to underfitting without ever passing through a
+better val optimum on the way.
+
+That last point is the informative part, and it's the strongest
+evidence in this doc so far that the ceiling is not an overfitting
+problem in the usual sense. The standard story ("the train/val gap
+is large, so constrain the model and val will improve") predicts
+that closing the gap buys generalization. Here we closed the gap
+almost entirely and generalization got worse. Combined with both
+capacity sweeps finding that smaller is worse, the picture is
+consistent: there is no capacity or regularization setting between
+here and a much smaller model that beats the current
+configuration, because what limits val performance isn't the model's
+freedom to memorize. The large train/val gap looks like a symptom of
+a target the images only partly determine, not a cause of the
+ceiling.
+
 ### sSFR target noise check (2026-07-19)
 
 Every experiment above assumed the sSFR targets themselves are
@@ -674,11 +723,14 @@ learning; or (b) the overfitting here may not be the "co-adapted
 feature detector" failure mode dropout specifically targets, but a
 more basic sample-size/capacity mismatch that dropout's mechanism
 doesn't address regardless of where it's placed. Guess (b) has
-gained ground since this was written: the
-[backbone-width sweep][backbone-sweep] directly tested cutting
-backbone capacity and found it made generalization worse, not
-better, arguing against a straightforward excess-capacity
-story for either dropout or capacity reduction to fix. Dropout had a
+since been confirmed, and guess (a) ruled out. The
+[backbone-width sweep][backbone-sweep] found that cutting backbone
+capacity made generalization worse, not better. Then
+[backbone dropout][backbone-dropout] tested guess (a) head-on, by
+putting dropout exactly where this paragraph said it was missing,
+throughout the conv backbone: it nearly closed the train/val gap and
+still made val worse. So dropout's failure here was never about
+placement. Dropout had a
 real, fair shot here (correctly implemented, tested in a clean A/B,
 and cross-checked against a whole project's worth of runs) and didn't
 move the number.
@@ -736,46 +788,51 @@ those lines, named and set aside for now, with reasons:
 
 ## Bottom line
 
-Not futile, but the architecture axis is now largely exhausted. The
-regressor has a real, measurable signal well above a trivial
-mass/size baseline, and the classifier already generalizes well.
-We've tested lr, pretraining, projection count, dropout, two capacity
-sweeps (head width and backbone width), sSFR shot noise, a direct
-shorter-window sSFR target, and a crude color baseline, each in a
-controlled way, and ruled them all out as the dominant lever: every
-one of them lands in the same R² ≈ 0.24-0.28 band once checked
-properly (against a second seed for the architecture and
-target-window axes, against the population's own target variance for
-the noise check). Capacity specifically is now closed in both
-directions, adding it (pretraining) and removing it (the backbone
-sweep) both made things worse, which is itself informative: it argues
-against "the network has too much unused capacity" as the story, and
-weakens the case for dropout too, even though dropout hasn't been
-directly retested since. That's useful negative information, and it
-came with a real methodological lesson: the head-width sweep's
-first-seed result looked like a breakthrough and mostly wasn't, and
-the multi-window burstiness estimate's suspiciously close numerical
-match to the observed ceiling also didn't survive a direct test, so
-every capacity/regularization experiment on this project now runs at
-least two seeds per point from the start, not a fast follow-up when a
-result looks promising, a discipline that's already paid off twice
-(the head-width sweep's medium-head reversal, and the backbone sweep
-coming back clean and monotonic instead of ambiguous).
+The architecture axis is now exhausted, and that is a result, not a
+failure. The regressor has a real, measurable signal well above a
+trivial mass/size baseline, and the classifier already generalizes
+well. We've tested lr, pretraining, projection count, dropout in
+both placements, two capacity sweeps (head width and backbone
+width), sSFR shot noise, a direct shorter-window sSFR target, and a
+crude color baseline, each in a controlled way, and ruled them all
+out as the dominant lever.
 
-What remains genuinely open, and where effort should go next: a
-heteroscedastic regression head as a direct diagnostic for whether
-the ceiling is target stochasticity rather than model capability (see
-"Next candidates"), calibrated color/photometry (the one feature
-axis tested only with a crude, uncalibrated proxy so far), and
-dropout placement (weaker motivation now, but a mechanistically
-different kind of regularizer than capacity reduction, so not
-strictly redundant with the backbone-width result). If those also
-come back flat, that would be real evidence this is close to the
-images' actual information limit for this target, itself a
-legitimate, useful finding, "single-snapshot images predict roughly
-this much of sSFR's variance, and the rest reflects real,
-image-invisible burstiness in star formation on sub-Gyr timescales,"
-not a dead end to be quietly abandoned.
+The strongest single piece of evidence came last. Every
+capacity/regularization intervention that constrained the model
+either did nothing or made val performance worse, and backbone
+dropout made this unmistakable: it nearly eliminated the train/val
+gap and val R² *fell*, from ~0.29 to ~0.21. Under an overfitting
+story, closing that gap should buy generalization. It didn't, at any
+point along the path. The most defensible reading now is that the
+large train/val gap was a symptom of a target that single-snapshot
+images only partly determine, not the cause of the ceiling, so
+constraining the model was never going to fix it.
+
+That came with a real methodological lesson too: the head-width
+sweep's first-seed result looked like a breakthrough and mostly
+wasn't, and the multi-window burstiness estimate's suspiciously close
+numerical match to the observed ceiling also didn't survive a direct
+test. Every capacity/regularization experiment on this project now
+runs at least two seeds per point from the start, a discipline that
+has already paid off three times (the head-width sweep's medium-head
+reversal, and the backbone-width and backbone-dropout sweeps both
+coming back clean and consistent instead of ambiguous).
+
+What remains open is no longer architectural. The
+[heteroscedastic regression head][nll] is the highest-value next
+step, because it tests the target-noise explanation directly rather
+than by elimination: if predicted per-galaxy variance tracks the
+bursty, low-particle-count galaxies, that converts the current
+inference into direct evidence.
+[Calibrated color/photometry][candidates] is the one feature axis
+tested only with a crude proxy so far. If those come back consistent
+with everything above, the honest conclusion isn't that this project
+failed, it's that it measured something: single-snapshot images
+predict roughly this much of sSFR's variance, and the rest reflects
+real, image-invisible burstiness in star formation on sub-Gyr
+timescales. That is a publishable claim about the physics and the
+data, supported by an unusually thorough set of controlled negative
+results, not a dead end to be quietly abandoned.
 ## Appendix: what is Gaussian NLL?
 
 Ordinary MSE training has the regressor predict one number per
@@ -834,6 +891,7 @@ out flat regardless of galaxy properties, that argues against it.
 [dropout-ab]: #dropout-bug-ab-2026-07-19-fix-made-no-real-difference
 [head-sweep]: #capacity-sweep-head-width-2026-07-19
 [backbone-sweep]: #capacity-sweep-backbone-width-2026-07-20
+[backbone-dropout]: #dropout-placement-dropout-in-the-backbone-2026-07-20
 [target-noise]: #ssfr-target-noise-check-2026-07-19
 [pm-dropout]: #post-mortem-dropout
 [pm-pretrained]: #post-mortem-pretrained-initialization
