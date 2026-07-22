@@ -12,6 +12,26 @@ GalLearn turns simulated galaxy images (plus stellar velocity maps and
 Sersic radii) into an HDF5 training set and trains the classifier and
 the regressor on it.
 
+## Project status: concluded (2026-07-22)
+
+Development is finished. The classifier works well (val F1 ≈ 0.97)
+and stays as documented below. The regressor reaches a real,
+reproducible signal well above a trivial mass/size baseline (val R²
+≈ 0.28-0.31), but a long, controlled investigation (architecture
+capacity in both directions, regularization, learning rate,
+pretraining, projection count, target-window choice, color/photometry)
+found no lever that pushes it meaningfully higher. The most
+defensible explanation is that this is close to the images' real
+information limit for a 1 Gyr sSFR target: real star formation is
+bursty on sub-Gyr timescales in a way a single snapshot image cannot
+resolve, established directly (not just inferred by elimination) via
+a multi-window sSFR comparison. See `docs/status.md`'s "Project
+status: concluded" section for the full evidence and reasoning
+behind each closed lever, and everything else in this README for how
+the pipeline itself works, which remains accurate as reference
+documentation even though the project isn't being actively developed
+further.
+
 ## Hurdle model
 
 A meaningful fraction of galaxies have essentially no recent star
@@ -38,11 +58,14 @@ shorter window would blur two physically different populations
 together under one "quenched" label: galaxies with no real recent
 star formation, and galaxies that are actively star-forming but
 happened to be between bursts during a short window. `docs/status.md`
-documents an ongoing investigation into whether the regressor
+documents a since-concluded investigation into whether the regressor
 specifically benefits from a shorter-window target on the
-star-forming subset the 1 Gyr classifier already selects; that's a
-nested question about regressor-target noise, not a reason to move
-the classifier's boundary.
+star-forming subset the 1 Gyr classifier already selects, a nested
+question about regressor-target noise, not the classifier's boundary.
+It didn't: a direct 0.3 Gyr target made generalization worse, not
+better, evidence that regressor's ceiling reflects genuine
+sub-Gyr burstiness in star formation rather than the 1 Gyr window
+hiding information a shorter one would expose.
 
 The repo spans two languages:
 

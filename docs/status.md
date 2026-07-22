@@ -6,7 +6,70 @@ also a historical log: append new findings, don't delete or silently
 rewrite old ones. If something turns out to be wrong or confounded,
 say so in place and point forward, rather than removing it.
 
-Last updated: 2026-07-20.
+Last updated: 2026-07-22. **This is the final entry.** See
+[Project status: concluded][status], immediately below.
+
+## Project status: concluded (2026-07-22)
+
+This project is done, not because it failed, but because every
+axis this doc tracked got a controlled, two-seed-checked answer, and
+none of them points at a fixable problem. Summary, with links to the
+evidence:
+
+- **Architecture is exhausted.** Capacity closed in both directions:
+  [pretraining][pm-pretrained] (more capacity) sharpened overfitting,
+  [shrinking the backbone][backbone-sweep] (less capacity) made
+  generalization steadily worse. Regularization closed too, and more
+  sharply: [backbone dropout][backbone-dropout] nearly eliminated the
+  train/val gap and val R² *fell* anyway, the strongest evidence in
+  this doc that the ceiling was never an overfitting problem in the
+  ordinary sense. [Exotic architecture families][considered] were
+  considered and set aside on the same evidence, not tried, because
+  nothing pointed at representational power as the bottleneck.
+- **Target noise is the best-supported explanation, though not
+  proven beyond doubt.** Plain shot noise is too small to explain the
+  ceiling, but a real [multi-window comparison][target-noise] found
+  genuine sub-Gyr burstiness in sSFR, and its implied ceiling (R² ~
+  0.295) landed close to the observed one. A direct test (a 0.3 Gyr
+  regressor target) made things worse, not better, which reframed but
+  didn't overturn this: the 1 Gyr window's smoothing isn't the
+  problem, the underlying stochasticity is. A
+  [heteroscedastic head][het-head] tried to convert this into direct,
+  per-galaxy evidence and mostly didn't, its predicted variance
+  correlated with target magnitude more than with anything
+  galaxy-specific.
+- **Color and photometry are closed, on a corrected basis.** The
+  original [color baseline check][target-noise] found no signal, and
+  this doc spent real effort second-guessing whether that was a
+  measurement artifact. It wasn't. Mock images are physically
+  calibrated luminosity surface brightness with no background and no
+  distance variation (`~/code/mockobservation-tools`), so the
+  original null result stands. The likely reasons color adds nothing
+  are documented in place: it was tested on the star-forming subset
+  only, where color's range compresses; dust attenuation is modeled
+  and reddens actively star-forming galaxies, partially inverting the
+  naive color-SFR relation; and color mainly tracks a shorter,
+  burstier timescale than the 1 Gyr target, the same noisy component
+  the window-sweep already flagged.
+
+**What this project actually produced**: a hurdle model whose
+classifier stage generalizes well (val F1 ~ 0.97) and whose regressor
+stage has a real, reproducible, above-trivial-baseline signal (val R²
+~ 0.28-0.31) that appears to sit close to the images' real
+information limit for a 1 Gyr sSFR target, not an engineering
+shortfall. That ceiling is best explained by genuine astrophysical
+burstiness in star formation on sub-Gyr timescales, evidence a
+single snapshot image cannot resolve, established directly rather
+than only inferred by elimination. See the README's "Hurdle model"
+section for the project-level framing.
+
+**Left genuinely open, not pursued further**: a second
+heteroscedastic-head pass correlating predicted variance against
+actual multi-window burstiness data instead of squared error (would
+need regenerating a particle-count CSV on Greenplanet); running
+multiple val splits to get a variance estimate on val R² itself. Both
+are recorded in [Documented future directions][candidates], not
+pursued as part of this project.
 
 ## Current understanding (read this first)
 
@@ -51,21 +114,19 @@ ceiling (R² ≈ 0.295) landed suspiciously close to the observed one.
 That match didn't survive a direct test, though: retraining the
 regressor on a 0.3 Gyr target instead of 1 Gyr made generalization
 *worse* on both seeds tried, not better (see the
-[sSFR target noise check][target-noise]). A crude color-only
-baseline also carries
-essentially no sSFR signal on its own, reinforcing that the CNN's
-real signal is likely morphological/spatial rather than a simple
-brightness/color summary, though that check used an uncalibrated
-color proxy and isn't the final word. A [heteroscedastic head][het-head]
-tried to turn the target-noise hypothesis into direct, per-galaxy
-evidence: its predicted variance does correlate with actual error
-(Spearman ≈ 0.28, reproducible across seeds), but that correlation
-mostly evaporates once controlled for target magnitude, so it
-doesn't confirm or refute target noise, it mostly measured a simpler
-pattern instead. What's left genuinely untested: calibrated
-color/photometry, and rerunning the heteroscedastic check against
-actual burstiness data instead of squared error; see
-[Next candidates][candidates].
+[sSFR target noise check][target-noise]). A color-only baseline also
+carries essentially no sSFR signal on its own; an initial worry that
+this was a measurement artifact (an uncalibrated color proxy) turned
+out to be wrong once checked against the image pipeline (see
+[Project status: concluded][status] above), so this null result
+stands as real, not just unresolved. A
+[heteroscedastic head][het-head] tried
+to turn the target-noise hypothesis into direct, per-galaxy evidence:
+its predicted variance does correlate with actual error (Spearman ≈
+0.28, reproducible across seeds), but that correlation mostly
+evaporates once controlled for target magnitude, so it doesn't
+confirm or refute target noise, it mostly measured a simpler pattern
+instead.
 
 We found and fixed two real infrastructure bugs along the way
 (resume not restoring most run settings; eval-mode dropout silently
@@ -75,18 +136,14 @@ first-seed result looked like a real effect and mostly turned out to
 be noise on reseed, so every capacity/regularization experiment from
 here on runs at least two seeds per point from the start.
 
-## Next candidates, not yet started
+## Documented future directions, not pursued
 
 Everything already tested, and how it turned out, lives in the
-[experiment log][log] below. This list is only what's still open.
+[experiment log][log] below. This project concluded (see
+[Project status: concluded][status] above) before either item below was
+tried; they're recorded for anyone who revisits this work, not as
+active next steps.
 
-- **Calibrated color/photometry as a feature or auxiliary signal**:
-  the color baseline check found essentially no signal from a crude,
-  uncalibrated per-band flux proxy, but flagged that a properly
-  calibrated color (e.g. from the AstroPhot Sersic fit outputs, which
-  likely already carry calibrated per-band flux) hasn't been tried
-  and could behave differently. Worth a follow-up before treating
-  "color adds nothing" as settled.
 - **Heteroscedastic head, take two: correlate against burstiness
   directly, not against squared error**. [The first attempt][het-head]
   found predicted variance mostly tracks target magnitude, a
@@ -627,15 +684,78 @@ train-only-fit target scaling as the original ceiling check, color
 alone added essentially nothing (linear val R² -0.020, gradient
 boosting -0.020), and adding it on top of `log10(Mstar)` + `Re` only
 marginally helped the gradient boosting model (0.038 -> 0.065; linear
-stayed flat, -0.012 -> -0.009). **Caveat**: this color proxy is
-crude, an uncalibrated raw pixel sum, not a real photometric color,
-so this result says more about that proxy's weakness than about
-whether color carries no SFR information at all. A properly
-calibrated color (e.g. from the AstroPhot Sersic fit outputs, which
-likely already contain calibrated per-band flux from the same
-pipeline `Re` comes from) has not been tried and could behave
-differently; this check should not be read as ruling out color as a
-useful feature.
+stayed flat, -0.012 -> -0.009).
+
+**Correction (2026-07-22): the "crude proxy" caveat above was
+wrong.** It assumed this check's weakness was an uncalibrated
+aperture/units problem, on the theory that real photometry needs
+background subtraction and a flux zero-point neither the raw pixel
+sum nor the image pipeline was known to provide. Checking
+`~/code/mockobservation-tools/mockobservation_tools/galaxy_tools.py`
+(`get_mock_observation`, which generates these images via
+`raytrace_ugr_attenuation`) settles this: pixel values are
+`'SB_lum': Luminosity per square distance (Lsun/kpc^2)`, genuine
+physical surface brightness from a dust-attenuated ray trace, not
+instrument counts needing a zero-point. There is no sky background
+to subtract (a pure simulation image), and every galaxy is imaged at
+the same distance, so there's no distance-modulus inconsistency
+either. None of the concerns a real observational photometry pipeline
+has to correct for actually apply here. A Sersic-fit-based total flux
+(available for the satellite subset via `AstroPhot_Sate_Sersic_
+AllMeasure.csv`'s `Ie`/`Re`/`n`/`b_a`) would mainly help with flux
+lost outside a fixed field of view for unusually extended galaxies, a
+second-order effect, not a first-order flaw in the original check.
+**The original null result stands, and is more solid than this doc
+previously gave it credit for.**
+
+That raises the real question this doc hadn't answered: given a
+reasonably legitimate color measurement, why does color still add
+nothing? Four likely, non-exclusive reasons, none of which needed a
+better proxy to find:
+
+1. **The check ran on the star-forming subset only.** Real
+   observational color-SFR relations are strongest for the coarse
+   quenched/star-forming split, which the
+   [classifier][classifier] already gets right at F1 ~ 0.97. Once
+   that split is already made, color's dynamic range compresses a
+   lot within just the star-forming population, leaving much less
+   room for it to track the *continuous* sSFR variation the
+   regressor is scored on.
+2. **Dust attenuation is explicitly modeled in the image pipeline**
+   (`raytrace_ugr_attenuation`), and dust preferentially reddens
+   light from young, actively star-forming regions. Within the
+   star-forming population, the most active, dustiest galaxies can
+   look redder, not bluer, partially inverting the naive
+   "bluer = more star formation" relationship. This is a known
+   complication in real observational SFR-from-color work too,
+   not a defect specific to this check.
+3. **The [window-sweep finding][target-noise] predicts exactly
+   this.** Color mainly traces relatively short-timescale star
+   formation (however long young stars stay blue), and this doc
+   already found that a shorter-timescale sSFR target is *harder*
+   to predict from these images than the 1 Gyr one. If color
+   specifically encodes the short-timescale, burstier component,
+   it's tracking the noisier signal relative to what the regressor
+   is actually scored against.
+4. **This check was always a narrower test than it sounds.** It
+   asks whether a single global scalar color helps a linear/GBR
+   model beyond mass and size, not whether the CNN uses
+   color-like information at all. The CNN's input already has
+   per-pixel, per-band values, direct access to spatially resolved
+   color (including color gradients across a galaxy), if that's
+   useful. A global scalar color not helping a simple model says
+   nothing about whether the CNN is already using something similar
+   internally.
+
+Reasons 1 and 2 are the likeliest explanation for the literal null
+result; reason 4 is why this check was never positioned to answer
+"does the CNN use color-like information" either way, only "does a
+naive global color feature help a simple model," a narrower
+question. Calibrated/photometric color as a candidate is closed:
+not because it was tried and failed under a fair test (it was
+already fairly tested), but because the specific concern that
+motivated retrying it, aperture and units, does not apply to this
+dataset.
 
 ### Heteroscedastic regression head (2026-07-20)
 
@@ -836,10 +956,9 @@ a network too weak to extract what's already there. No architecture,
 however capable, can predict a target's genuinely stochastic
 component from an image that doesn't encode it.
 
-That argues for keeping architecture changes targeted (see
-[Next candidates][candidates]) rather than jumping to a
-fundamentally different architecture family. Three options along
-those lines, named and set aside for now, with reasons:
+That argues for keeping architecture changes targeted rather than
+jumping to a fundamentally different architecture family. Three
+options along those lines, named and set aside, with reasons:
 
 - **Vision transformers**: typically need more data than CNNs to
   outperform them, since they lack a CNN's built-in spatial
@@ -853,16 +972,15 @@ those lines, named and set aside for now, with reasons:
   spatial scale a plain ResNet's downsampling washes out (e.g. a
   faint diffuse component vs. a compact bright core). But nothing
   tested so far points at scale specifically as the problem, so this
-  is speculative rather than motivated by evidence; worth revisiting
-  after the nearer-term levers in [Next candidates][candidates], not
-  before them.
+  stayed speculative rather than evidence-motivated, and the project
+  concluded before it was revisited.
 - **Multi-branch, physics-informed networks** (a separate branch for
   a derived quantity, fused with the image branch): really just
-  "better features" wearing an architecture costume. It overlaps
-  heavily with the calibrated color/photometry item in
-  [Next candidates][candidates], which is the same idea in a
-  cheaper, more targeted form, so it doesn't add a distinct
-  hypothesis of its own worth testing separately.
+  "better features" wearing an architecture costume, and largely the
+  same idea as the calibrated-color question this doc later settled
+  (see [Project status: concluded][status]): color and photometry,
+  however measured, don't appear to add much on top of what the images
+  already give the CNN directly.
 
 ## Bottom line
 
@@ -896,22 +1014,29 @@ has already paid off three times (the head-width sweep's medium-head
 reversal, and the backbone-width and backbone-dropout sweeps both
 coming back clean and consistent instead of ambiguous).
 
-What remains open is no longer architectural. The
+The last two axes closed rather than resolved cleanly. The
 [heteroscedastic head][het-head] was meant to test the target-noise
-explanation directly rather than by elimination, and it half-worked:
-predicted variance does correlate with actual error, reproducibly
-across seeds, but mostly because both track target magnitude, a
-confound that needs a cleaner comparison (predicted variance against
-actual burstiness data, not squared error) to resolve.
-[Calibrated color/photometry][candidates] is the one feature axis
-tested only with a crude proxy so far. If those come back consistent
-with everything above, the honest conclusion isn't that this project
-failed, it's that it measured something: single-snapshot images
-predict roughly this much of sSFR's variance, and the rest reflects
-real, image-invisible burstiness in star formation on sub-Gyr
-timescales. That is a publishable claim about the physics and the
+explanation directly rather than by elimination, and it
+half-worked: predicted variance does correlate with actual error,
+reproducibly across seeds, but mostly because both track target
+magnitude, a confound a cleaner comparison (predicted variance
+against actual burstiness data, not squared error) would need to
+resolve, left as a documented future direction rather than pursued.
+Color closed more cleanly: the original null result held up once the
+[uncalibrated proxy][status] concern was checked against the actual image
+pipeline and found not to apply (see
+[Project status: concluded][status]).
+
+The honest conclusion isn't that this project failed, it's that it
+measured something: single-snapshot images predict roughly this much
+of sSFR's variance, on top of a classifier that already separates
+quenched from star-forming galaxies well, and the regressor's
+remaining ceiling most likely reflects real, image-invisible
+burstiness in star formation on sub-Gyr timescales, not an
+engineering shortfall. That's a claim about the physics and the
 data, supported by an unusually thorough set of controlled negative
-results, not a dead end to be quietly abandoned.
+results, not a dead end quietly abandoned.
+
 ## Appendix: what is Gaussian NLL?
 
 Ordinary MSE training has the regressor predict one number per
@@ -975,6 +1100,7 @@ out flat regardless of galaxy properties, that argues against it.
 [het-head]: #heteroscedastic-regression-head-2026-07-20
 [pm-dropout]: #post-mortem-dropout
 [pm-pretrained]: #post-mortem-pretrained-initialization
-[candidates]: #next-candidates-not-yet-started
+[candidates]: #documented-future-directions-not-pursued
+[status]: #project-status-concluded-2026-07-22
 [considered]: #considered-and-set-aside-a-different-architecture
 [nll]: #appendix-what-is-gaussian-nll
