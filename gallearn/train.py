@@ -239,8 +239,8 @@ def prepare_targets(task, d, N, train_idxs, target_stats=None):
         targets = torch.zeros_like(ssfr)
         targets[valid_indices] = scaled
         print(
-            'Regressor: training on {0:.0f}'
-            ' star-forming galaxy images'.format(
+            'Regressor: {0:.0f} star-forming galaxy images'
+            ' available'.format(
                 len(valid_indices)
             )
         )

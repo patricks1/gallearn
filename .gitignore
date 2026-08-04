@@ -27,6 +27,10 @@ gallearn/_version.py
 # ignore compiled sysimages
 *.so
 
+# ignore generated plots/reports (e.g. from scripts/evaluate.py)
+*.png
+*.pdf
+
 # ignore slurm output
 *.out
 slurm.epilog-*
