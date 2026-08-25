@@ -1,3 +1,3 @@
 import UCITools
 
-UCITools.firebox_io.summarize_gals(save=true)
+UCITools.FIREBoxIO.summarize_gals(save=true)
