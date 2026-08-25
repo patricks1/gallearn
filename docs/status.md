@@ -6,8 +6,43 @@ also a historical log: append new findings, don't delete or silently
 rewrite old ones. If something turns out to be wrong or confounded,
 say so in place and point forward, rather than removing it.
 
-Last updated: 2026-07-22. **This is the final entry.** See
-[Project status: concluded][status], immediately below.
+Last updated: 2026-08-25. See [Project status: reopened][reopened],
+immediately below, then [Project status: concluded][status] for the
+sSFR work this project produced before the pivot.
+
+## Project status: reopened (2026-08-25)
+
+The 2026-07-22 conclusion below stands as a correct read of the sSFR
+axis, not a mistake to walk back: that investigation is closed. What
+changed is scope, not the verdict. The project is pivoting to target
+other galaxy properties instead of continuing to press on sSFR,
+since the sSFR ceiling looks like a real astrophysical limit rather
+than a fixable gap. Candidate targets under discussion:
+
+- **Gas fraction** (starting point; see below).
+- **Dark-matter fraction.**
+- **Dark-matter distribution** (e.g. density-profile slope within
+  1-2 Rvir).
+- **Dynamical mass.**
+- **Perturbation index.**
+- **Color gradient** (spatial color gradients across a galaxy,
+  distinct from the single global color scalar [ruled out
+  ][target-noise] as an sSFR feature).
+- **Unsupervised classification** (e.g. clustering galaxies on
+  learned or physical features, rather than regressing or
+  classifying one chosen target).
+
+Work starts with gas fraction, since it (and dark-matter fraction)
+is already available per galaxy from the halo-finder output the
+pipeline reads, as a true fraction of total halo mass. Dark-matter
+distribution, dynamical mass, and perturbation index likely need new
+particle-level measurements instead.
+
+Everything below this section is the sSFR project's history and
+final status, preserved as-is. New findings on the new targets get
+their own entries appended to the [experiment log][log] going
+forward, following this doc's usual convention: append, don't
+rewrite.
 
 ## Project status: concluded (2026-07-22)
 
@@ -1102,5 +1137,6 @@ out flat regardless of galaxy properties, that argues against it.
 [pm-pretrained]: #post-mortem-pretrained-initialization
 [candidates]: #documented-future-directions-not-pursued
 [status]: #project-status-concluded-2026-07-22
+[reopened]: #project-status-reopened-2026-08-25
 [considered]: #considered-and-set-aside-a-different-architecture
 [nll]: #appendix-what-is-gaussian-nll

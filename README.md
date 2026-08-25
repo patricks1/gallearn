@@ -12,25 +12,33 @@ GalLearn turns simulated galaxy images (plus stellar velocity maps and
 Sersic radii) into an HDF5 training set and trains the classifier and
 the regressor on it.
 
-## Project status: concluded (2026-07-22)
+## Project status: reopened (2026-08-25)
 
-Development is finished. The classifier works well (val F1 ≈ 0.97)
-and stays as documented below. The regressor reaches a real,
-reproducible signal well above a trivial mass/size baseline (val R²
-≈ 0.28-0.31), but a long, controlled investigation (architecture
-capacity in both directions, regularization, learning rate,
-pretraining, projection count, target-window choice, color/photometry)
-found no lever that pushes it meaningfully higher. The most
-defensible explanation is that this is close to the images' real
-information limit for a 1 Gyr sSFR target: real star formation is
-bursty on sub-Gyr timescales in a way a single snapshot image cannot
-resolve, established directly (not just inferred by elimination) via
-a multi-window sSFR comparison. See `docs/status.md`'s "Project
-status: concluded" section for the full evidence and reasoning
-behind each closed lever, and everything else in this README for how
-the pipeline itself works, which remains accurate as reference
-documentation even though the project isn't being actively developed
-further.
+The sSFR hurdle model below is complete, and its investigation is
+closed. The classifier works well (val F1 ≈ 0.97) and stays as
+documented below. The regressor reaches a real, reproducible signal
+well above a trivial mass/size baseline (val R² ≈ 0.28-0.31), but a
+long, controlled investigation (architecture capacity in both
+directions, regularization, learning rate, pretraining, projection
+count, target-window choice, color/photometry) found no lever that
+pushes it meaningfully higher. The most defensible explanation is
+that this is close to the images' real information limit for a 1 Gyr
+sSFR target: real star formation is bursty on sub-Gyr timescales in a
+way a single snapshot image cannot resolve, established directly (not
+just inferred by elimination) via a multi-window sSFR comparison. See
+`docs/status.md`'s "Project status: concluded" section for the full
+evidence and reasoning behind each closed lever.
+
+The project itself isn't done, though: it's pivoting to target other
+galaxy properties instead of continuing to press on sSFR: gas fraction (the current starting point), dark-matter
+fraction, dark-matter distribution (e.g. density slope within 1-2
+Rvir), dynamical mass, perturbation index, color gradient, and
+unsupervised classification. See `docs/status.md`'s "Project status:
+reopened" section for the current list and status. Everything else
+in this README describes the sSFR pipeline as built; it remains
+accurate reference documentation, and much of the dataset-build,
+splitting, and training infrastructure below should carry over
+directly to the new targets.
 
 ## Hurdle model
 
