@@ -23,6 +23,7 @@ from . import config
 from . import dataset_lock
 from . import preprocessing
 from . import splitting
+from . import target_specs
 
 
 def get_device():
@@ -120,15 +121,16 @@ def compute_regression_metrics(outputs, targets):
     }
 
 
-def compute_valid_indices(task, d, N):
+def compute_valid_indices(task, d, N, tgt_type):
     """
     Determine which HDF5 rows this task trains/evaluates on.
 
-    Deliberately cheap and leak-free: it only looks at which rows
-    have a nonzero sSFR, not at any train/val split, so it's safe to
+    Deliberately cheap and leak-free: it only looks at the target
+    values themselves, not at any train/val split, so it's safe to
     call before train_idxs/val_idxs are resolved (resolving them
     requires narrowing the split's rows down to valid ones first, see
-    main()).
+    main()). Which rows count as valid comes from the target's spec
+    in target_specs.py.
 
     Parameters
     ----------
@@ -138,20 +140,23 @@ def compute_valid_indices(task, d, N):
         Metadata dictionary from load_metadata.
     N : int
         Number of samples in dataset.
+    tgt_type : str
+        Which target the dataset holds: 'sfr', 'avg_sfr', or
+        'fgas'. See target_specs.REGISTRY.
 
     Returns
     -------
     valid_indices : torch.Tensor
         HDF5 indices to use for training/testing. For classifier
-        this is all N indices; for regressor this is the
-        star-forming subset.
+        this is all N indices; for regressor it is whichever subset
+        the target's spec considers valid (for sSFR, the
+        star-forming rows; for gas fraction, all of them).
     """
     if task == 'classifier':
         return torch.arange(N)
     elif task == 'regressor':
-        ssfr = d['ys_sorted'][:N]
-        sf_mask = (ssfr > 0).squeeze()
-        return torch.where(sf_mask)[0]
+        spec = target_specs.get(tgt_type)
+        return spec.select_valid(d['ys_sorted'][:N])
     else:
         raise ValueError(
             "task must be 'classifier' or 'regressor', "
@@ -159,13 +164,23 @@ def compute_valid_indices(task, d, N):
         )
 
 
-def prepare_targets(task, d, N, train_idxs, target_stats=None):
+def prepare_targets(
+        task,
+        d,
+        N,
+        train_idxs,
+        tgt_type,
+        target_stats=None):
     """
-    Prepare targets based on task type.
+    Prepare targets for one task and target.
 
-    For the regressor, target-scaling statistics (means/stds fed to
-    std_asinh) are fit on train_idxs only, never on val or locked-test
-    rows, so no held-out information leaks into the scaling.
+    Everything target-specific comes from the target's spec in
+    target_specs.py, so this function stays free of per-target
+    branches.
+
+    For the regressor, target-scaling statistics are fit on
+    train_idxs only, never on val or locked-test rows, so no
+    held-out information leaks into the scaling.
 
     Parameters
     ----------
@@ -179,13 +194,17 @@ def prepare_targets(task, d, N, train_idxs, target_stats=None):
         Row indices to fit target-scaling statistics on (regressor
         only; ignored for the classifier, which has none). This
         should already be resolved against compute_valid_indices'
-        output, i.e. it may contain only star-forming rows.
+        output, i.e. it may contain only the target's valid rows.
+    tgt_type : str
+        Which target the dataset holds: 'sfr', 'avg_sfr', or
+        'fgas'. See target_specs.REGISTRY.
     target_stats : dict, optional
-        A resumed run's cached {'means': ..., 'stds': ...,
-        'stretch': ...}, reused directly instead of refitting from
-        train_idxs, so a resume rescales targets identically to the
-        original run bit-for-bit rather than refitting against
-        whatever train_idxs the checkpoint happens to carry.
+        A resumed run's cached scaling statistics, reused directly
+        instead of refitting from train_idxs, so a resume rescales
+        targets identically to the original run bit-for-bit rather
+        than refitting against whatever train_idxs the checkpoint
+        happens to carry. Treat this as opaque: only the target's
+        spec interprets its contents.
 
     Returns
     -------
@@ -194,53 +213,36 @@ def prepare_targets(task, d, N, train_idxs, target_stats=None):
         at valid_indices contain meaningful values.
     valid_indices : torch.Tensor
         HDF5 indices to use for training/testing. For classifier
-        this is all N indices; for regressor this is the
-        star-forming subset.
+        this is all N indices; for regressor it is whichever subset
+        the target's spec considers valid.
     target_stats : dict or None
-        For regressor: {'means': ..., 'stds': ..., 'stretch': ...}
-        needed to invert predictions. None for classifier.
+        For regressor, the spec's scaling statistics, needed to
+        invert predictions. None for classifier.
     """
-    ssfr = d['ys_sorted'][:N]
-    sf_mask = (ssfr > 0).squeeze()
-
-    n_star_forming = sf_mask.sum().item()
-    n_quenched = N - n_star_forming
-    print(
-        'Class balance: {0:.0f} quenched images, '
-        '{1:.0f} star-forming images'.format(
-            n_quenched, n_star_forming
-        )
-    )
+    spec = target_specs.get(tgt_type)
+    vals = d['ys_sorted'][:N]
+    print(spec.population_summary(vals))
 
     if task == 'classifier':
-        targets = sf_mask.float().unsqueeze(-1)
+        if not spec.supports_classifier:
+            raise ValueError(
+                "Target '{0}' does not support the classifier"
+                ' task. The quenched/star-forming hurdle only'
+                ' applies to a target with a structural'
+                ' zero.'.format(tgt_type)
+            )
+        targets = spec.classifier_targets(vals)
         valid_indices = torch.arange(N)
         target_stats = None
     elif task == 'regressor':
-        valid_indices = torch.where(sf_mask)[0]
-        ssfr_sf = ssfr[valid_indices]
+        valid_indices = spec.select_valid(vals)
         if target_stats is None:
-            _, means, stds = preprocessing.std_asinh(
-                ssfr[train_idxs],
-                1.e11,
-                return_distrib=True,
-            )
-            target_stats = {
-                'means': means,
-                'stds': stds,
-                'stretch': 1.e11,
-            }
-        scaled = preprocessing.std_asinh(
-            ssfr_sf,
-            target_stats['stretch'],
-            means=target_stats['means'],
-            stds=target_stats['stds'],
-        )
-        targets = torch.zeros_like(ssfr)
+            target_stats = spec.fit(vals[train_idxs])
+        scaled = spec.scale(vals[valid_indices], target_stats)
+        targets = torch.zeros_like(vals)
         targets[valid_indices] = scaled
         print(
-            'Regressor: {0:.0f} star-forming galaxy images'
-            ' available'.format(
+            'Regressor: {0:.0f} galaxy images available'.format(
                 len(valid_indices)
             )
         )
@@ -572,7 +574,9 @@ def main(
         resume_from=None,
         use_scheduler=None,
         pretrained=None,
-        train_orientations=None):
+        train_orientations=None,
+        tgt_type=None,
+        dataset=None):
     """
     Main training function.
 
@@ -709,6 +713,24 @@ def main(
                 ' checkpoint\'s already-filtered cached train_idxs'
                 ' rather than rebuilding them.'
             )
+        if dataset is not None:
+            raise ValueError(
+                'dataset has no effect when resume_from is given. A'
+                ' resumed run always reuses the checkpoint\'s own'
+                ' recorded dataset, since its cached train_idxs are'
+                ' raw row indices resolved against that dataset and'
+                ' would point at different galaxies in another one.'
+                ' Omit --dataset when passing --resume.'
+            )
+        if tgt_type is not None:
+            raise ValueError(
+                'tgt_type has no effect when resume_from is given.'
+                ' A resumed run always reuses the checkpoint\'s own'
+                ' recorded tgt_type, along with the target scaling'
+                ' statistics fit under it, so it cannot continue'
+                ' against a different target than it was trained'
+                ' on. Omit --target when passing --resume.'
+            )
         if task is not None or model_type is not None:
             raise ValueError(
                 'task and model_type have no effect when resume_from'
@@ -799,6 +821,10 @@ def main(
         seed = saved_config.get('seed')
         use_scheduler = saved_config.get('use_scheduler')
         pretrained = saved_config.get('pretrained')
+        # Checkpoints written before tgt_type was recorded have none,
+        # which leaves it to be resolved from the dataset's own
+        # attributes below, exactly as a fresh run would.
+        tgt_type = saved_config.get('tgt_type')
     else:
         if task is None or model_type is None:
             raise ValueError(
@@ -827,7 +853,13 @@ def main(
             pretrained = False
         with open(split_file_path) as f:
             split_dict = json.load(f)
-        dataset = split_dict['metadata']['dataset_path']
+        # The split file records the dataset it was built against.
+        # An explicit `dataset` overrides that, so one split's galaxy
+        # partition can train against a different dataset (a
+        # different target over the same galaxies, say) while the
+        # split file stays an unedited record of its own origin.
+        if dataset is None:
+            dataset = split_dict['metadata']['dataset_path']
         # A resumed run never reopens the split file (see below), so
         # nothing downstream needs the literal path split_file_path
         # was passed in as, which is often absolute and specific to
@@ -925,9 +957,44 @@ def main(
     d, N, hdf5_path = preprocessing.load_metadata(dataset)
     print('{0} galaxy images in data'.format(N))
 
+    # A dataset built by a current src/Dataset.jl declares its own
+    # target, and that declaration wins: it travels with the file, so
+    # it cannot disagree with it. Passing tgt_type as well is an
+    # error rather than a silent agreement check, since the only way
+    # a caller can be right is by repeating what the file already
+    # says. Older datasets predate the attribute and have no way to
+    # answer, so those require tgt_type instead of defaulting to
+    # sSFR and quietly mis-scaling some other target.
+    if checkpoint is not None and tgt_type is not None:
+        # Restored from the checkpoint, which is authoritative for a
+        # resumed run: its target scaling statistics were fit under
+        # this target. The resume guard above already rejected a
+        # caller-supplied tgt_type, so this cannot be one.
+        pass
+    elif d['tgt_type'] is not None:
+        if tgt_type is not None:
+            raise ValueError(
+                "Dataset '{0}' already declares its target as"
+                " '{1}', so tgt_type would be redundant at best"
+                ' and contradictory at worst. Omit'
+                ' --target.'.format(dataset, d['tgt_type'])
+            )
+        tgt_type = d['tgt_type']
+    elif tgt_type is None:
+        raise ValueError(
+            "Dataset '{0}' does not record which target it holds,"
+            ' since it predates that attribute. Say which it is'
+            ' with --target ({1}), or rebuild it with a current'
+            ' scripts/build_dataset.jl.'.format(
+                dataset, ', '.join(sorted(target_specs.REGISTRY))
+            )
+        )
+    print('Target: {0}'.format(tgt_type))
+    train_config['tgt_type'] = tgt_type
+
     # Cheap, leak-free: which rows this task trains/evaluates on,
     # before any split resolution or scaling-statistic fitting.
-    valid_indices = compute_valid_indices(task, d, N)
+    valid_indices = compute_valid_indices(task, d, N, tgt_type)
     rs = d['Re'][:N]
 
     # A resumed run reuses the checkpoint's cached train_idxs/
@@ -975,6 +1042,7 @@ def main(
             d,
             N,
             train_idxs,
+            tgt_type,
             target_stats=checkpoint.get('target_stats'),
         )
         scaling_means = checkpoint['scaling_means']

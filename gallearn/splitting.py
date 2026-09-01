@@ -86,14 +86,64 @@ def _save_json(data, path):
         f.write('\n')
 
 
+def _load_avg_sfr_column(csv_path, column):
+    """
+    Load one column of the avg_sfrs CSV, keyed by galaxy id.
+
+    Both values this reads travel a long way to get here:
+
+        particles_within_Rvir_object_<id>.hdf5
+            FIREbox stores one `Mstar` scalar per galaxy alongside
+            that galaxy's particles.
+        -> UCITools ProcessFIREBox.get_avg_sfrs
+            Reads `Mstar`, sums the mass of stars formed within the
+            averaging window to get `sfr`, then divides to get
+            `ssfr`.
+        -> avg_sfrs_<age>Gyr_no_bound_filter.csv
+            get_all_avg_sfrs writes one row per galaxy, with an
+            `id`, `grp_id`, `sfr`, `ssfr`, `Mstar` schema, into
+            project_data_dir. gallearn runs this step through
+            scripts/gen_sfrs.jl.
+        -> this function
+
+    `id` is a bare integer in the CSV, so this prepends "object_"
+    to match `obs_sorted`, the same transform src/Dataset.jl's
+    `read_sfr_tgt` applies.
+
+    Parameters
+    ----------
+    csv_path : str or pathlib.Path
+        Path to the avg_sfrs CSV.
+    column : str
+        Which column to read, e.g. 'Mstar' or 'ssfr'.
+
+    Returns
+    -------
+    dict
+        {galaxy_id: value}, one entry per CSV row whose `id`
+        parsed cleanly.
+    """
+    df = pd.read_csv(csv_path)
+    values = {}
+    n_bad = 0
+    for raw_id, value in zip(df['id'], df[column]):
+        try:
+            galaxy_id = 'object_{0}'.format(int(raw_id))
+        except (TypeError, ValueError):
+            n_bad += 1
+            continue
+        values[galaxy_id] = float(value)
+    if n_bad > 0:
+        print(
+            'Skipped {0} rows in {1} with an unparseable galaxy'
+            ' id.'.format(n_bad, csv_path)
+        )
+    return values
+
+
 def load_avg_sfr_csv(csv_path=AVG_SFR_CSV):
     """
-    Load a galaxy-mass lookup from the avg_sfrs CSV (see UCITools'
-    ProcessFIREBox.get_avg_sfrs, which writes this file with an
-    `id`, `grp_id`, `sfr`, `ssfr`, `Mstar` schema). `id` is a bare
-    integer in the CSV; load_avg_sfr_csv prepends "object_" to
-    match `obs_sorted`, the same transform src/Dataset.jl's
-    `read_sfr_tgt` applies.
+    Load a galaxy-mass lookup from the avg_sfrs CSV.
 
     Parameters
     ----------
@@ -106,22 +156,28 @@ def load_avg_sfr_csv(csv_path=AVG_SFR_CSV):
         {galaxy_id: Mstar}, one entry per CSV row whose `id`
         parsed cleanly.
     """
-    df = pd.read_csv(csv_path)
-    masses = {}
-    n_bad = 0
-    for raw_id, mstar in zip(df['id'], df['Mstar']):
-        try:
-            galaxy_id = 'object_{0}'.format(int(raw_id))
-        except (TypeError, ValueError):
-            n_bad += 1
-            continue
-        masses[galaxy_id] = float(mstar)
-    if n_bad > 0:
-        print(
-            'Skipped {0} rows in {1} with an unparseable galaxy'
-            ' id.'.format(n_bad, csv_path)
-        )
-    return masses
+    return _load_avg_sfr_column(csv_path, 'Mstar')
+
+
+def load_avg_sfr_ssfrs(csv_path=AVG_SFR_CSV):
+    """
+    Load a galaxy-sSFR lookup from the avg_sfrs CSV.
+
+    Test-lock stratification bins on stellar mass and sSFR no matter
+    what target a dataset holds, so it reads both from this CSV.
+
+    Parameters
+    ----------
+    csv_path : str or pathlib.Path, optional
+        Path to the avg_sfrs CSV. Defaults to AVG_SFR_CSV.
+
+    Returns
+    -------
+    dict
+        {galaxy_id: ssfr}, one entry per CSV row whose `id` parsed
+        cleanly.
+    """
+    return _load_avg_sfr_column(csv_path, 'ssfr')
 
 
 def build_galaxy_index(obs_sorted):
@@ -236,7 +292,7 @@ def stratify_galaxies(
     """
     Group galaxies into strata for representative test-lock
     sampling. Galaxies missing from `masses` land in their own
-    'unknown_mass' stratum; stratify_galaxies never drops them.
+    'unknown_mass_or_ssfr' stratum; stratify_galaxies never drops them.
     stratify_galaxies bins quenched galaxies (ssfr <= 0) by
     log10(Mstar) alone and bins the rest on a log10(Mstar) x
     log10(ssfr) quantile grid. _quantile_edges collapses the bin
@@ -251,8 +307,9 @@ def stratify_galaxies(
         {galaxy_id: Mstar}, from load_avg_sfr_csv. Galaxy ids
         absent here are treated as unknown-mass.
     ssfrs : dict
-        {galaxy_id: ssfr}, from galaxy_ssfr. Must cover every id in
-        galaxy_ids.
+        {galaxy_id: ssfr}, from load_avg_sfr_ssfrs. Must cover every
+        id that `masses` covers, since those are the ids
+        stratify_galaxies bins.
     n_mass_bins : int, optional
         Requested quantile bins on log10(Mstar). Default 5.
     n_ssfr_bins : int, optional
@@ -263,7 +320,7 @@ def stratify_galaxies(
     -------
     dict
         {stratum_name: [galaxy_id, ...]}. stratum_name is
-        'unknown_mass' for galaxies missing from `masses`,
+        'unknown_mass_or_ssfr' for galaxies missing from `masses`,
         'quenched_m<mass_bin>' for quenched galaxies, or
         'sf_m<mass_bin>_s<ssfr_bin>' for star-forming galaxies,
         where <mass_bin>/<ssfr_bin> are integer bin indices from
@@ -272,9 +329,22 @@ def stratify_galaxies(
     """
     strata = collections.defaultdict(list)
 
-    known = [g for g in galaxy_ids if g in masses]
-    unknown = [g for g in galaxy_ids if g not in masses]
-    strata['unknown_mass'].extend(unknown)
+    # A galaxy missing one of mass and sSFR is missing the other.
+    # load_avg_sfr_csv and load_avg_sfr_ssfrs read two columns of a
+    # single CSV, keyed on the same `id` column, so a galaxy either
+    # has a row there and both values, or no row and neither. One
+    # stratum therefore covers both cases. The check below still
+    # tests both lookups rather than inferring one from the other,
+    # so independently sourced lookups yield a stratum instead of a
+    # KeyError.
+    #
+    # Galaxies do land here. A gas-fraction dataset draws its
+    # galaxies from firebox_summary_stats.csv, which lists 10
+    # galaxies the avg_sfrs CSV omits.
+    known = [g for g in galaxy_ids if g in masses and g in ssfrs]
+    known_ids = set(known)
+    unknown = [g for g in galaxy_ids if g not in known_ids]
+    strata['unknown_mass_or_ssfr'].extend(unknown)
 
     quenched = [g for g in known if ssfrs[g] <= 0.]
     star_forming = [g for g in known if ssfrs[g] > 0.]
@@ -313,7 +383,7 @@ def select_test_lock_galaxies(
     Draw new galaxies into the test lock so each stratum's locked
     share approaches target_fraction. Draws only from galaxies not
     already in `already_locked`, and never touches an existing
-    entry. select_test_lock_galaxies skips the 'unknown_mass'
+    entry. select_test_lock_galaxies skips the 'unknown_mass_or_ssfr'
     stratum entirely, since those galaxies have no mass to make the
     lock representative with.
 
@@ -339,7 +409,7 @@ def select_test_lock_galaxies(
     already_locked = set(already_locked)
     selected = []
     for stratum, galaxy_ids in sorted(strata.items()):
-        if stratum == 'unknown_mass':
+        if stratum == 'unknown_mass_or_ssfr':
             continue
         candidates = sorted(
             g for g in galaxy_ids if g not in already_locked
@@ -444,9 +514,14 @@ def update_test_lock(
     existing = _load_json(existing_path) if existing_path else None
 
     d, N, _ = preprocessing.load_metadata(dataset_fname)
+    # The dataset says which galaxies exist; the CSV supplies the
+    # stellar mass and sSFR to stratify them on. Note that `d` holds
+    # this dataset's targets, which are gas fractions rather than
+    # sSFRs whenever it was built for gas fraction, so they cannot
+    # stand in for the CSV's sSFRs here.
     galaxy_index = build_galaxy_index(d['obs_sorted'][:N])
-    ssfrs = galaxy_ssfr(galaxy_index, d['ys_sorted'][:N])
     masses = load_avg_sfr_csv(avg_sfr_csv)
+    ssfrs = load_avg_sfr_ssfrs(avg_sfr_csv)
 
     already_locked = existing['locked_galaxies'] if existing else []
 

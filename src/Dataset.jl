@@ -199,26 +199,55 @@ function read_2d_shapes()
     return dat
 end
 
+# One file per mass class. Order matters: it sets the row order of the
+# concatenated target frame.
+const TGT_3D_FNAMES = [
+    "FIREBoxm9.csv",
+    "FIREBoxm7.csv",
+    "FIREBoxm8.csv",
+    "FIREBoxm10.csv",
+]
+
 function read_3d_tgt()
-    files = readdir(tgt_3d_dir)
-    ys = CSV.read(joinpath(tgt_3d_dir, "FIREBoxm9.csv"), DataFrame)
-    for mclass in ["7", "8", "10"]
-        ys_add = CSV.read(
-            joinpath(tgt_3d_dir, "FIREBoxm" * mclass * ".csv"),
-            DataFrame
-        )
+    ys = CSV.read(joinpath(tgt_3d_dir, TGT_3D_FNAMES[1]), DataFrame)
+    for fname in TGT_3D_FNAMES[2:end]
+        ys_add = CSV.read(joinpath(tgt_3d_dir, fname), DataFrame)
         ys = vcat(ys, ys_add)
     end
     return ys
 end
 
-function read_sfr_tgt(sfr_type)
+const FGAS_FNAME = "firebox_summary_stats.csv"
+
+function sfr_tgt_fname(sfr_type)
     if sfr_type == "sfr"
-        fname = "sfrs.csv"
+        return "sfrs.csv"
     elseif sfr_type == "avg_sfr"
-        fname = "avg_sfrs_1.0Gyr_no_bound_filter.csv"
+        return "avg_sfrs_1.0Gyr_no_bound_filter.csv"
+    else
+        throw(ArgumentError(
+            "`sfr_type` should be \"sfr\" or \"avg_sfr\"."
+        ))
     end
-    y_df = CSV.read(joinpath(gallearn_dir, fname), DataFrame)
+end
+
+function read_sfr_tgt(sfr_type)
+    y_df = CSV.read(
+        joinpath(gallearn_dir, sfr_tgt_fname(sfr_type)),
+        DataFrame
+    )
+    y_df.id .= "object_" .* string.(y_df.id)
+    DataFrames.rename!(y_df, :id => :Simulation)
+    return y_df
+end
+
+# The gas fraction `fgas` is a scalar field FIREbox already stores in
+# each galaxy's particle file, which UCITools' FIREBoxIO.summarize_gals
+# collects into firebox_summary_stats.csv. It is gas mass over total
+# halo mass (dark matter included), not a baryonic ratio, so it needs
+# no derivation here.
+function read_fgas_tgt()
+    y_df = CSV.read(joinpath(gallearn_dir, FGAS_FNAME), DataFrame)
     y_df.id .= "object_" .* string.(y_df.id)
     DataFrames.rename!(y_df, :id => :Simulation)
     return y_df
@@ -280,9 +309,14 @@ function load_images(
         y_df = read_sfr_tgt(tgt_type)
         all_bands = true
         Nbands = 3
+    elseif tgt_type == "fgas"
+        y_df = read_fgas_tgt()
+        all_bands = true
+        Nbands = 3
     else
         throw(ArgumentError(
-            "`tgt_type` should be \"2d\", \"3d\", \"sfr\", or \"avg_sfr\"."
+            "`tgt_type` should be \"2d\", \"3d\", \"sfr\", \"avg_sfr\", or"
+            * " \"fgas\"."
         ))
     end
 
@@ -681,9 +715,38 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
     elseif tgt_type in ("sfr", "avg_sfr")
         ys = Array(y_df[:, "ssfr"])
         ys = reshape(ys, (size(ys)..., 1))
+    elseif tgt_type == "fgas"
+        ys = Array(y_df[:, "fgas"])
+        ys = reshape(ys, (size(ys)..., 1))
     else
         throw(ArgumentError(
-            "`tgt_type` should be \"2d\", \"3d\", \"sfr\", or\"avg_sfr\"."
+            "`tgt_type` should be \"2d\", \"3d\", \"sfr\", \"avg_sfr\", or"
+            * " \"fgas\"."
+        ))
+    end
+
+    # Record which file(s) `ys` came from, so a finished dataset is
+    # traceable to its source without re-reading this code. `tgt_type`
+    # itself is what the Python side dispatches on, so it needs no
+    # separate name here.
+    if tgt_type in ("sfr", "avg_sfr")
+        tgt_source = sfr_tgt_fname(tgt_type)
+    elseif tgt_type == "fgas"
+        tgt_source = FGAS_FNAME
+    elseif tgt_type == "2d"
+        tgt_source = join(
+            [
+                host_2d_shapes_path,
+                sat_2d_shapes_path,
+                octant_2d_shapes_path,
+            ],
+            ","
+        )
+    elseif tgt_type == "3d"
+        tgt_source = join(joinpath.(tgt_3d_dir, TGT_3D_FNAMES), ",")
+    else
+        throw(ArgumentError(
+            "No target source known for `tgt_type` \"$(tgt_type)\"."
         ))
     end
 
@@ -733,6 +796,11 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
                 )
                 write(f, label, data)
             end
+            # Make the dataset self-describing, so training reads its
+            # target from the file rather than being told which target
+            # a given file holds.
+            HDF5.attributes(f)["tgt_type"] = tgt_type
+            HDF5.attributes(f)["tgt_source"] = tgt_source
         end
     end
 

@@ -47,6 +47,33 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
+        '--dataset',
+        type=str,
+        default=None,
+        help=(
+            'Train against this dataset instead of the one'
+            ' --split records. Use it to run an existing split\'s'
+            ' galaxy partition against a dataset holding a'
+            ' different target, which keeps results comparable'
+            ' across targets and leaves the split file an'
+            ' unedited record of its own origin. Must be omitted'
+            ' when --resume is given.'
+        ),
+    )
+    parser.add_argument(
+        '--target',
+        type=str,
+        choices=['sfr', 'avg_sfr', 'fgas'],
+        default=None,
+        help=(
+            'Which target the dataset holds. Only for datasets'
+            ' built before the pipeline recorded this in the HDF5'
+            ' itself; those datasets require it. Passing it for a'
+            ' dataset that does declare its own target is an'
+            ' error. Must be omitted when --resume is given.'
+        ),
+    )
+    parser.add_argument(
         '--run-name',
         type=str,
         default=None,
@@ -156,4 +183,6 @@ if __name__ == '__main__':
         resume_from=args.resume,
         use_scheduler=use_scheduler,
         pretrained=args.pretrained,
+        tgt_type=args.target,
+        dataset=args.dataset,
     )

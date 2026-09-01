@@ -39,7 +39,7 @@ def test_bin_index():
 
 def test_stratify_galaxies_bins_and_unknown_mass():
     '''Verify that stratify_galaxies routes galaxies missing from
-    masses into 'unknown_mass', splits the rest into quenched
+    masses into 'unknown_mass_or_ssfr', splits the rest into quenched
     ('ssfr <= 0') vs. star-forming, and never drops a galaxy.'''
     galaxy_ids = ['g1', 'g2', 'g3', 'g4', 'g5']
     masses = {
@@ -53,7 +53,7 @@ def test_stratify_galaxies_bins_and_unknown_mass():
         galaxy_ids, masses, ssfrs, n_mass_bins=2, n_ssfr_bins=2,
     )
 
-    assert strata['unknown_mass'] == ['g5']
+    assert strata['unknown_mass_or_ssfr'] == ['g5']
     grouped = sorted(gid for ids in strata.values() for gid in ids)
     assert grouped == sorted(galaxy_ids)
 
@@ -109,10 +109,10 @@ def test_select_test_lock_galaxies_never_touches_already_locked():
 
 def test_select_test_lock_galaxies_skips_unknown_mass():
     '''Verify that select_test_lock_galaxies never selects a galaxy
-    out of the 'unknown_mass' stratum, since those galaxies have no
+    out of the 'unknown_mass_or_ssfr' stratum, since those galaxies have no
     mass to make the lock representative with.'''
     strata = {
-        'unknown_mass': ['g1', 'g2', 'g3', 'g4'],
+        'unknown_mass_or_ssfr': ['g1', 'g2', 'g3', 'g4'],
     }
     new_galaxies = splitting.select_test_lock_galaxies(
         strata, target_fraction=1.0, already_locked=[], seed=42,

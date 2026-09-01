@@ -75,8 +75,14 @@ def load_metadata(fname):
     '''
     Load everything except X from the HDF5 file. Returns a tuple
     (d, N, hdf5_path) where d is a dict with keys 'ys_sorted',
-    'obs_sorted', 'orientations', 'file_names', 'Re', N is the number of
-    samples, and hdf5_path is the full path to the HDF5 file.
+    'obs_sorted', 'orientations', 'file_names', 'Re', 'tgt_type', N is
+    the number of samples, and hdf5_path is the full path to the HDF5
+    file.
+
+    'tgt_type' names which target the dataset holds, read from the
+    HDF5 root attributes src/Dataset.jl writes. It is None for
+    datasets built before those attributes existed, which the caller
+    has to resolve some other way.
     '''
     import os
     import numpy as np
@@ -97,12 +103,16 @@ def load_metadata(fname):
             np.array(f['ys_sorted'])
         )
         Re = torch.FloatTensor(np.array(f['Re']))
+        tgt_type = f.attrs.get('tgt_type')
+        if isinstance(tgt_type, bytes):
+            tgt_type = tgt_type.decode()
     d = {
         'obs_sorted': obs_sorted,
         'orientations': orientations,
         'file_names': file_names,
         'ys_sorted': ys_sorted,
-        'Re': Re
+        'Re': Re,
+        'tgt_type': tgt_type
     }
 
     return d, N, hdf5_path

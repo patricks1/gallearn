@@ -29,16 +29,16 @@ just inferred by elimination) via a multi-window sSFR comparison. See
 `docs/status.md`'s "Project status: concluded" section for the full
 evidence and reasoning behind each closed lever.
 
-The project itself isn't done, though: it's pivoting to target other
-galaxy properties instead of continuing to press on sSFR: gas fraction (the current starting point), dark-matter
-fraction, dark-matter distribution (e.g. density slope within 1-2
-Rvir), dynamical mass, perturbation index, color gradient, and
-unsupervised classification. See `docs/status.md`'s "Project status:
-reopened" section for the current list and status. Everything else
-in this README describes the sSFR pipeline as built; it remains
-accurate reference documentation, and much of the dataset-build,
-splitting, and training infrastructure below should carry over
-directly to the new targets.
+The project itself isn't done, though. It is pivoting to other galaxy
+properties instead of continuing to press on sSFR. The candidates are
+gas fraction (the current starting point), dark-matter fraction,
+dark-matter distribution (e.g. density slope within 1-2 Rvir),
+dynamical mass, perturbation index, color gradient, and unsupervised
+classification. See `docs/status.md`'s "Project status: reopened"
+section for the current list and status. Everything else in this
+README describes the sSFR pipeline as built. It remains accurate
+reference documentation, and much of the dataset-build, splitting,
+and training infrastructure below carries over to the new targets.
 
 ## Hurdle model
 
@@ -87,10 +87,11 @@ The repo spans two languages:
    - Sersic fits giving the effective radius `Re` per projection
      (`scripts/gen_octant_shapes.py`; host/satellite shape CSVs).
    - Average star formation rates (`scripts/gen_sfrs.jl`).
-2. **Build the dataset** (Julia). `scripts/transform_images.jl` reads the
-   images, velocity maps, and shape/SFR tables and writes one HDF5 file:
-   the image tensor `X` (image bands plus a velocity-map channel), the
-   `ssfr` targets, and `Re`.
+2. **Build the dataset** (Julia). `scripts/build_dataset.jl <target>`
+   reads the images, velocity maps, and shape/target tables and writes
+   one HDF5 file: the image tensor `X` (image bands plus a velocity-map
+   channel), the targets as `ys_sorted`, and `Re`. One dataset holds one
+   target (see "Targets" below).
 3. **Split the dataset** (Python). Lock the dataset by content hash,
    create or top up the locked test set, and write a train/val split
    (see "Splitting the dataset" below).
@@ -135,9 +136,45 @@ Note: because Python keys the filename off the active conda environment,
 keep that environment name consistent across runs, or you will end up
 reading (or auto-creating) a different config file.
 
+## Targets
+
+One dataset holds one target. `scripts/build_dataset.jl` takes which
+target to build as its argument, and records it in the finished HDF5's
+root attributes (`tgt_type`, plus a `tgt_source` naming the file the
+values came from), so a dataset says for itself what it holds:
+
+    julia --project=scripts scripts/build_dataset.jl fgas
+
+The trainable targets are:
+
+| target | source | population |
+|---|---|---|
+| `avg_sfr`, `sfr` | `avg_sfrs_*.csv` | star-forming subset |
+| `fgas` | `firebox_summary_stats.csv` | all galaxies |
+
+`gallearn/target_specs.py` holds one spec per target, covering
+everything that varies between them: which rows to train on, how to
+scale the values and undo that scaling, whether the hurdle classifier
+applies, and how to label a plot axis. Adding a target means adding a
+spec and a `REGISTRY` entry there, plus a branch in `src/Dataset.jl`
+that reads its source column. The rest of the pipeline does not
+branch on the target.
+
+`--task classifier` only applies to a target with a structural zero,
+i.e. sSFR, whose quenched galaxies are the hurdle's whole point. Gas
+fraction is continuous (about 1.5% of galaxies sit at exactly zero,
+fully gas-stripped, which is too few to hurdle on), so it trains a
+regressor over every galaxy and rejects `--task classifier`.
+
+Training reads the target from the dataset's own attributes. A dataset
+built before those attributes existed has none, so training against
+one requires naming its target with `--target`; passing `--target` for
+a dataset that does declare its own is an error rather than a
+redundant agreement check.
+
 ## Building the dataset
 
-The build runs as a Slurm job. `scripts/transform_images.jl` spawns
+The build runs as a Slurm job. `scripts/build_dataset.jl` spawns
 Distributed workers to read the HDF5 image files in parallel, assembles
 the image tensor, attaches each galaxy's velocity map and Sersic radius,
 and writes the training HDF5.
@@ -152,7 +189,7 @@ image. Build it on a compute node under the juliaup Julia:
 
     julia --project=scripts scripts/build_base_sysimage.jl
 
-Then run `transform_images.jl` with that image loaded (`-J`), and have the
+Then run `build_dataset.jl` with that image loaded (`-J`), and have the
 run pass the image to every worker via `--sysimage`, so no worker
 recompiles the baked dependencies.
 
@@ -160,14 +197,14 @@ recompiles the baked dependencies.
 
 Slurm submission scripts are cluster-specific and are kept out of the repo
 (as are the machine-specific sbatch wrappers that build the system
-image). A submission script for `transform_images.jl` should:
+image). A submission script for `build_dataset.jl` should:
 
 - pin `~/.juliaup/bin/julia` (the system image must load under the Julia
   that built it),
 - rebuild the image if `Manifest.toml` or `build_base_sysimage.jl` is
   newer than it,
 - cap the worker count with an `NWORKERS` variable, and
-- run `transform_images.jl` with `-J <sysimage>`.
+- run `build_dataset.jl` with `-J <sysimage>`.
 
 Memory note: each worker is a full Julia process (~2 GB), so `NWORKERS`
 times that footprint must fit node RAM. Too many workers swap-thrash the
@@ -224,7 +261,7 @@ target, so the same `--test-fraction` won't pull it in either.
 If you need more test rows, you need to expand image generation to
 accept more viewing directions, Sersic-fitting
 those new images (`scripts/gen_octant_shapes.py`), and rebuilding and
-re-locking the dataset (`scripts/transform_images.jl`). Any such new
+re-locking the dataset (`scripts/build_dataset.jl`). Any such new
 rows would land in test automatically, without a `test-lock` rerun,
 since `scripts/split.py split` only pulls rows for the galaxies a
 split's `train_galaxies`/`val_galaxies` lists actually name.
@@ -257,16 +294,25 @@ command line and calls `gallearn.train.main()`, which selects the task
 and architecture and covers all four combinations:
 
 - `--task classifier` — star-forming vs quenched (BCE loss, F1 metric).
-- `--task regressor` — sSFR on the star-forming subset (MSE loss, with
-  asinh-scaled targets).
+  Only applies to sSFR; see "Targets" above.
+- `--task regressor` — the dataset's target over whichever galaxies
+  that target's spec considers valid (MSE loss, scaled targets).
 - `--model standard` — torchvision ResNet-18 backbone (`StandardNet`).
 - `--model resnet` — the custom ResNet from `cnn.py`.
 
 `--split <path>` names a train/val split JSON from `scripts/split.py
 split` (see "Splitting the dataset" above) and is required on a fresh
-run; there is no separate `--dataset` flag, since the split file's own
-recorded `dataset_path` determines which dataset the run trains
-against.
+run. The split file's own recorded `dataset_path` determines which
+dataset the run trains against by default.
+
+`--dataset <filename>` overrides that. A split file records only which
+galaxies go in train and which in val, so the same partition works
+against any dataset containing those galaxies, whatever target it
+holds. Pointing an existing split at a new target's dataset therefore
+trains on exactly the same galaxies as the runs it should be compared
+against, without a redrawn split, and leaves the split file itself an
+unedited record of the dataset it was built from. The overriding
+dataset needs its own lock (`scripts/lock_dataset.py`).
 
 `--resume <checkpoint>` reuses everything about the original run
 instead of taking it again on the command line: dataset, split,
@@ -276,10 +322,11 @@ train/val row indices, task, model architecture, run name, wandb run
 shuffle an uninterrupted run would have, rather than perturbing a
 converged model with a differently-ordered epoch), whether a
 scheduler is used, and `--pretrained`. `--resume` rejects every one
-of `--split`, `--task`, `--model`, `--run-name`, `--wandb`,
-`--batch-size`, `--lr`, `--seed`, `--no-scheduler`, and `--pretrained`
-if any is also given, so a resumed run can never silently continue
-under different settings than the run it's continuing. `--epochs` is
+of `--split`, `--dataset`, `--target`, `--task`, `--model`,
+`--run-name`, `--wandb`, `--batch-size`, `--lr`, `--seed`,
+`--no-scheduler`, and `--pretrained` if any is also given, so a
+resumed run can never silently continue under different settings than
+the run it's continuing. `--epochs` is
 the one exception: it's how many further epochs to run from wherever
 the checkpoint left off, so it's expected to vary freely on each
 resume.

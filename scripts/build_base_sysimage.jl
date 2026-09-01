@@ -8,12 +8,12 @@
 # Julia loads all the heavy dependencies from the image instantly and
 # only has to compile your own code at runtime.
 #
-# Run it with the SAME juliaup Julia that runs transform_images.jl, from
+# Run it with the SAME juliaup Julia that runs build_dataset.jl, from
 # the scripts/ directory:
 #
 #     ~/.juliaup/bin/julia --project=. build_base_sysimage.jl
 #
-# transform_images.sh rebuilds the image automatically when it is missing
+# The sbatch wrapper rebuilds the image automatically when it is missing
 # or when Manifest.toml is newer than it (a dependency version changed),
 # so you rarely run this by hand.
 

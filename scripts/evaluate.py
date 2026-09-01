@@ -102,8 +102,11 @@ def load_val_dataset(checkpoint, split_file_path):
         d['obs_sorted'] entries for val_idxs, in the same row order
         as val_dataset (i.e. run_inference's outputs/targets).
     ssfr : torch.Tensor
-        d['ys_sorted'] entries for val_idxs (raw, unscaled sSFR),
-        same row order as galaxy_ids.
+        d['ys_sorted'] entries for val_idxs (raw, unscaled target
+        values), same row order as galaxy_ids.
+    tgt_type : str
+        Which target this checkpoint predicts. See
+        gallearn.target_specs.REGISTRY.
     """
     train_config = checkpoint['train_config']
     task = train_config['task']
@@ -132,7 +135,21 @@ def load_val_dataset(checkpoint, split_file_path):
     print('Loading metadata...')
     d, N, hdf5_path = gallearn.preprocessing.load_metadata(dataset)
 
-    valid_indices = gallearn.train.compute_valid_indices(task, d, N)
+    # The checkpoint records the target it trained on. Fall back to
+    # the dataset's own declaration for checkpoints written before
+    # that was recorded.
+    tgt_type = train_config.get('tgt_type') or d['tgt_type']
+    if tgt_type is None:
+        raise ValueError(
+            'Neither this checkpoint nor dataset {0!r} records which'
+            ' target it holds, so predictions cannot be mapped back'
+            ' to raw units. Both predate that being'
+            ' recorded.'.format(dataset)
+        )
+
+    valid_indices = gallearn.train.compute_valid_indices(
+        task, d, N, tgt_type
+    )
     galaxy_index = gallearn.splitting.build_galaxy_index(d['obs_sorted'][:N])
     _, split_val_idxs = gallearn.splitting.resolve_split_indices(
         split_dict,
@@ -147,6 +164,7 @@ def load_val_dataset(checkpoint, split_file_path):
         d,
         N,
         checkpoint['train_idxs'],
+        tgt_type,
         target_stats=checkpoint.get('target_stats'),
     )
     rs = d['Re'][:N]
@@ -186,7 +204,7 @@ def load_val_dataset(checkpoint, split_file_path):
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
-    return model, val_dataset, task, galaxy_ids, ssfr
+    return model, val_dataset, task, galaxy_ids, ssfr, tgt_type
 
 
 @torch.no_grad()
@@ -258,29 +276,32 @@ def plot_confusion_matrix(outputs, targets, run_name, pdf):
     print('Metrics: {0}'.format(metrics))
 
 
-def invert_target_scaling(scaled, target_stats):
+def invert_target_scaling(scaled, target_stats, tgt_type):
     """
-    Undo preprocessing.std_asinh, mapping scaled targets/predictions
-    back to raw sSFR units.
+    Map scaled targets/predictions back to raw target units.
 
-    std_asinh computes scaled = (asinh(stretch * x) - means) / stds,
-    so the inverse is x = sinh(scaled * stds + means) / stretch.
+    The target's spec owns both directions of its scaling, so this
+    defers to it rather than reimplementing an inverse here. That
+    keeps target_stats opaque: how a given target scales, and what
+    it needs to remember to undo that, stays in target_specs.py.
 
     Parameters
     ----------
     scaled : torch.Tensor
     target_stats : dict
-        {'means': ..., 'stds': ..., 'stretch': ...}, as saved in a
-        checkpoint's 'target_stats' (see prepare_targets).
+        The spec's scaling statistics, as saved in a checkpoint's
+        'target_stats' (see gallearn.train.prepare_targets). Treat
+        the contents as opaque.
+    tgt_type : str
+        Which target these values belong to: 'sfr', 'avg_sfr', or
+        'fgas'. See gallearn.target_specs.REGISTRY.
 
     Returns
     -------
-    torch.Tensor, same shape as scaled, in raw sSFR units.
+    torch.Tensor, same shape as scaled, in raw target units.
     """
-    means = target_stats['means']
-    stds = target_stats['stds']
-    stretch = target_stats['stretch']
-    return torch.sinh(scaled * stds + means) / stretch
+    spec = gallearn.target_specs.get(tgt_type)
+    return spec.unscale(scaled, target_stats)
 
 
 def plot_regression_scatter(
@@ -289,39 +310,48 @@ def plot_regression_scatter(
         target_stats,
         masses,
         run_name,
+        tgt_type,
         pdf):
     """Add a ground-truth-vs-prediction scatter plot page, in raw
-    sSFR units (metrics are still computed in std_asinh-scaled
-    space, to match the numbers train.py itself logs), color-coded
-    by stellar mass.
+    target units (metrics are still computed in scaled space, to
+    match the numbers train.py itself logs), color-coded by stellar
+    mass.
 
     Parameters
     ----------
     masses : np.ndarray
         Stellar mass (Msun) per row, aligned with outputs/targets.
         NaN for galaxies missing from the avg_sfrs mass CSV.
+    tgt_type : str
+        Which target these values belong to. See
+        gallearn.target_specs.REGISTRY.
     """
+    spec = gallearn.target_specs.get(tgt_type)
     metrics = gallearn.train.compute_regression_metrics(outputs, targets)
-    y_true = invert_target_scaling(targets, target_stats).flatten().numpy()
-    y_pred = invert_target_scaling(outputs, target_stats).flatten().numpy()
+    y_true = invert_target_scaling(
+        targets, target_stats, tgt_type
+    ).flatten().numpy()
+    y_pred = invert_target_scaling(
+        outputs, target_stats, tgt_type
+    ).flatten().numpy()
 
-    # Ground-truth sSFR is always positive by construction (the
-    # regressor task only ever sees the star-forming subset), but a
-    # bad-enough prediction can invert to a non-positive value, which
-    # a log axis can't show. Drop those points rather than error or
-    # silently clip, and say how many were dropped.
-    positive = (y_true > 0) & (y_pred > 0)
-    n_dropped = len(y_true) - positive.sum()
-    if n_dropped > 0:
-        print(
-            'Note: dropping {0} points with non-positive predicted'
-            ' sSFR (can\'t show on a log-scale plot)'.format(
-                n_dropped
+    # On a log-scaled target, a bad-enough prediction can invert to a
+    # non-positive value, which a log axis can't show. Drop those
+    # points rather than error or silently clip, and say how many
+    # were dropped. A target plotted on linear axes keeps every
+    # point, including any legitimate zeros.
+    if spec.log_scale:
+        positive = (y_true > 0) & (y_pred > 0)
+        n_dropped = len(y_true) - positive.sum()
+        if n_dropped > 0:
+            print(
+                'Note: dropping {0} points with non-positive'
+                ' predicted {1} (can\'t show on a log-scale'
+                ' plot)'.format(n_dropped, spec.axis_label)
             )
-        )
-    y_true = y_true[positive]
-    y_pred = y_pred[positive]
-    masses = masses[positive]
+        y_true = y_true[positive]
+        y_pred = y_pred[positive]
+        masses = masses[positive]
 
     # A galaxy absent from the mass CSV (see
     # gallearn.splitting.load_avg_sfr_csv) has a NaN mass; those
@@ -359,10 +389,16 @@ def plot_regression_scatter(
     lo = min(y_true.min(), y_pred.min())
     hi = max(y_true.max(), y_pred.max())
     ax.plot([lo, hi], [lo, hi], 'k--', linewidth=1)
-    ax.set_xscale('log')
-    ax.set_yscale('log')
-    ax.set_xlabel('Ground truth sSFR (yr$^{-1}$)')
-    ax.set_ylabel('Predicted sSFR (yr$^{-1}$)')
+    if spec.log_scale:
+        ax.set_xscale('log')
+        ax.set_yscale('log')
+    unit_suffix = ' ({0})'.format(spec.unit) if spec.unit else ''
+    ax.set_xlabel(
+        'Ground truth {0}{1}'.format(spec.axis_label, unit_suffix)
+    )
+    ax.set_ylabel(
+        'Predicted {0}{1}'.format(spec.axis_label, unit_suffix)
+    )
     ax.set_title(
         '{0}\nN={1}, R2={2:.3f}, RMSE={3:.3f}, MAE={4:.3f}'
         ' (scaled space)'.format(
@@ -388,6 +424,7 @@ def add_sample_slides(
         outputs,
         target_stats,
         n_samples,
+        tgt_type,
         seed=42):
     """
     Add pages of sample val images (RGB composites) with true and
@@ -409,8 +446,12 @@ def add_sample_slides(
         columns handled by the caller, not here).
     target_stats : dict or None
         Needed to invert a regressor's scaled prediction back to raw
-        sSFR units; unused for the classifier.
+        target units; unused for the classifier.
+    tgt_type : str
+        Which target this run predicts. See
+        gallearn.target_specs.REGISTRY.
     """
+    spec = gallearn.target_specs.get(tgt_type)
     rng = np.random.default_rng(seed)
 
     if task == 'classifier':
@@ -473,26 +514,27 @@ def add_sample_slides(
                 ax.imshow(rgb, origin='lower')
                 ax.axis('off')
 
-                galaxy_ssfr = ssfr[si].item()
+                galaxy_true = ssfr[si].item()
                 if task == 'classifier':
                     pred_label = (
                         'star-forming' if preds[si] == 1
                         else 'quenched'
                     )
                     title = (
-                        'sSFR: {0:.2e} yr$^{{-1}}$\n'
-                        'pred: {1} ({2:.2f})'.format(
-                            galaxy_ssfr, pred_label, probs[si],
+                        '{0}: {1:.2e} {2}\n'
+                        'pred: {3} ({4:.2f})'.format(
+                            spec.axis_label, galaxy_true,
+                            spec.unit, pred_label, probs[si],
                         )
                     )
                 else:
-                    pred_ssfr = invert_target_scaling(
-                        outputs[si:si + 1], target_stats,
+                    pred_val = invert_target_scaling(
+                        outputs[si:si + 1], target_stats, tgt_type,
                     ).item()
                     title = (
                         'true: {0:.2e}\n'
-                        'pred: {1:.2e} yr$^{{-1}}$'.format(
-                            galaxy_ssfr, pred_ssfr,
+                        'pred: {1:.2e} {2}'.format(
+                            galaxy_true, pred_val, spec.unit,
                         )
                     )
                 ax.set_title(title, fontsize=8)
@@ -507,7 +549,9 @@ def main(model_path, split_file_path, output_path=None, n_samples=10):
     checkpoint = gallearn.train.load_checkpoint(model_path)
     run_name = checkpoint['train_config']['run_name']
 
-    model, val_dataset, task, galaxy_ids, ssfr = load_val_dataset(
+    (
+        model, val_dataset, task, galaxy_ids, ssfr, tgt_type
+    ) = load_val_dataset(
         checkpoint,
         split_file_path,
     )
@@ -550,6 +594,7 @@ def main(model_path, split_file_path, output_path=None, n_samples=10):
                 checkpoint['target_stats'],
                 masses,
                 run_name,
+                tgt_type,
                 pdf,
             )
         else:
@@ -564,6 +609,7 @@ def main(model_path, split_file_path, output_path=None, n_samples=10):
             outputs,
             checkpoint.get('target_stats'),
             n_samples,
+            tgt_type,
         )
 
     print('Saved report to {0}'.format(output_path))
