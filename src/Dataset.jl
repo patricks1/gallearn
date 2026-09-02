@@ -219,6 +219,18 @@ end
 
 const FGAS_FNAME = "firebox_summary_stats.csv"
 
+# Every `tgt_type` the pipeline knows how to build. load_images and
+# build_training_data each branch on tgt_type in more than one place,
+# so keep the list of valid values here rather than restating it at
+# each throw site, where one copy can fall out of date with the
+# branches and report a target as invalid after it has been added.
+const TGT_TYPES = ("2d", "3d", "sfr", "avg_sfr", "fgas")
+const TGT_TYPE_ERR = (
+    "`tgt_type` should be one of "
+    * join(map(t -> "\"$t\"", TGT_TYPES), ", ", ", or ")
+    * "."
+)
+
 function sfr_tgt_fname(sfr_type)
     if sfr_type == "sfr"
         return "sfrs.csv"
@@ -314,10 +326,7 @@ function load_images(
         all_bands = true
         Nbands = 3
     else
-        throw(ArgumentError(
-            "`tgt_type` should be \"2d\", \"3d\", \"sfr\", \"avg_sfr\", or"
-            * " \"fgas\"."
-        ))
+        throw(ArgumentError(TGT_TYPE_ERR))
     end
 
     println(
@@ -537,7 +546,9 @@ function load_images(
             orientation_mask[i, :] .= y_df[!, "view"] .== orientations[i]
         end
         mask = id_mask .& orientation_mask
-    elseif tgt_type in ("sfr", "avg_sfr")
+    elseif tgt_type in ("sfr", "avg_sfr", "fgas")
+        # These targets are properties of the galaxy rather than of the
+        # projection, so they match on Simulation alone, with no view.
         # mask is (length(ids_X), nrow(y_df)); see comment above.
         mask = falses(length(ids_X), size(y_df)[1])
         for i in 1:length(ids_X)
@@ -547,9 +558,7 @@ function load_images(
             mask[i, :] .= y_df[!, "Simulation"] .== ids_X[i]
         end
     else
-        throw(ArgumentError(
-            "`tgt_type` should be \"2d\", \"3d\", \"sfr\", or \"avg_sfr\"."
-        ))
+        throw(ArgumentError(TGT_TYPE_ERR))
     end
 
     # Ensure there's only one match for every Xi.
@@ -719,10 +728,7 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
         ys = Array(y_df[:, "fgas"])
         ys = reshape(ys, (size(ys)..., 1))
     else
-        throw(ArgumentError(
-            "`tgt_type` should be \"2d\", \"3d\", \"sfr\", \"avg_sfr\", or"
-            * " \"fgas\"."
-        ))
+        throw(ArgumentError(TGT_TYPE_ERR))
     end
 
     # Record which file(s) `ys` came from, so a finished dataset is
