@@ -458,6 +458,50 @@ function load_images(
         error("Orientation mismatch between images and vmaps.")
     end
 
+    # Drop (galaxy, projection) pairs that have no Sersic radius before
+    # allocating X, not after filling it. Re is an auxiliary input
+    # feature rather than the training target, and a missing radius is
+    # expected while Sersic fits are still in progress, so a pair
+    # without one gets dropped instead of crashing the run.
+    #
+    # Pass 1 already established which (galaxy, projection) pairs become
+    # rows, and the radius lookup needs nothing but those pairs, so it
+    # can settle which rows survive before any pixel data is read.
+    # Deciding here rather than after pass 2 skips loading images that
+    # would only be discarded. It also avoids subsetting X afterward,
+    # which is far more expensive than its size suggests. Julia stores
+    # arrays column-major, so gathering rows along the first axis reads
+    # elements spread the width of the array apart. That subset also
+    # needs the old and new arrays alive at once, which roughly doubles
+    # peak memory at the largest point of the run.
+    shapes = read_2d_shapes()
+    # read_2d_shapes already asserts `shapes` holds no duplicate
+    # Simulation+view rows, so one row index per pair is well defined.
+    shape_row_by_pair = Dict{Tuple{String, String}, Int}()
+    for (row_idx, row) in enumerate(eachrow(shapes))
+        shape_row_by_pair[(row.Simulation, row.view)] = row_idx
+    end
+    n_before_re = sum(length.(valid_projs_per_file))
+    valid_projs_per_file = [
+        begin
+            underscores = findall(isequal('_'), good_files[fi])
+            obj_id = good_files[fi][1:underscores[2]-1]
+            filter(
+                proj -> haskey(shape_row_by_pair, (obj_id, proj)),
+                valid_projs_per_file[fi]
+            )
+        end
+        for fi in 1:Nfiles
+    ]
+    n_dropped_re = n_before_re - sum(length.(valid_projs_per_file))
+    if n_dropped_re > 0
+        println(
+            "Dropping $(n_dropped_re) of $(n_before_re) images with " *
+            "no matching radius in host_2d_shapes/sat_2d_shapes/" *
+            "octant_shapes."
+        ); flush(stdout)
+    end
+
     # Compute per-file starting row indices via prefix sum so that
     # the assembly step after pass 2 can place each file's rows without
     # any shared mutable state.
@@ -572,48 +616,17 @@ function load_images(
     # Ensure the galaxies match between X and y_df
     @assert all(ids_X .== y_df[:, "Simulation"])
 
-    # Separate, independent lookup for Re. Unlike the target match above,
-    # Re is an auxiliary input feature, not the training target, and a
-    # missing radius is expected while Sersic fits are still in progress,
-    # so we drop the image instead of crashing the run.
-    shapes = read_2d_shapes()
-    # re_mask is (length(ids_X), nrow(shapes)): rows are loaded images
-    # (the target match above has already filtered these down), columns
-    # are rows of `shapes`, true where the image and shapes row are the
-    # same galaxy + projection.
-    re_mask = falses(length(ids_X), nrow(shapes))
-    for i in 1:length(ids_X)
-        id_match = shapes[!, "Simulation"] .== ids_X[i]
-        orient_match = shapes[!, "view"] .== orientations[i]
-        re_mask[i, :] .= id_match .& orient_match
-    end
-    re_match_counts = vec(sum(re_mask, dims=2))
-    # read_2d_shapes() already asserts there are no duplicate
-    # Simulation+view rows in `shapes`, which guarantees every column
-    # group above has at most one true entry per row. This assertion is
-    # therefore redundant given that guarantee; it exists only to catch
-    # a bug in the matching logic above should that guarantee ever stop
-    # holding, not to catch new duplicate radius data.
-    @assert all(re_match_counts .<= 1)
-    re_keep = re_match_counts .== 1
-    n_dropped = sum(.!re_keep)
-    if n_dropped > 0
-        println(
-            "\nDropping $(n_dropped) of $(length(re_keep)) images with " *
-            "no matching radius in host_2d_shapes/sat_2d_shapes/" *
-            "octant_shapes."
-        ); flush(stdout)
-    end
-    re_indices = findfirst.(eachrow(re_mask))
-
-    X = X[re_keep, :, :, :]
-    ids_X = ids_X[re_keep]
-    orientations = orientations[re_keep]
-    fnames_sorted = fnames_sorted[re_keep]
-    y_df = y_df[re_keep, :]
-    # Re is an auxiliary input feature, not a training target, so we
-    # keep it separate from y_df instead of merging it in.
-    matched_shapes = shapes[re_indices[re_keep], :]
+    # Look Re up for the rows that survived. Every row has a radius by
+    # construction, since projections without one never made it into X.
+    # This indexes rather than searches, and drops nothing.
+    #
+    # Re is an auxiliary input feature rather than a training target, so
+    # it stays separate from y_df.
+    re_indices = [
+        shape_row_by_pair[(ids_X[i], orientations[i])]
+        for i in 1:length(ids_X)
+    ]
+    matched_shapes = shapes[re_indices, :]
     Re_X = matched_shapes[:, "Re"]
 
     # Sanity-check the Re lookup as carefully as the old Python-side
