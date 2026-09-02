@@ -24,8 +24,10 @@ gallearn/_version.py
 !tests/test_data/**/*.h5
 !tests/test_data/**/*.hdf5
 
-# ignore compiled sysimages
+# ignore compiled sysimages, and the stamps recording which inputs
+# each one was built from (see scripts/ensure_sysimage.sh)
 *.so
+*.so.stamp
 
 # ignore generated plots/reports (e.g. from scripts/evaluate.py)
 *.png
