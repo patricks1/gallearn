@@ -660,14 +660,12 @@ function load_vmap(id, res)
     end
     HDF5.h5open(path, "r") do file
         for orientation in keys(file)
-            for data in keys(file[orientation])
-                grp = read(file, orientation)
-                # h5py wrote vmap as (H, W); Julia reverses axes to (W, H).
-                # Transpose back so spatial layout is consistent with the
-                # band images.
-                grp["vmap"] = permutedims(grp["vmap"], (2, 1))
-                vmap[orientation] = grp
-            end
+            grp = read(file, orientation)
+            # h5py wrote vmap as (H, W); Julia reverses axes to (W, H).
+            # Transpose back so spatial layout is consistent with the
+            # band images.
+            grp["vmap"] = permutedims(grp["vmap"], (2, 1))
+            vmap[orientation] = grp
         end
     end
     return vmap
