@@ -563,6 +563,12 @@ function load_images(
             fnames_sorted[row] = fnames_chunk[pi]
         end
     end
+    # results duplicates everything now in X. It stays reachable (and
+    # so un-collectible) for the rest of this function otherwise,
+    # which measured at ~5.6 GiB of dead weight sitting through the
+    # mask-building and logandscale steps below on a half-size dataset.
+    results = nothing
+    GC.gc()
     println("  Done loading images. X shape: $(size(X))")
 
     if logandscale
