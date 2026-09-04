@@ -1,10 +1,10 @@
 
 module Dataset
 
-using HDF5
-using CSV
-using DataFrames
-using Distributed
+import HDF5
+import CSV
+import DataFrames
+import Distributed
 import Images
 import StatsBase
 import Plots
@@ -149,7 +149,7 @@ function read_2d_shapes()
         # predates the later rename. None of this affects Re, which is
         # what this function is here for, but it matters if this code
         # ever starts reading Ie too.
-        dat = CSV.read(path, DataFrame, header=1)
+        dat = CSV.read(path, DataFrames.DataFrame, header=1)
         return dat
     end
     host_dat = csv_read(host_2d_shapes_path)
@@ -209,9 +209,9 @@ const TGT_3D_FNAMES = [
 ]
 
 function read_3d_tgt()
-    ys = CSV.read(joinpath(tgt_3d_dir, TGT_3D_FNAMES[1]), DataFrame)
+    ys = CSV.read(joinpath(tgt_3d_dir, TGT_3D_FNAMES[1]), DataFrames.DataFrame)
     for fname in TGT_3D_FNAMES[2:end]
-        ys_add = CSV.read(joinpath(tgt_3d_dir, fname), DataFrame)
+        ys_add = CSV.read(joinpath(tgt_3d_dir, fname), DataFrames.DataFrame)
         ys = vcat(ys, ys_add)
     end
     return ys
@@ -246,7 +246,7 @@ end
 function read_sfr_tgt(sfr_type)
     y_df = CSV.read(
         joinpath(gallearn_dir, sfr_tgt_fname(sfr_type)),
-        DataFrame
+        DataFrames.DataFrame
     )
     y_df.id .= "object_" .* string.(y_df.id)
     DataFrames.rename!(y_df, :id => :Simulation)
@@ -259,7 +259,7 @@ end
 # halo mass (dark matter included), not a baryonic ratio, so it needs
 # no derivation here.
 function read_fgas_tgt()
-    y_df = CSV.read(joinpath(gallearn_dir, FGAS_FNAME), DataFrame)
+    y_df = CSV.read(joinpath(gallearn_dir, FGAS_FNAME), DataFrames.DataFrame)
     y_df.id .= "object_" .* string.(y_df.id)
     DataFrames.rename!(y_df, :id => :Simulation)
     return y_df
@@ -330,7 +330,7 @@ function load_images(
     end
 
     println(
-        "Target dataframe loaded ($(nrow(y_df)) rows). " *
+        "Target dataframe loaded ($(DataFrames.nrow(y_df)) rows). " *
         "Building file mask..."
     ); flush(stdout)
     # For every file name, create an inner mask the size of y_df.Simulation
@@ -373,13 +373,13 @@ function load_images(
     # progress line as workers complete.
     println(
         "\nPass 1: scanning $(Nfiles) files to filter for <= 2000 px using " *
-        "$(nworkers()) workers..."
+        "$(Distributed.nworkers()) workers..."
     ); flush(stdout)
     println("  Creating RemoteChannel..."); flush(stdout)
-    prog1 = RemoteChannel(() -> Channel{Nothing}(Nfiles))
+    prog1 = Distributed.RemoteChannel(() -> Channel{Nothing}(Nfiles))
     println("  RemoteChannel created. Starting pmap..."); flush(stdout)
     t_p1 = time()
-    p1_task = @async pmap(good_paths[1:Nfiles]) do path
+    p1_task = @async Distributed.pmap(good_paths[1:Nfiles]) do path
         result = scan_file(path)
         put!(prog1, nothing)
         result
@@ -524,14 +524,14 @@ function load_images(
     # pattern as pass 1. Each worker returns its image chunk and metadata;
     # the main process assembles them into X after all workers finish.
     println("Pass 2: loading images...")
-    prog2 = RemoteChannel(() -> Channel{Nothing}(Nfiles))
+    prog2 = Distributed.RemoteChannel(() -> Channel{Nothing}(Nfiles))
     t_p2 = time()
     file_args = collect(zip(
         good_paths[1:Nfiles],
         valid_projs_per_file,
         good_files[1:Nfiles]
     ))
-    p2_task = @async pmap(file_args) do args
+    p2_task = @async Distributed.pmap(file_args) do args
         path, projs, fname = args
         result = load_file(path, projs, fname, all_bands, Nbands, res)
         put!(prog2, nothing)
@@ -640,7 +640,7 @@ function load_images(
     @assert size(X, 1) == n
     @assert length(orientations) == n
     @assert length(fnames_sorted) == n
-    @assert nrow(y_df) == n
+    @assert DataFrames.nrow(y_df) == n
     @assert length(Re_X) == n
 
     return ids_X, X, fnames_sorted, y_df, orientations, Re_X
@@ -688,8 +688,8 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
     # allocation history and does not see the Slurm cgroup limit, so
     # collecting the now-dead load_images intermediates here keeps the
     # next big allocation from tipping the node into swap.
-    if nprocs() > 1
-        rmprocs(workers())
+    if Distributed.nprocs() > 1
+        Distributed.rmprocs(Distributed.workers())
     end
     GC.gc()
 
@@ -790,7 +790,7 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
 
         fname *= ".h5"
 
-        h5open(joinpath(output_dir, fname), "w") do f
+        HDF5.h5open(joinpath(output_dir, fname), "w") do f
             # Permute X and ys before writing so that h5py reads them
             # in PyTorch (row-major) order. Julia writes column-major
             # data to HDF5, and h5py reverses all axes on read. Writing
