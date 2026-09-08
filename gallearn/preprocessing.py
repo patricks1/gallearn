@@ -535,14 +535,13 @@ def plt_distrib(ax, X, title=None, all_bands=False):
     return None
 
 
-def test(save=False):
+def test(dataset, save=False):
     import torch
     from matplotlib import pyplot as plt
     from matplotlib import rcParams
-    from . import config
     rcParams['axes.titlesize'] = 8.
 
-    d = load_data(config.config['gallearn_paths']['dataset'])
+    d = load_data(dataset)
     X = d['X']
     Xstd = std_scale(X)
     Xminmax = min_max_scale(X)
@@ -613,14 +612,13 @@ def test(save=False):
     return None
 
 
-def plt_ssfr():
+def plt_ssfr(dataset):
     import os
     import torch
     import matplotlib.pyplot as plt
     import numpy as np
-    from . import config
 
-    d = load_data(config.config['gallearn_paths']['dataset'])
+    d = load_data(dataset)
     ssfrs = d['ys_sorted']
     #iszero = ssfrs == 0.
     #print(len(ssfrs))

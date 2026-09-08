@@ -17,13 +17,15 @@ if __name__ == '__main__':
         'test-lock',
         help='Create or top up the locked test set',
     )
+    # Required, with no default: the locked test set defines which
+    # galaxies every later run must never train on, so a bare
+    # invocation locking a dataset the caller never named would
+    # quietly bind that decision to the wrong galaxies.
     lock_parser.add_argument(
         '--dataset',
         type=str,
-        default=(
-            gallearn.config.config['gallearn_paths']['dataset']
-        ),
-        help='Dataset filename (default: %(default)s)',
+        required=True,
+        help='Dataset filename',
     )
     lock_parser.add_argument(
         '--test-fraction',
@@ -64,13 +66,15 @@ if __name__ == '__main__':
         'split',
         help='Create a train/val split from the unlocked galaxies',
     )
+    # Required, with no default: a split file records the dataset it
+    # was built against, and every run reading that file trusts the
+    # record, so defaulting it would let a split claim provenance the
+    # caller never chose.
     split_parser.add_argument(
         '--dataset',
         type=str,
-        default=(
-            gallearn.config.config['gallearn_paths']['dataset']
-        ),
-        help='Dataset filename (default: %(default)s)',
+        required=True,
+        help='Dataset filename',
     )
     split_parser.add_argument(
         '--test-lock',

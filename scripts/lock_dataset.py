@@ -10,13 +10,14 @@ if __name__ == '__main__':
             ' under the same filename later'
         )
     )
+    # Positional and required on purpose: a lock file records which
+    # dataset a run's results are reproducible against, so defaulting
+    # to any particular dataset would let a bare invocation lock one
+    # the caller never named.
     parser.add_argument(
-        '--dataset',
+        'dataset',
         type=str,
-        default=(
-            gallearn.config.config['gallearn_paths']['dataset']
-        ),
-        help='Dataset filename (default: %(default)s)',
+        help='Dataset filename to lock',
     )
 
     args = parser.parse_args()
