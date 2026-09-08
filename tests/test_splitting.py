@@ -157,9 +157,9 @@ def test_load_avg_sfr_csv_skips_unparseable_ids(tmp_path):
     }
 
 
-def test_build_galaxy_index_and_galaxy_ssfr():
+def test_build_galaxy_index_and_galaxy_target_values():
     '''Verify that build_galaxy_index groups row indices by galaxy
-    and galaxy_ssfr collapses agreeing per-row sSFR copies to a
+    and galaxy_target_values collapses agreeing per-row copies to a
     single value per galaxy.'''
     obs_sorted = ['object_1', 'object_2', 'object_1']
     ys_sorted = [0.5, 0.0, 0.5]
@@ -167,18 +167,18 @@ def test_build_galaxy_index_and_galaxy_ssfr():
     galaxy_index = splitting.build_galaxy_index(obs_sorted)
     assert galaxy_index == {'object_1': [0, 2], 'object_2': [1]}
 
-    ssfrs = splitting.galaxy_ssfr(galaxy_index, ys_sorted)
-    assert ssfrs == {'object_1': pytest.approx(0.5), 'object_2': 0.0}
+    vals = splitting.galaxy_target_values(galaxy_index, ys_sorted)
+    assert vals == {'object_1': pytest.approx(0.5), 'object_2': 0.0}
 
 
-def test_galaxy_ssfr_raises_on_disagreement():
-    '''Verify that galaxy_ssfr raises rather than silently averaging
-    when a galaxy's per-row sSFR copies disagree with each other.'''
+def test_galaxy_target_values_raises_on_disagreement():
+    '''Verify that galaxy_target_values raises rather than silently
+    averaging when a galaxy's per-row copies disagree.'''
     galaxy_index = {'object_1': [0, 1]}
     ys_sorted = [0.5, 0.7]
 
     with pytest.raises(ValueError):
-        splitting.galaxy_ssfr(galaxy_index, ys_sorted)
+        splitting.galaxy_target_values(galaxy_index, ys_sorted)
 
 
 def test_resolve_split_indices_raises_on_missing_galaxy():

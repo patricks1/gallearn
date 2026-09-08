@@ -201,15 +201,19 @@ def build_galaxy_index(obs_sorted):
     return dict(galaxy_index)
 
 
-def galaxy_ssfr(galaxy_index, ys_sorted):
+def galaxy_target_values(galaxy_index, ys_sorted):
     """
-    Collapse the per-row sSFR target down to one value per galaxy.
-    sSFR is a property of the galaxy, not of the projection, so
-    every one of a galaxy's projection rows in `ys_sorted` stores an
-    independent copy of the same value. galaxy_ssfr asserts those
-    per-row copies actually agree with each other rather than
-    silently averaging over a disagreement, since disagreement would
-    mean a data bug upstream.
+    Collapse the per-row target down to one value per galaxy.
+
+    Every target this pipeline trains on is a property of the
+    galaxy, not of the projection, so each of a galaxy's projection
+    rows in `ys_sorted` stores an independent copy of the same
+    value. This asserts those per-row copies actually agree rather
+    than silently averaging over a disagreement, since disagreement
+    would mean a data bug upstream.
+
+    Nothing here interprets the values, so this works for whichever
+    target the dataset holds. Ask target_specs what they mean.
 
     Parameters
     ----------
@@ -217,12 +221,12 @@ def galaxy_ssfr(galaxy_index, ys_sorted):
         {galaxy_id: [row_idx, ...]}, from build_galaxy_index.
     ys_sorted : array-like
         The training HDF5's `ys_sorted` target array, sliced to the
-        N rows in use. 0.0 means quenched.
+        N rows in use.
 
     Returns
     -------
     dict
-        {galaxy_id: ssfr}, one float per galaxy.
+        {galaxy_id: value}, one float per galaxy.
     """
     values = np.asarray(ys_sorted).reshape(-1)
     ssfrs = {}
@@ -230,7 +234,7 @@ def galaxy_ssfr(galaxy_index, ys_sorted):
         rows = values[row_idxs]
         if not np.allclose(rows, rows[0]):
             raise ValueError(
-                'Rows for {0} disagree on ssfr: {1}'.format(
+                'Rows for {0} disagree on the target value: {1}'.format(
                     galaxy_id, rows
                 )
             )

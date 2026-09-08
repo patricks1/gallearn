@@ -1,27 +1,31 @@
-def plot_mass_ssfr_distributions(
+def plot_mass_target_distributions(
         dataset_fname,
         test_lock_path=None,
         avg_sfr_csv=None,
+        tgt_type=None,
         n_bins=30):
     """
-    Plot log10(Mstar) and log10(ssfr) histograms comparing the full
+    Plot log10(Mstar) and target-value histograms comparing the full
     galaxy population, the population excluding the locked test set,
     and the locked test set itself, so a stratified test lock's
     representativeness is visible directly rather than only implied
     by the lock file's recorded bin_allocations counts.
 
+    The dataset says which target it holds, and target_specs says how
+    to draw it, so this works for whichever target the file carries
+    rather than assuming sSFR. A target whose spec sets log_scale
+    plots log10 of the value, and represents each group's
+    non-positive galaxies as a single 'Quenched' bar instead of
+    placing them on the continuous axis, matching how
+    stratify_galaxies treats quenched galaxies as their own stratum.
+    That bar and the continuous histogram share one normalization per
+    group (both divide by the group's total galaxy count), so their
+    areas sum to 1 and are directly comparable. A target that plots
+    linearly, such as gas fraction or dark-matter fraction, needs no
+    such split, since a linear axis shows zeros fine.
+
     Excludes galaxies missing from avg_sfr_csv from every panel
-    (their mass is unknown). log10 is undefined for a quenched
-    galaxy's ssfr (<= 0), so the sSFR panel represents each group's
-    quenched galaxies as a single 'Quenched' bar instead of placing
-    them on the continuous log10(ssfr) axis, matching how
-    stratify_galaxies treats quenched galaxies as their own stratum
-    rather than a point on the star-forming mass/sSFR grid. The
-    'Quenched' bar and the continuous histogram share one
-    normalization per group (both divide by that group's total
-    galaxy count, not just its star-forming count), so the bar's
-    area and the histogram's area sum to 1 and are directly
-    comparable.
+    (their mass is unknown).
 
     Parameters
     ----------
@@ -29,7 +33,8 @@ def plot_mass_ssfr_distributions(
         Training HDF5 filename, as passed to
         preprocessing.load_metadata. Must already be locked via
         gallearn.dataset_lock.lock_dataset (e.g. via
-        scripts/lock_dataset.py).
+        scripts/lock_dataset.py). Its recorded tgt_type decides how
+        the target panel gets drawn.
     test_lock_path : str or pathlib.Path, optional
         Path to a specific test_lock_v<N>.json. Defaults to
         splitting.latest_test_lock_path(), the highest version
@@ -37,7 +42,15 @@ def plot_mass_ssfr_distributions(
     avg_sfr_csv : str or pathlib.Path, optional
         Path to the avg_sfrs CSV, passed to
         splitting.load_avg_sfr_csv. Defaults to
-        splitting.AVG_SFR_CSV.
+        splitting.AVG_SFR_CSV. Read for stellar masses only,
+        whatever target the dataset holds.
+    tgt_type : str, optional
+        Which target the dataset holds, for datasets built before
+        src/Dataset.jl recorded that in the HDF5 itself. Those
+        datasets require it, since nothing else says what their
+        values mean. Passing it for a dataset that does declare its
+        own target is an error when the two disagree, matching how
+        gallearn.train.main guards --target.
     n_bins : int, optional
         Number of histogram bins per panel. Default 30.
 
@@ -55,6 +68,7 @@ def plot_mass_ssfr_distributions(
     from . import dataset_lock
     from . import preprocessing
     from . import splitting
+    from . import target_specs
 
     if avg_sfr_csv is None:
         avg_sfr_csv = splitting.AVG_SFR_CSV
@@ -73,8 +87,32 @@ def plot_mass_ssfr_distributions(
 
     dataset_lock.verify_dataset(dataset_fname)
     d, N, _ = preprocessing.load_metadata(dataset_fname)
+
+    declared = d['tgt_type']
+    if declared is not None and tgt_type is not None:
+        if declared != tgt_type:
+            raise ValueError(
+                'Dataset {0!r} declares tgt_type {1!r}, but this'
+                ' call passed {2!r}. Omit tgt_type for a dataset'
+                ' that declares its own.'.format(
+                    dataset_fname, declared, tgt_type
+                )
+            )
+    if declared is not None:
+        tgt_type = declared
+    elif tgt_type is None:
+        raise ValueError(
+            'Dataset {0!r} does not record which target it holds, so'
+            ' this plot cannot say what its values mean. It predates'
+            ' src/Dataset.jl recording tgt_type, so pass tgt_type'
+            ' explicitly.'.format(dataset_fname)
+        )
+    spec = target_specs.get(tgt_type)
+
     galaxy_index = splitting.build_galaxy_index(d['obs_sorted'][:N])
-    ssfrs = splitting.galaxy_ssfr(galaxy_index, d['ys_sorted'][:N])
+    values = splitting.galaxy_target_values(
+        galaxy_index, d['ys_sorted'][:N]
+    )
     masses = splitting.load_avg_sfr_csv(avg_sfr_csv)
 
     galaxy_ids = sorted(galaxy_index)
@@ -87,9 +125,16 @@ def plot_mass_ssfr_distributions(
         )
 
     log_mass = {g: np.log10(masses[g]) for g in known_ids}
-    log_ssfr = {
-        g: np.log10(ssfrs[g]) for g in known_ids if ssfrs[g] > 0.
-    }
+    # A log-scaled target drops its non-positive galaxies out of the
+    # continuous axis and counts them separately below. A linear one
+    # keeps every galaxy, zeros included.
+    if spec.log_scale:
+        plotted = {
+            g: np.log10(values[g]) for g in known_ids
+            if values[g] > 0.
+        }
+    else:
+        plotted = {g: values[g] for g in known_ids}
 
     groups = {
         'population': known_ids,
@@ -102,23 +147,23 @@ def plot_mass_ssfr_distributions(
     mass_edges = np.histogram_bin_edges(
         list(log_mass.values()), bins=n_bins,
     )
-    ssfr_edges = np.histogram_bin_edges(
-        list(log_ssfr.values()), bins=n_bins,
+    tgt_edges = np.histogram_bin_edges(
+        list(plotted.values()), bins=n_bins,
     )
-    ssfr_bin_width = ssfr_edges[1] - ssfr_edges[0]
-    # Placed a few bin widths left of the star-forming range, with a
+    tgt_bin_width = tgt_edges[1] - tgt_edges[0]
+    # Placed a few bin widths left of the plotted range, with a
     # dashed separator, so it reads as a distinct category rather
-    # than a point on the continuous log10(ssfr) axis.
-    quenched_x = ssfr_edges[0] - 3. * ssfr_bin_width
-    separator_x = ssfr_edges[0] - 1.5 * ssfr_bin_width
+    # than a point on the continuous axis.
+    excluded_x = tgt_edges[0] - 3. * tgt_bin_width
+    separator_x = tgt_edges[0] - 1.5 * tgt_bin_width
 
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-    # Sub-width per group's quenched bar so groups sit side by side
-    # inside the quenched slot, rather than fully overlapping (which
-    # could hide a shorter bar entirely behind a taller one).
-    quenched_bar_width = ssfr_bin_width / len(groups)
+    # Sub-width per group's bar so groups sit side by side inside the
+    # excluded slot, rather than fully overlapping (which could hide
+    # a shorter bar entirely behind a taller one).
+    excluded_bar_width = tgt_bin_width / len(groups)
 
-    fig, (ax_mass, ax_ssfr) = plt.subplots(1, 2, figsize=(12, 5))
+    fig, (ax_mass, ax_tgt) = plt.subplots(1, 2, figsize=(12, 5))
     for i, ((label, ids), color) in enumerate(
             zip(groups.items(), colors)):
         mass_vals = [log_mass[g] for g in ids]
@@ -135,72 +180,111 @@ def plot_mass_ssfr_distributions(
         )
 
         n_total = len(ids)
-        sf_vals = [log_ssfr[g] for g in ids if g in log_ssfr]
-        n_quenched = n_total - len(sf_vals)
-        # Weight each star-forming galaxy by 1 / (n_total *
-        # ssfr_bin_width) rather than passing density=True (which
-        # would normalize against only the star-forming count), so
-        # this histogram's area is (n_sf / n_total) and lines up with
-        # the quenched bar's area of (n_quenched / n_total) below.
+        shown_vals = [plotted[g] for g in ids if g in plotted]
+        n_excluded = n_total - len(shown_vals)
+        # Weight each shown galaxy by 1 / (n_total * tgt_bin_width)
+        # rather than passing density=True (which would normalize
+        # against only the shown count), so this histogram's area is
+        # (n_shown / n_total) and lines up with the excluded bar's
+        # area of (n_excluded / n_total) below.
         weight = (
-            1. / (n_total * ssfr_bin_width) if n_total else 0.
+            1. / (n_total * tgt_bin_width) if n_total else 0.
         )
-        ax_ssfr.hist(
-            sf_vals,
-            bins=ssfr_edges,
-            weights=[weight] * len(sf_vals),
+        if spec.log_scale:
+            hist_label = (
+                r'{0} ($N_{{\mathrm{{gal}}}}={1}$, {2} quenched)'
+                .format(label, n_total, n_excluded)
+            )
+        else:
+            hist_label = r'{0} ($N_{{\mathrm{{gal}}}}={1}$)'.format(
+                label, n_total
+            )
+        ax_tgt.hist(
+            shown_vals,
+            bins=tgt_edges,
+            weights=[weight] * len(shown_vals),
             histtype='step',
             linewidth=2,
             color=color,
-            label=r'{0} ($N_{{\mathrm{{gal}}}}={1}$, {2} quenched)'
-                .format(label, n_total, n_quenched),
+            label=hist_label,
         )
-        quenched_frac = n_quenched / n_total if n_total else 0.
-        bar_x = (
-            quenched_x
-            - ssfr_bin_width / 2.
-            + (i + 0.5) * quenched_bar_width
-        )
-        ax_ssfr.bar(
-            bar_x,
-            quenched_frac / ssfr_bin_width,
-            width=quenched_bar_width,
-            color=color,
-        )
+        if spec.log_scale:
+            excluded_frac = (
+                n_excluded / n_total if n_total else 0.
+            )
+            bar_x = (
+                excluded_x
+                - tgt_bin_width / 2.
+                + (i + 0.5) * excluded_bar_width
+            )
+            ax_tgt.bar(
+                bar_x,
+                excluded_frac / tgt_bin_width,
+                width=excluded_bar_width,
+                color=color,
+            )
 
     legend_anchor = (0.5, -0.15)
 
     ax_mass.set_xlabel(r'$\log_{10}(M_\star / \mathrm{M}_\odot)$')
     ax_mass.set_ylabel('Density')
-    ax_mass.set_title('Stellar mass distribution')
+    ax_mass.set_title('Distribution of stellar mass')
     ax_mass.legend(bbox_to_anchor=legend_anchor, loc='upper center')
 
-    ax_ssfr.axvline(separator_x, color='gray', linestyle=':')
-    # Explicit ticks replace the default locator, which would
-    # otherwise autoscale to the quenched bars' and separator's x
-    # positions too and place numeric ticks in that gap, cluttering
-    # right where the dashed separator is meant to keep the quenched
-    # bars visually distinct from the real log10(ssfr) axis.
-    numeric_ticks = [
-        t for t in mpl.ticker.MaxNLocator(nbins=6).tick_values(
-            ssfr_edges[0], ssfr_edges[-1]
+    if spec.log_scale:
+        ax_tgt.axvline(separator_x, color='gray', linestyle=':')
+        # Explicit ticks replace the default locator, which would
+        # otherwise autoscale to the excluded bars' and separator's x
+        # positions too and place numeric ticks in that gap,
+        # cluttering right where the dashed separator is meant to
+        # keep those bars visually distinct from the real axis.
+        numeric_ticks = [
+            t for t in mpl.ticker.MaxNLocator(nbins=6).tick_values(
+                tgt_edges[0], tgt_edges[-1]
+            )
+            if tgt_edges[0] <= t <= tgt_edges[-1]
+        ]
+        ax_tgt.set_xticks([excluded_x] + numeric_ticks)
+        ax_tgt.set_xticklabels(
+            ['Quenched']
+            + ['{0:g}'.format(t) for t in numeric_ticks]
         )
-        if ssfr_edges[0] <= t <= ssfr_edges[-1]
-    ]
-    ax_ssfr.set_xticks([quenched_x] + numeric_ticks)
-    ax_ssfr.set_xticklabels(
-        ['Quenched'] + ['{0:g}'.format(t) for t in numeric_ticks]
+
+    # Built in text mode with math only around the pieces that need
+    # it, the way scripts/evaluate.py writes its axis labels. A spec's
+    # unit is itself a mixed fragment (sSFR's is 'yr$^{-1}$'), so
+    # wrapping the whole label in $...$ would nest delimiters and
+    # mathtext would render the label wrong.
+    if spec.log_scale:
+        unit_suffix = ' / {0}'.format(spec.unit) if spec.unit else ''
+        ax_tgt.set_xlabel(
+            'log$_{{10}}$({0}{1})'.format(
+                spec.axis_label, unit_suffix
+            )
+        )
+    else:
+        unit_suffix = (
+            ' ({0})'.format(spec.unit) if spec.unit else ''
+        )
+        ax_tgt.set_xlabel(
+            '{0}{1}'.format(
+                spec.axis_label,
+                unit_suffix,
+            )
+        )
+    ax_tgt.set_ylabel('Density')
+    # The spec spells its own target, so this passes axis_label
+    # through untouched. str.capitalize would rewrite 'sSFR' as
+    # 'Ssfr', and scripts/evaluate.py already treats the label as
+    # authoritative.
+    ax_tgt.set_title(
+        'Distribution of {0}'.format(spec.axis_label)
     )
-    ax_ssfr.set_xlabel(
-        r'$\log_{10}(\mathrm{sSFR} / \mathrm{yr}^{-1})$'
-    )
-    ax_ssfr.set_ylabel('Density')
-    ax_ssfr.set_title('sSFR distribution')
     # bbox_to_anchor's y is negative (below the axes, in axes-fraction
     # coordinates) and loc='upper center' aligns the legend's top edge
     # (not its center) to that anchor, so the legend hangs downward
     # below the plot instead of sitting inside it.
-    ax_ssfr.legend(bbox_to_anchor=legend_anchor, loc='upper center')
+    ax_tgt.legend(bbox_to_anchor=legend_anchor, loc='upper center')
 
     fig.tight_layout()
     # tight_layout() doesn't reserve space for a legend placed outside
