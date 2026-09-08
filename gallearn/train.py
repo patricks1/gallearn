@@ -141,8 +141,8 @@ def compute_valid_indices(task, d, N, tgt_type):
     N : int
         Number of samples in dataset.
     tgt_type : str
-        Which target the dataset holds: 'sfr', 'avg_sfr', or
-        'fgas'. See target_specs.REGISTRY.
+        Which target the dataset holds: 'sfr', 'avg_sfr', 'fgas',
+        or 'fdm'. See target_specs.REGISTRY.
 
     Returns
     -------
@@ -196,8 +196,8 @@ def prepare_targets(
         should already be resolved against compute_valid_indices'
         output, i.e. it may contain only the target's valid rows.
     tgt_type : str
-        Which target the dataset holds: 'sfr', 'avg_sfr', or
-        'fgas'. See target_specs.REGISTRY.
+        Which target the dataset holds: 'sfr', 'avg_sfr', 'fgas',
+        or 'fdm'. See target_specs.REGISTRY.
     target_stats : dict, optional
         A resumed run's cached scaling statistics, reused directly
         instead of refitting from train_idxs, so a resume rescales
@@ -892,67 +892,10 @@ def main(
         'wandb_run_id': wandb_run_id,
     }
 
-    # Task-specific settings
-    if task == 'classifier':
-        loss_fn = nn.BCEWithLogitsLoss()
-        metrics_fn = compute_classification_metrics
-        best_metric_key = 'f1'
-        higher_is_better = True
-    elif task == 'regressor':
-        loss_fn = nn.MSELoss()
-        metrics_fn = compute_regression_metrics
-        best_metric_key = 'loss'
-        higher_is_better = False
-    else:
-        raise ValueError(
-            "task must be 'classifier' or 'regressor', "
-            "got '{0}'".format(task)
-        )
-
-    # Initialize wandb if requested (before setting run_name
-    # so wandb can generate one).
-    if wandb_mode in ('y', 'r'):
-        import wandb
-        if task == 'classifier':
-            project = 'gallearn_quenched_classifier'
-        else:
-            project = 'sfr_gallearn'
-        if wandb_mode == 'r':
-            # wandb resumes by id, not by name; without the
-            # original run's id, resume='must' fails even if name
-            # matches an existing run, since a name isn't guaranteed
-            # unique. wandb_mode is only ever set to 'r' above when
-            # the checkpoint recorded a wandb_run_id, so it's always
-            # available here.
-            wandb.init(
-                project=project,
-                id=wandb_run_id,
-                resume='must',
-            )
-        else:
-            wandb.init(
-                project=project,
-                name=run_name,
-                config=train_config,
-            )
-            train_config['wandb_run_id'] = wandb.run.id
-        if run_name is None:
-            run_name = wandb.run.name
-
-    if run_name is None:
-        run_name = datetime.datetime.now().strftime(
-            '%Y%m%d_%H%M%S'
-        )
-    train_config['run_name'] = run_name
-
-    run_dir = os.path.join(
-        config.config['gallearn_paths']['project_data_dir'],
-        run_name,
-    )
-    os.makedirs(run_dir, exist_ok=True)
-    print('Run directory: {0}'.format(run_dir))
-
-    # Load metadata (not the full image tensor)
+    # Load metadata (not the full image tensor) and resolve tgt_type
+    # here, before wandb init below, so a fresh run's wandb project
+    # can be named after the target it actually trains. A resumed
+    # run already has tgt_type from the checkpoint by this point.
     print('Loading metadata...')
     d, N, hdf5_path = preprocessing.load_metadata(dataset)
     print('{0} galaxy images in data'.format(N))
@@ -993,6 +936,72 @@ def main(
         )
     print('Target: {0}'.format(tgt_type))
     train_config['tgt_type'] = tgt_type
+
+    # Task-specific settings
+    if task == 'classifier':
+        loss_fn = nn.BCEWithLogitsLoss()
+        metrics_fn = compute_classification_metrics
+        best_metric_key = 'f1'
+        higher_is_better = True
+    elif task == 'regressor':
+        loss_fn = nn.MSELoss()
+        metrics_fn = compute_regression_metrics
+        best_metric_key = 'loss'
+        higher_is_better = False
+    else:
+        raise ValueError(
+            "task must be 'classifier' or 'regressor', "
+            "got '{0}'".format(task)
+        )
+
+    # Initialize wandb if requested (before setting run_name
+    # so wandb can generate one). One project per target keeps
+    # gas-fraction, dark-matter-fraction, and future targets' runs
+    # from mixing into sSFR's history; sfr/avg_sfr keep the original
+    # project name rather than move into the new per-target scheme,
+    # so past sSFR runs stay where they already are.
+    if wandb_mode in ('y', 'r'):
+        import wandb
+        if task == 'classifier':
+            project = 'gallearn_quenched_classifier'
+        elif tgt_type in ('sfr', 'avg_sfr'):
+            project = 'sfr_gallearn'
+        else:
+            project = 'gallearn_{0}'.format(tgt_type)
+        if wandb_mode == 'r':
+            # wandb resumes by id, not by name; without the
+            # original run's id, resume='must' fails even if name
+            # matches an existing run, since a name isn't guaranteed
+            # unique. wandb_mode is only ever set to 'r' above when
+            # the checkpoint recorded a wandb_run_id, so it's always
+            # available here.
+            wandb.init(
+                project=project,
+                id=wandb_run_id,
+                resume='must',
+            )
+        else:
+            wandb.init(
+                project=project,
+                name=run_name,
+                config=train_config,
+            )
+            train_config['wandb_run_id'] = wandb.run.id
+        if run_name is None:
+            run_name = wandb.run.name
+
+    if run_name is None:
+        run_name = datetime.datetime.now().strftime(
+            '%Y%m%d_%H%M%S'
+        )
+    train_config['run_name'] = run_name
+
+    run_dir = os.path.join(
+        config.config['gallearn_paths']['project_data_dir'],
+        run_name,
+    )
+    os.makedirs(run_dir, exist_ok=True)
+    print('Run directory: {0}'.format(run_dir))
 
     # Cheap, leak-free: which rows this task trains/evaluates on,
     # before any split resolution or scaling-statistic fitting.
