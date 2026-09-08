@@ -115,6 +115,21 @@ def load_val_dataset(checkpoint, split_file_path):
     pretrained = train_config.get('pretrained', False)
     run_name = train_config['run_name']
 
+    # create_model requires both of these for model_type='resnet' and
+    # rejects them for 'standard'. Checkpoints written before either
+    # became a parameter ran the shapes cnn.ResNet then hardcoded, so
+    # they backfill the same way gallearn.train.main does. The head
+    # this rebuilds gets replaced below by one sized from the
+    # checkpoint's own weights, so head_size only has to satisfy
+    # create_model here, while head_dropout never affects an eval
+    # forward pass at all, since model.eval() disables dropout.
+    if model_type == 'resnet':
+        head_size = train_config.get('head_size', 'large')
+        head_dropout = train_config.get('head_dropout', 0.5)
+    else:
+        head_size = None
+        head_dropout = None
+
     with open(split_file_path) as f:
         split_dict = json.load(f)
 
@@ -191,6 +206,8 @@ def load_val_dataset(checkpoint, split_file_path):
         dataset,
         run_name,
         pretrained=pretrained,
+        head_size=head_size,
+        head_dropout=head_dropout,
     )
     head_widths = infer_head_widths(checkpoint['model_state_dict'])
     model.head = build_head(head_widths)
