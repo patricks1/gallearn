@@ -976,8 +976,10 @@ def main(
             raise ValueError(
                 "Dataset '{0}' already declares its target as"
                 " '{1}', so tgt_type would be redundant at best"
-                ' and contradictory at worst. Omit'
-                ' --target.'.format(dataset, d['tgt_type'])
+                ' and contradictory at worst. Omit --target here;'
+                ' it exists only for datasets built before'
+                ' src/Dataset.jl recorded this attribute, which'
+                ' this one is not.'.format(dataset, d['tgt_type'])
             )
         tgt_type = d['tgt_type']
     elif tgt_type is None:
@@ -1053,6 +1055,7 @@ def main(
             d,
             N,
             train_idxs,
+            tgt_type,
         )
         scaling_means, scaling_stds = (
             preprocessing.compute_scaling_stats(
