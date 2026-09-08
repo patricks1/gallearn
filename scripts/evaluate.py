@@ -101,7 +101,7 @@ def load_val_dataset(checkpoint, split_file_path):
     galaxy_ids : np.ndarray of str
         d['obs_sorted'] entries for val_idxs, in the same row order
         as val_dataset (i.e. run_inference's outputs/targets).
-    ssfr : torch.Tensor
+    target_values : torch.Tensor
         d['ys_sorted'] entries for val_idxs (raw, unscaled target
         values), same row order as galaxy_ids.
     tgt_type : str
@@ -187,7 +187,7 @@ def load_val_dataset(checkpoint, split_file_path):
     print('Validating on {0} images'.format(len(val_idxs)))
 
     galaxy_ids = d['obs_sorted'][:N][val_idxs.numpy()]
-    ssfr = d['ys_sorted'][:N][val_idxs]
+    target_values = d['ys_sorted'][:N][val_idxs]
 
     val_dataset = gallearn.preprocessing.LazyGalaxyDataset(
         hdf5_path,
@@ -221,7 +221,7 @@ def load_val_dataset(checkpoint, split_file_path):
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
-    return model, val_dataset, task, galaxy_ids, ssfr, tgt_type
+    return model, val_dataset, task, galaxy_ids, target_values, tgt_type
 
 
 @torch.no_grad()
@@ -436,7 +436,7 @@ def add_sample_slides(
         pdf,
         hdf5_path,
         val_idxs,
-        ssfr,
+        target_values,
         task,
         outputs,
         target_stats,
@@ -454,9 +454,10 @@ def add_sample_slides(
     Parameters
     ----------
     val_idxs : torch.Tensor
-        Row indices into the HDF5, aligned with ssfr/outputs.
-    ssfr : torch.Tensor
-        Raw (unscaled) sSFR, aligned with val_idxs.
+        Row indices into the HDF5, aligned with
+        target_values/outputs.
+    target_values : torch.Tensor
+        Raw (unscaled) target values, aligned with val_idxs.
     outputs : torch.Tensor
         Model outputs, already reduced to a single point-prediction
         column for the regressor (heteroscedastic mean/log-variance
@@ -531,7 +532,7 @@ def add_sample_slides(
                 ax.imshow(rgb, origin='lower')
                 ax.axis('off')
 
-                galaxy_true = ssfr[si].item()
+                galaxy_true = target_values[si].item()
                 if task == 'classifier':
                     pred_label = (
                         'star-forming' if preds[si] == 1
@@ -567,7 +568,7 @@ def main(model_path, split_file_path, output_path=None, n_samples=10):
     run_name = checkpoint['train_config']['run_name']
 
     (
-        model, val_dataset, task, galaxy_ids, ssfr, tgt_type
+        model, val_dataset, task, galaxy_ids, target_values, tgt_type
     ) = load_val_dataset(
         checkpoint,
         split_file_path,
@@ -621,7 +622,7 @@ def main(model_path, split_file_path, output_path=None, n_samples=10):
             pdf,
             val_dataset.hdf5_path,
             val_dataset.indices,
-            ssfr,
+            target_values,
             task,
             outputs,
             checkpoint.get('target_stats'),
