@@ -176,6 +176,20 @@ if __name__ == '__main__':
         ),
     )
 
+    parser.add_argument(
+        '--head-dropout',
+        type=float,
+        default=None,
+        help=(
+            'Only affects --model resnet: dropout probability applied'
+            ' to the pooled feature vector before the head, where it'
+            ' drops whole pooled channels (default: 0.5). Pass 0.0 to'
+            ' disable. Must be omitted when --resume is given, since'
+            ' a resumed run reuses the checkpoint\'s own recorded'
+            ' head_dropout'
+        ),
+    )
+
     args = parser.parse_args()
 
     use_scheduler = (
@@ -196,6 +210,7 @@ if __name__ == '__main__':
         use_scheduler=use_scheduler,
         pretrained=args.pretrained,
         head_size=args.head_size,
+        head_dropout=args.head_dropout,
         tgt_type=args.target,
         dataset=args.dataset,
     )

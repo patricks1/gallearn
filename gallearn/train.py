@@ -278,7 +278,8 @@ def create_model(
         dataset,
         run_name,
         pretrained=False,
-        head_size=None):
+        head_size=None,
+        head_dropout=None):
     """
     Create a model based on model_type.
 
@@ -307,6 +308,12 @@ def create_model(
         omitted or invalid, rather than assuming a shape); must stay
         None for model_type='standard', whose head shape is fixed
         and unrelated to HEAD_PRESETS.
+    head_dropout : float, optional
+        Only affects model_type='resnet'. Dropout probability
+        cnn.ResNet.forward applies to the pooled feature vector
+        before the head. Required for model_type='resnet'; must stay
+        None for model_type='standard', whose forward pass has no
+        such step.
 
     Returns
     -------
@@ -325,6 +332,13 @@ def create_model(
                 " whose head is a fixed shape unrelated to"
                 " HEAD_PRESETS. Omit --head-size for a standard"
                 " model."
+            )
+        if head_dropout is not None:
+            raise ValueError(
+                "head_dropout has no effect on"
+                " model_type='standard', whose forward pass has no"
+                " pre-head dropout step. Omit --head-dropout for a"
+                " standard model."
             )
         if pretrained:
             backbone = torchvision.models.resnet18(
@@ -365,6 +379,7 @@ def create_model(
             out_channels_list=[16, 32, 64, 128],
             N_img_channels=4,
             head_widths=HEAD_PRESETS[head_size],
+            head_dropout=head_dropout,
         )
     else:
         raise ValueError(
@@ -613,6 +628,7 @@ def main(
         use_scheduler=None,
         pretrained=None,
         head_size=None,
+        head_dropout=None,
         train_orientations=None,
         tgt_type=None,
         dataset=None):
@@ -727,6 +743,14 @@ def main(
         given, since a resumed run always reuses the checkpoint's
         own recorded head_size: building a different head shape than
         the checkpoint's weights would fail to load.
+    head_dropout : float, optional
+        Only affects model_type='resnet'. Dropout probability applied
+        to the pooled feature vector before the head. Defaults to 0.5
+        on a fresh run, the rate hardcoded there before this was a
+        choice. Must be omitted when resume_from is given, since a
+        resumed run reuses the checkpoint's own recorded
+        head_dropout: changing the rate partway would alter the
+        regularization the restored weights were trained under.
     train_orientations : list of str, optional
         If given, restricts the training set to rows whose
         orientation is in this list (e.g. ['projection_xy',
@@ -862,6 +886,15 @@ def main(
                 ' fail to load. Omit --head-size when passing'
                 ' --resume.'
             )
+        if head_dropout is not None:
+            raise ValueError(
+                'head_dropout has no effect when resume_from is'
+                ' given. A resumed run always reuses the'
+                ' checkpoint\'s own recorded head_dropout, since'
+                ' changing the rate partway would alter the'
+                ' regularization its restored weights were trained'
+                ' under. Omit --head-dropout when passing --resume.'
+            )
         checkpoint = load_checkpoint(resume_from)
         saved_config = checkpoint.get('train_config', {})
         dataset = saved_config.get('dataset')
@@ -884,6 +917,11 @@ def main(
         # since create_model rejects any non-None value for it.
         head_size = saved_config.get(
             'head_size', 'large' if model_type == 'resnet' else None
+        )
+        # Checkpoints predating head_dropout all ran the rate that
+        # was hardcoded in cnn.ResNet.forward at the time, 0.5.
+        head_dropout = saved_config.get(
+            'head_dropout', 0.5 if model_type == 'resnet' else None
         )
         # Checkpoints written before tgt_type was recorded have none,
         # which leaves it to be resolved from the dataset's own
@@ -925,6 +963,12 @@ def main(
             # for model_type='standard', which create_model rejects
             # any non-None value for anyway.
             head_size = 'small'
+        if head_dropout is None and model_type == 'resnet':
+            # The rate cnn.ResNet.forward hardcoded before this was a
+            # parameter. Kept as the default so runs stay comparable
+            # to every result already in hand, not because anything
+            # has shown 0.5 to be right here.
+            head_dropout = 0.5
         with open(split_file_path) as f:
             split_dict = json.load(f)
         # The split file records the dataset it was built against.
@@ -962,6 +1006,7 @@ def main(
         'use_scheduler': use_scheduler,
         'pretrained': pretrained,
         'head_size': head_size,
+        'head_dropout': head_dropout,
         'train_orientations': train_orientations,
         'run_name': run_name,
         'wandb_run_id': wandb_run_id,
@@ -1228,6 +1273,7 @@ def main(
         run_name,
         pretrained=pretrained,
         head_size=head_size,
+        head_dropout=head_dropout,
     )
     model = model.to(device)
 

@@ -406,7 +406,8 @@ class ResNet(nn.Module):
                 dataset=None,
                 out_channels_list=[64, 128, 256, 512],
                 N_img_channels=None,
-                head_widths=None):
+                head_widths=None,
+                head_dropout=None):
 
         '''
         Adapted from https://github.com/freshtechyy/resnet.git
@@ -428,12 +429,30 @@ class ResNet(nn.Module):
                 silently. See gallearn.train.HEAD_PRESETS for the
                 named presets docs/status.md's head-width sweep
                 tested.
+            head_dropout: dropout probability forward() applies to the
+                pooled feature vector before the head. Required, for
+                the same reason as head_widths. Note what this
+                dropout does at this position: avgpool has already
+                reduced each channel to one scalar, so dropping an
+                element drops that channel's whole contribution, with
+                no downstream layer able to compensate.
         '''
         from . import config
         import os
         from . import preprocessing
 
         super().__init__()
+
+        if head_widths is None:
+            raise ValueError(
+                'head_widths is required; ResNet assumes no head'
+                ' shape of its own. See gallearn.train.HEAD_PRESETS.'
+            )
+        if head_dropout is None:
+            raise ValueError(
+                'head_dropout is required; ResNet assumes no dropout'
+                ' rate of its own. Pass 0.0 to disable it.'
+            )
 
         self.run_name = run_name
 
@@ -450,6 +469,7 @@ class ResNet(nn.Module):
         self.out_channels_list = out_channels_list
         self.N_img_channels = N_img_channels
         self.head_widths = head_widths
+        self.head_dropout = head_dropout
         self.dataset = dataset
 
         self.last_epoch = 0
@@ -558,12 +578,14 @@ class ResNet(nn.Module):
         x = self.conv4_x(x)
         x = self.conv5_x(x)
 
-        # Head
+        # Head. The dropout lands after avgpool, so it drops whole
+        # pooled channels rather than pixels, and before the rs
+        # concatenation, so the auxiliary scalar always survives.
         x = self.avgpool(x)
         x = x.flatten(start_dim=1)
         x = torch.nn.functional.dropout(
             x,
-            0.5,
+            self.head_dropout,
             training=self.training,
         )
         x = torch.cat((x, rs), dim=1)
