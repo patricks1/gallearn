@@ -212,7 +212,27 @@ class LazyGalaxyDataset(torch.utils.data.Dataset):
     A Dataset that reads galaxy images from an HDF5 file on demand, one sample
     at a time, instead of loading the full dataset into memory.
     '''
-    def __init__(self, hdf5_path, indices, means, stds, stretch, ys, rs):
+    def __init__(
+                self,
+                hdf5_path,
+                indices,
+                means,
+                stds,
+                stretch,
+                ys,
+                rs,
+                zero_channels=None,
+            ):
+        '''
+        zero_channels: channel indices to zero after scaling, for
+            input ablations, or None to keep every channel. This
+            belongs to the dataset rather than to a caller-side
+            monkeypatch because a DataLoader with num_workers > 0
+            spawns worker processes that re-import this module and
+            would never see a patched __getitem__. Instance
+            attributes reach those workers, since the DataLoader
+            pickles the dataset itself (see __getstate__).
+        '''
         self.hdf5_path = hdf5_path
         self.indices = indices
         self.means = means
@@ -220,6 +240,7 @@ class LazyGalaxyDataset(torch.utils.data.Dataset):
         self.stretch = stretch
         self.ys = ys
         self.rs = rs
+        self.zero_channels = zero_channels
         self._file = None
 
     def __len__(self):
@@ -238,6 +259,13 @@ class LazyGalaxyDataset(torch.utils.data.Dataset):
         x[3][torch.isnan(x[3])] = 0.0
         for c in range(4):
             x[c] = (x[c] - self.means[c]) / self.stds[c]
+
+        # After scaling, so an ablated channel reaches the model as
+        # zeros rather than as whatever value zero maps to once
+        # standardized.
+        if self.zero_channels is not None:
+            for c in self.zero_channels:
+                x[c] = 0.
 
         return x, self.rs[idx], self.ys[idx]
 

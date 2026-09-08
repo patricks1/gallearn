@@ -630,6 +630,7 @@ def main(
         head_size=None,
         head_dropout=None,
         train_orientations=None,
+        zero_channels=None,
         tgt_type=None,
         dataset=None):
     """
@@ -760,6 +761,13 @@ def main(
         (dataset, split, scaling stats, val set) fixed; not meant
         for routine use, so there is no --train-orientations CLI
         flag, only this argument.
+    zero_channels : list of int, optional
+        Image channels to zero after scaling, in both the train and
+        val datasets, for input ablations (e.g. [3] to remove the
+        velocity map). Recorded in train_config so a run's wandb
+        config says which channels it actually trained on. Like
+        train_orientations, this is an experiment argument with no
+        CLI flag.
     """
     device = get_device()
     print('Using device: {0}'.format(device))
@@ -782,6 +790,15 @@ def main(
                 ' is given, since a resumed run reuses the'
                 ' checkpoint\'s already-filtered cached train_idxs'
                 ' rather than rebuilding them.'
+            )
+        if zero_channels is not None:
+            raise ValueError(
+                'zero_channels has no effect when resume_from is'
+                ' given. A resumed run always reuses the'
+                ' checkpoint\'s own recorded zero_channels, since'
+                ' training on different input channels than the'
+                ' restored weights saw is a different experiment,'
+                ' not a continuation.'
             )
         if dataset is not None:
             raise ValueError(
@@ -927,6 +944,7 @@ def main(
         # which leaves it to be resolved from the dataset's own
         # attributes below, exactly as a fresh run would.
         tgt_type = saved_config.get('tgt_type')
+        zero_channels = saved_config.get('zero_channels')
     else:
         if task is None or model_type is None:
             raise ValueError(
@@ -1008,6 +1026,7 @@ def main(
         'head_size': head_size,
         'head_dropout': head_dropout,
         'train_orientations': train_orientations,
+        'zero_channels': zero_channels,
         'run_name': run_name,
         'wandb_run_id': wandb_run_id,
     }
@@ -1215,6 +1234,7 @@ def main(
         stretch,
         targets[train_idxs],
         rs[train_idxs],
+        zero_channels=zero_channels,
     )
     val_dataset = preprocessing.LazyGalaxyDataset(
         hdf5_path,
@@ -1224,6 +1244,7 @@ def main(
         stretch,
         targets[val_idxs],
         rs[val_idxs],
+        zero_channels=zero_channels,
     )
 
     # train_loader's shuffling order is controlled entirely by this
