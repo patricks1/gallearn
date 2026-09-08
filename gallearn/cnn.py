@@ -432,6 +432,7 @@ class ResNet(nn.Module):
                 dataset=None,
                 out_channels_list=[64, 128, 256, 512],
                 N_img_channels=None,
+                head_widths=None,
                 auto_load=True):
 
         '''
@@ -439,15 +440,21 @@ class ResNet(nn.Module):
 
         Parameters
         ----------
-            resblock: residual block type, BasicResBlock for ResNet-18, 34 or 
+            resblock: residual block type, BasicResBlock for ResNet-18, 34 or
                       BottleNeck for ResNet-50, 101, 152
             n_class: number of classes for image classifcation (used in
                 classfication head)
-            n_blocks_list: number of residual blocks for each conv layer 
+            n_blocks_list: number of residual blocks for each conv layer
                 (conv2_x - conv5_x)
-            out_channels_list: list of the output channel numbers for conv2_x 
+            out_channels_list: list of the output channel numbers for conv2_x
                 - conv5_x
             N_img_channels: the number of channels of input image
+            head_widths: hidden layer widths for the fully-connected
+                head, applied after global average pooling. Required;
+                there is no default, so no head shape is assumed
+                silently. See gallearn.train.HEAD_PRESETS for the
+                named presets docs/status.md's head-width sweep
+                tested.
         '''
         from . import config
         import os
@@ -494,6 +501,7 @@ class ResNet(nn.Module):
             self.n_blocks_list = n_blocks_list
             self.out_channels_list = out_channels_list
             self.N_img_channels = N_img_channels
+            self.head_widths = head_widths
             self.dataset = dataset
 
             self.last_epoch = 0
@@ -563,32 +571,22 @@ class ResNet(nn.Module):
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
-        # Head
-        self.head = nn.Sequential(
-            nn.LazyLinear(2048),
-            nn.BatchNorm1d(2048),
-            self.activation_module(),
-
-            nn.Linear(2048, 1024),
-            nn.BatchNorm1d(1024),
-            self.activation_module(),
-
-            nn.Linear(1024, 256),
-            nn.BatchNorm1d(256),
-            self.activation_module(),
-
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            self.activation_module(),
-
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            self.activation_module(),
-
-            nn.Linear(64, self.N_out_channels),
-            #nn.Sigmoid()
-            #nn.ReLU()
-        )
+        # Head. self.head_widths gives the hidden-layer widths; the
+        # first Linear is Lazy since the pooled-feature width depends
+        # on out_channels_list and the concatenated auxiliary inputs
+        # (see forward()), not on head_widths itself.
+        head_layers = []
+        prev_width = None
+        for i, width in enumerate(self.head_widths):
+            if i == 0:
+                head_layers.append(nn.LazyLinear(width))
+            else:
+                head_layers.append(nn.Linear(prev_width, width))
+            head_layers.append(nn.BatchNorm1d(width))
+            head_layers.append(self.activation_module())
+            prev_width = width
+        head_layers.append(nn.Linear(prev_width, self.N_out_channels))
+        self.head = nn.Sequential(*head_layers)
 
         if self.need_to_load:
             self.init_optimizer()

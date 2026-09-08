@@ -26,6 +26,23 @@ from . import splitting
 from . import target_specs
 
 
+# Named cnn.ResNet head shapes from docs/status.md's head-width
+# sweep (sSFR project). 'large' is the sweep's original baseline,
+# kept only for reproducing/comparing against that history, not as
+# anyone's default going forward: the sweep found it wasn't a robust
+# improvement over the smaller options, and its own head alone held
+# ~87% of the whole model's parameters. 'minimal' is a new,
+# untested-by-that-sweep point close to a standard ResNet head shape
+# (no wide expansion after global average pooling).
+HEAD_PRESETS = {
+    'large': [2048, 1024, 256, 128, 64],
+    'medium': [512, 256, 128, 64, 32],
+    'small': [128, 64, 32, 16, 8],
+    'tiny': [32, 16, 8, 4],
+    'minimal': [64, 32],
+}
+
+
 def get_device():
     """Select the best available device (MPS, CUDA, or CPU)."""
     try:
@@ -260,7 +277,8 @@ def create_model(
         lr,
         dataset,
         run_name,
-        pretrained=False):
+        pretrained=False,
+        head_size=None):
     """
     Create a model based on model_type.
 
@@ -282,6 +300,13 @@ def create_model(
         cnn._replace_first_conv_in_channels). cnn.ResNet has no
         pretrained option, since it isn't a standard torchvision
         architecture with published weights.
+    head_size : str, optional
+        Only affects model_type='resnet'. One of HEAD_PRESETS'
+        keys, naming cnn.ResNet's fully-connected head shape.
+        Required for model_type='resnet' (create_model raises if
+        omitted or invalid, rather than assuming a shape); must stay
+        None for model_type='standard', whose head shape is fixed
+        and unrelated to HEAD_PRESETS.
 
     Returns
     -------
@@ -294,6 +319,13 @@ def create_model(
     # decoupled leaves other pairings available to experiment with.
     # cnn.py also defines Net and BottleNeck, not wired in here yet.
     if model_type == 'standard':
+        if head_size is not None:
+            raise ValueError(
+                "head_size has no effect on model_type='standard',"
+                " whose head is a fixed shape unrelated to"
+                " HEAD_PRESETS. Omit --head-size for a standard"
+                " model."
+            )
         if pretrained:
             backbone = torchvision.models.resnet18(
                 weights=torchvision.models.ResNet18_Weights.DEFAULT,
@@ -316,6 +348,12 @@ def create_model(
                 " published weights. Use model_type='standard' for"
                 " a pretrained run."
             )
+        if head_size not in HEAD_PRESETS:
+            raise ValueError(
+                'head_size must be one of {0}, got {1!r}'.format(
+                    sorted(HEAD_PRESETS), head_size
+                )
+            )
         model = cnn.ResNet(
             run_name,
             N_out_channels=1,
@@ -326,6 +364,7 @@ def create_model(
             dataset=dataset,
             out_channels_list=[16, 32, 64, 128],
             N_img_channels=4,
+            head_widths=HEAD_PRESETS[head_size],
             auto_load=False,
         )
     else:
@@ -574,6 +613,7 @@ def main(
         resume_from=None,
         use_scheduler=None,
         pretrained=None,
+        head_size=None,
         train_orientations=None,
         tgt_type=None,
         dataset=None):
@@ -681,6 +721,13 @@ def main(
         this flag; restored and guarded anyway so train_config's
         record of it can't disagree with what the checkpoint's
         weights actually are.
+    head_size : str, optional
+        Only affects model_type='resnet'. See create_model's
+        head_size parameter for the named presets. Defaults to
+        'small' on a fresh run. Must be omitted when resume_from is
+        given, since a resumed run always reuses the checkpoint's
+        own recorded head_size: building a different head shape than
+        the checkpoint's weights would fail to load.
     train_orientations : list of str, optional
         If given, restricts the training set to rows whose
         orientation is in this list (e.g. ['projection_xy',
@@ -807,6 +854,15 @@ def main(
                 ' what the checkpoint\'s weights actually are. Omit'
                 ' --pretrained when passing --resume.'
             )
+        if head_size is not None:
+            raise ValueError(
+                'head_size has no effect when resume_from is given.'
+                ' A resumed run always reuses the checkpoint\'s own'
+                ' recorded head_size, since building a different'
+                ' head shape than the checkpoint\'s weights would'
+                ' fail to load. Omit --head-size when passing'
+                ' --resume.'
+            )
         checkpoint = load_checkpoint(resume_from)
         saved_config = checkpoint.get('train_config', {})
         dataset = saved_config.get('dataset')
@@ -821,6 +877,15 @@ def main(
         seed = saved_config.get('seed')
         use_scheduler = saved_config.get('use_scheduler')
         pretrained = saved_config.get('pretrained')
+        # Checkpoints written before head_size existed, for
+        # model_type='resnet', all used the hardcoded shape
+        # HEAD_PRESETS['large'] now names, so that's the correct
+        # backward-compatible default here, not None. For
+        # model_type='standard', head_size stays None either way,
+        # since create_model rejects any non-None value for it.
+        head_size = saved_config.get(
+            'head_size', 'large' if model_type == 'resnet' else None
+        )
         # Checkpoints written before tgt_type was recorded have none,
         # which leaves it to be resolved from the dataset's own
         # attributes below, exactly as a fresh run would.
@@ -851,6 +916,16 @@ def main(
             use_scheduler = True
         if pretrained is None:
             pretrained = False
+        if head_size is None and model_type == 'resnet':
+            # 'small' is the one shrink that held up across both
+            # seeds in the sSFR project's head-width sweep, a real
+            # if weak result. 'minimal' cuts much further into
+            # untested territory, closer to 'tiny', which
+            # underperformed 'large' in that same sweep, so it isn't
+            # a safe assumption for a default. head_size stays None
+            # for model_type='standard', which create_model rejects
+            # any non-None value for anyway.
+            head_size = 'small'
         with open(split_file_path) as f:
             split_dict = json.load(f)
         # The split file records the dataset it was built against.
@@ -887,6 +962,7 @@ def main(
         'seed': seed,
         'use_scheduler': use_scheduler,
         'pretrained': pretrained,
+        'head_size': head_size,
         'train_orientations': train_orientations,
         'run_name': run_name,
         'wandb_run_id': wandb_run_id,
@@ -1147,7 +1223,12 @@ def main(
 
     # Create model
     model = create_model(
-        model_type, lr, dataset, run_name, pretrained=pretrained
+        model_type,
+        lr,
+        dataset,
+        run_name,
+        pretrained=pretrained,
+        head_size=head_size,
     )
     model = model.to(device)
 

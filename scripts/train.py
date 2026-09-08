@@ -163,6 +163,18 @@ if __name__ == '__main__':
             ' pretrained'
         ),
     )
+    parser.add_argument(
+        '--head-size',
+        type=str,
+        choices=sorted(gallearn.train.HEAD_PRESETS),
+        default=None,
+        help=(
+            'Only affects --model resnet: names cnn.ResNet\'s'
+            ' fully-connected head shape (default: small). Must be'
+            ' omitted when --resume is given, since a resumed run'
+            ' reuses the checkpoint\'s own recorded head_size'
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -183,6 +195,7 @@ if __name__ == '__main__':
         resume_from=args.resume,
         use_scheduler=use_scheduler,
         pretrained=args.pretrained,
+        head_size=args.head_size,
         tgt_type=args.target,
         dataset=args.dataset,
     )
