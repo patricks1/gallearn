@@ -217,14 +217,14 @@ function read_3d_tgt()
     return ys
 end
 
-const FGAS_FNAME = "firebox_summary_stats.csv"
+const HALO_STATS_FNAME = "firebox_summary_stats.csv"
 
 # Every `tgt_type` the pipeline knows how to build. load_images and
 # build_training_data each branch on tgt_type in more than one place,
 # so keep the list of valid values here rather than restating it at
 # each throw site, where one copy can fall out of date with the
 # branches and report a target as invalid after it has been added.
-const TGT_TYPES = ("2d", "3d", "sfr", "avg_sfr", "fgas")
+const TGT_TYPES = ("2d", "3d", "sfr", "avg_sfr", "fgas", "fdm")
 const TGT_TYPE_ERR = (
     "`tgt_type` should be one of "
     * join(map(t -> "\"$t\"", TGT_TYPES), ", ", ", or ")
@@ -253,13 +253,18 @@ function read_sfr_tgt(sfr_type)
     return y_df
 end
 
-# The gas fraction `fgas` is a scalar field FIREbox already stores in
-# each galaxy's particle file, which UCITools' FIREBoxIO.summarize_gals
-# collects into firebox_summary_stats.csv. It is gas mass over total
-# halo mass (dark matter included), not a baryonic ratio, so it needs
-# no derivation here.
-function read_fgas_tgt()
-    y_df = CSV.read(joinpath(gallearn_dir, FGAS_FNAME), DataFrames.DataFrame)
+# Gas fraction (`fgas`) and dark-matter fraction (`fdm`) are both
+# scalar fields FIREbox already stores in each galaxy's particle
+# file, which UCITools' FIREBoxIO.summarize_gals collects into
+# firebox_summary_stats.csv alongside each other. Both are mass
+# fractions of the total halo mass, not baryonic ratios, so neither
+# needs derivation here; build_training_data picks the actual column
+# each target trains on.
+function read_halo_stats_tgt()
+    y_df = CSV.read(
+        joinpath(gallearn_dir, HALO_STATS_FNAME),
+        DataFrames.DataFrame
+    )
     y_df.id .= "object_" .* string.(y_df.id)
     DataFrames.rename!(y_df, :id => :Simulation)
     return y_df
@@ -321,8 +326,8 @@ function load_images(
         y_df = read_sfr_tgt(tgt_type)
         all_bands = true
         Nbands = 3
-    elseif tgt_type == "fgas"
-        y_df = read_fgas_tgt()
+    elseif tgt_type in ("fgas", "fdm")
+        y_df = read_halo_stats_tgt()
         all_bands = true
         Nbands = 3
     else
@@ -596,7 +601,7 @@ function load_images(
             orientation_mask[i, :] .= y_df[!, "view"] .== orientations[i]
         end
         mask = id_mask .& orientation_mask
-    elseif tgt_type in ("sfr", "avg_sfr", "fgas")
+    elseif tgt_type in ("sfr", "avg_sfr", "fgas", "fdm")
         # These targets are properties of the galaxy rather than of the
         # projection, so they match on Simulation alone, with no view.
         # mask is (length(ids_X), nrow(y_df)); see comment above.
@@ -744,6 +749,9 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
     elseif tgt_type == "fgas"
         ys = Array(y_df[:, "fgas"])
         ys = reshape(ys, (size(ys)..., 1))
+    elseif tgt_type == "fdm"
+        ys = Array(y_df[:, "fdm"])
+        ys = reshape(ys, (size(ys)..., 1))
     else
         throw(ArgumentError(TGT_TYPE_ERR))
     end
@@ -754,8 +762,8 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
     # separate name here.
     if tgt_type in ("sfr", "avg_sfr")
         tgt_source = sfr_tgt_fname(tgt_type)
-    elseif tgt_type == "fgas"
-        tgt_source = FGAS_FNAME
+    elseif tgt_type in ("fgas", "fdm")
+        tgt_source = HALO_STATS_FNAME
     elseif tgt_type == "2d"
         tgt_source = join(
             [

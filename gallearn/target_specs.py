@@ -212,6 +212,52 @@ class FgasTarget(TargetSpec):
         return scaled * stats['stds'] + stats['means']
 
 
+class FdmTarget(TargetSpec):
+    """
+    Dark-matter fraction: dark-matter mass over total halo mass.
+
+    Unlike gas fraction, no galaxy sits at exactly zero or exactly
+    one, so there is no edge case to carve out. The regressor trains
+    on every galaxy, scaled the same way as gas fraction: plain
+    standardization, since the range is narrow enough that no
+    stretch is needed and a log axis would be pointless without any
+    zeros to worry about.
+    """
+
+    name = 'fdm'
+    column = 'fdm'
+    supports_classifier = False
+    axis_label = 'dark-matter fraction'
+    unit = ''
+    log_scale = False
+
+    def select_valid(self, vals):
+        return torch.arange(len(vals))
+
+    def population_summary(self, vals):
+        return 'Dark-matter fraction: {0:.0f} galaxy images'.format(
+            len(vals)
+        )
+
+    def fit(self, vals):
+        _, means, stds = preprocessing.std_scale(
+            vals,
+            return_distrib=True,
+        )
+        return {'means': means, 'stds': stds}
+
+    def scale(self, vals, stats):
+        return preprocessing.std_scale(
+            vals,
+            means=stats['means'],
+            stds=stats['stds'],
+        )
+
+    def unscale(self, scaled, stats):
+        # std_scale computes scaled = (x - means) / stds.
+        return scaled * stats['stds'] + stats['means']
+
+
 # Keyed by the `tgt_type` src/Dataset.jl writes into the HDF5 root
 # attributes, which is also what --target accepts. "sfr" and
 # "avg_sfr" are both sSFR, differing only in the averaging window
@@ -221,6 +267,7 @@ REGISTRY = {
     'sfr': SsfrTarget(),
     'avg_sfr': SsfrTarget(),
     'fgas': FgasTarget(),
+    'fdm': FdmTarget(),
 }
 
 
@@ -231,7 +278,7 @@ def get(tgt_type):
     Parameters
     ----------
     tgt_type : str
-        A key of REGISTRY: 'sfr', 'avg_sfr', or 'fgas'.
+        A key of REGISTRY: 'sfr', 'avg_sfr', 'fgas', or 'fdm'.
 
     Returns
     -------

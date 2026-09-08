@@ -63,7 +63,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--target',
         type=str,
-        choices=['sfr', 'avg_sfr', 'fgas'],
+        choices=['sfr', 'avg_sfr', 'fgas', 'fdm'],
         default=None,
         help=(
             'Which target the dataset holds. Only for datasets'

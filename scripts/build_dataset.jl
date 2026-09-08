@@ -47,7 +47,7 @@ println("GalLearn loaded on workers."); flush(stdout)
 if isempty(ARGS)
     error(
         "Pass the target to build, e.g. `build_dataset.jl fgas`."
-        * " Options: 2d, 3d, sfr, avg_sfr, fgas."
+        * " Options: 2d, 3d, sfr, avg_sfr, fgas, fdm."
     )
 end
 tgt_type = ARGS[1]

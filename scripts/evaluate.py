@@ -293,8 +293,8 @@ def invert_target_scaling(scaled, target_stats, tgt_type):
         'target_stats' (see gallearn.train.prepare_targets). Treat
         the contents as opaque.
     tgt_type : str
-        Which target these values belong to: 'sfr', 'avg_sfr', or
-        'fgas'. See gallearn.target_specs.REGISTRY.
+        Which target these values belong to: 'sfr', 'avg_sfr',
+        'fgas', or 'fdm'. See gallearn.target_specs.REGISTRY.
 
     Returns
     -------

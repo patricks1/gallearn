@@ -22,11 +22,11 @@ from gallearn import dataset_lock
 from gallearn import train
 
 
-def _write_dataset(path, n_rows=6, res=32):
+def _write_dataset(path, tgt_type, n_rows=6, res=32):
     '''Write a minimal but real-shaped dataset HDF5: 4-channel images
-    (3 bands + vmap), Re, and an fgas-style target attrs-declared so
-    main() needs no --target. Values are non-constant so per-channel
-    scaling stats come out finite.'''
+    (3 bands + vmap), Re, and a target attrs-declared so main() needs
+    no --target. Values are non-constant so per-channel scaling
+    stats come out finite.'''
     rng = np.random.default_rng(0)
     with h5py.File(path, 'w') as f:
         f.create_dataset(
@@ -57,15 +57,20 @@ def _write_dataset(path, n_rows=6, res=32):
         f.create_dataset(
             'Re', data=np.ones((n_rows, 1), dtype=np.float64)
         )
-        f.attrs['tgt_type'] = 'fgas'
+        f.attrs['tgt_type'] = tgt_type
         f.attrs['tgt_source'] = 'firebox_summary_stats.csv'
 
 
-def test_main_runs_a_fresh_regressor_epoch(tmp_path, monkeypatch):
+@pytest.mark.parametrize('tgt_type', ['fgas', 'fdm'])
+def test_main_runs_a_fresh_regressor_epoch(
+        tgt_type, tmp_path, monkeypatch):
     '''Verify a fresh (non-resume) regressor run completes one
     epoch end to end: dataset load, target/scaling prep, training and
     validation loops, and a checkpoint write. This is the exact path
-    that broke when prepare_targets() was called without tgt_type.'''
+    that broke when prepare_targets() was called without tgt_type.
+    Covers both fraction targets, since they share the same
+    read_halo_stats_tgt() source file on the Julia side and this is
+    what verifies that rename/merge didn't regress either one.'''
     monkeypatch.setitem(
         config.config['gallearn_paths'],
         'project_data_dir',
@@ -74,7 +79,7 @@ def test_main_runs_a_fresh_regressor_epoch(tmp_path, monkeypatch):
     monkeypatch.setattr(dataset_lock, 'HASHES_DIR', tmp_path / 'hashes')
 
     dataset_fname = 'ds.h5'
-    _write_dataset(tmp_path / dataset_fname)
+    _write_dataset(tmp_path / dataset_fname, tgt_type)
     dataset_lock.lock_dataset(dataset_fname)
 
     n_rows = 6
@@ -89,12 +94,13 @@ def test_main_runs_a_fresh_regressor_epoch(tmp_path, monkeypatch):
         ],
     }))
 
+    run_name = 'ci_smoke_{0}'.format(tgt_type)
     model = train.main(
         task='regressor',
         model_type='standard',
         split_file_path=str(split_path),
         dataset=dataset_fname,
-        run_name='ci_smoke',
+        run_name=run_name,
         n_epochs=1,
         batch_size=2,
         wandb_mode='n',
@@ -102,6 +108,6 @@ def test_main_runs_a_fresh_regressor_epoch(tmp_path, monkeypatch):
 
     assert model is not None
     checkpoints = list(
-        (tmp_path / 'ci_smoke').glob('checkpoint_epoch*.pt')
+        (tmp_path / run_name).glob('checkpoint_epoch*.pt')
     )
     assert len(checkpoints) == 1

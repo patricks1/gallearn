@@ -516,9 +516,8 @@ def update_test_lock(
     d, N, _ = preprocessing.load_metadata(dataset_fname)
     # The dataset says which galaxies exist; the CSV supplies the
     # stellar mass and sSFR to stratify them on. Note that `d` holds
-    # this dataset's targets, which are gas fractions rather than
-    # sSFRs whenever it was built for gas fraction, so they cannot
-    # stand in for the CSV's sSFRs here.
+    # whichever target the dataset was built for, not necessarily
+    # sSFR, so it cannot stand in for the CSV's sSFRs here.
     galaxy_index = build_galaxy_index(d['obs_sorted'][:N])
     masses = load_avg_sfr_csv(avg_sfr_csv)
     ssfrs = load_avg_sfr_ssfrs(avg_sfr_csv)

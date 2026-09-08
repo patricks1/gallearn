@@ -91,5 +91,8 @@ def test_compute_valid_indices_follows_the_target():
         'regressor', d, 4, 'fgas'
     ).tolist() == [0, 1, 2, 3]
     assert train.compute_valid_indices(
+        'regressor', d, 4, 'fdm'
+    ).tolist() == [0, 1, 2, 3]
+    assert train.compute_valid_indices(
         'regressor', d, 4, 'avg_sfr'
     ).tolist() == [1, 3]
