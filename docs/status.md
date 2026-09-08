@@ -6,9 +6,77 @@ also a historical log: append new findings, don't delete or silently
 rewrite old ones. If something turns out to be wrong or confounded,
 say so in place and point forward, rather than removing it.
 
-Last updated: 2026-08-25. See [Project status: reopened][reopened],
-immediately below, then [Project status: concluded][status] for the
-sSFR work this project produced before the pivot.
+Last updated: 2026-09-08. See [Project status: the vmap carries
+the signal][vmap-status] first, then [Project status:
+reopened][reopened] for the pivot to these targets, then [Project
+status: concluded][status] for the sSFR work that came before.
+
+## Project status: the vmap carries the signal (2026-09-08)
+
+The first real experiments on the new targets landed a result that
+outranks everything else measured on them. Gas fraction and
+dark-matter fraction both look easy compared to sSFR, at val R2 ~0.62
+and ~0.77 against an sSFR ceiling of ~0.31. Both numbers come
+entirely from one input channel. Zero the velocity map and
+performance on both targets falls to zero, reproducibly, on both
+seeds:
+
+| target | seed | with vmap | vmap zeroed | change |
+|---|---|---|---|---|
+| fgas | 42 | 0.6150 | -0.0000 | -0.6151 |
+| fgas | 7 | 0.6110 | 0.0062 | -0.6049 |
+| fdm | 42 | 0.7585 | 0.0008 | -0.7577 |
+| fdm | 7 | 0.7728 | 0.0048 | -0.7680 |
+
+Not degraded, gone. The three ugr bands contribute nothing this
+pipeline can measure on either target. The ablated models still train
+(their train loss falls), so nothing crashes; they simply learn
+nothing that transfers to val galaxies. For fdm the ablated network
+lands below the mass-and-size scalar baseline of 0.354, even though
+it receives Re directly and could in principle read stellar mass off
+the ugr brightness.
+
+What the vmap actually contains explains why this matters.
+`UCITools`' `vel_map.calc_vmap` builds a gas column-density map, keeps
+only bins above `min_cden`, and writes NaN elsewhere:
+
+    mask = cden_map >= min_cden
+    vmap = np.where(mask, v_y_colormap, np.nan)
+
+`LazyGalaxyDataset` then turns those NaNs into zeros. So the channel
+bundles two different things. Its non-zero footprint is a map of
+where this galaxy holds gas above a threshold, and the values inside
+that footprint are gas kinematics tracing the gravitational
+potential.
+
+Those two components carry very different weight for the two targets.
+Predicting gas fraction from the extent of a gas map approaches
+circularity, since the input derives from the same physical quantity
+as the target. Predicting dark-matter fraction from a velocity field
+is instead what rotation curves have done for decades, so it may be
+real kinematic mass modeling rather than leakage. The current
+ablation cannot separate these, because zeroing the channel destroys
+the footprint and the kinematics together.
+
+Either way, one claim is already ruled out. These are not results
+about what galaxy images show. Photometry contributes nothing here.
+Any framing of this work should say that gas velocity maps predict
+these quantities, not that images do.
+
+**The experiment that resolves it** splits the channel's two
+components, at head-small, two seeds each:
+
+- **Mask only**: replace the velocity values with a binary
+  gas-presence mask. Keeps the footprint, destroys kinematics.
+- **Kinematics only**: keep velocity values but break the
+  footprint's correspondence to gas extent, by shuffling values
+  spatially within the mask or randomizing the mask's extent while
+  preserving the velocity distribution.
+
+If fdm survives kinematics-only and dies on mask-only, the
+dark-matter result is physics. If both targets follow the mask, both
+are measuring gas extent and the headline numbers do not mean what
+they appear to.
 
 ## Project status: reopened (2026-08-25)
 
@@ -229,6 +297,19 @@ Everything tried so far, grouped by theme, oldest first:
 - [Heteroscedastic regression head][het-head]: predicted variance
   correlates with actual error, but mostly because both track target
   magnitude. Little left once that's controlled for.
+- [Ceiling check: fgas and fdm][ceiling-new]: mass and size alone
+  reach val R² 0.354 on fdm, a far higher bar than sSFR's 0-0.04.
+- [Head-size sweep on the new targets][head-sweep-new]: a ~10K
+  parameter head matches or beats the ~2.99M one on both targets.
+  Bottleneck width matters, parameter count barely does.
+- [Epoch budget][epoch-budget]: 50 epochs was enough. Of twelve runs
+  extended to 75, one improved, and it was the most constrained head.
+- [Pre-head dropout, on against off][head-dropout]: no reproducible
+  effect, the clean test the dropout post-mortem never ran.
+- [Velocity-map ablation][vmap-ablation]: zeroing the vmap takes both
+  targets to R² ≈ 0. The photometry carries nothing on its own.
+- [A failed ablation, twice][ablation-fail]: two monkeypatch attempts
+  silently did nothing and looked like clean null results.
 
 ### Classifier: generalizes fine
 
@@ -869,6 +950,176 @@ against actual burstiness (the multi-window sSFR comparison data)
 rather than against squared error, since squared error is exactly
 where the `|target|` confound comes from.
 
+### Ceiling check: fgas and fdm (2026-09-08)
+
+The same scalar-feature baseline the sSFR project ran, refit for the
+new targets: linear regression and gradient-boosted trees on
+`log10(Mstar)` and `Re`, no images, against the same train/val
+galaxies the CNN runs use, with the target standardized on train rows
+alone.
+
+| target | features | model | train R2 | val R2 |
+|---|---|---|---|---|
+| fgas | log(Mstar) | linear | 0.0280 | 0.0048 |
+| fgas | log(Mstar) | GBR | 0.5268 | -0.1787 |
+| fgas | log(Mstar) + Re | linear | 0.0372 | 0.0144 |
+| fgas | log(Mstar) + Re | GBR | 0.5473 | 0.0563 |
+| fdm | log(Mstar) | linear | 0.1062 | 0.1036 |
+| fdm | log(Mstar) | GBR | 0.4637 | 0.1238 |
+| fdm | log(Mstar) + Re | linear | 0.1226 | 0.1295 |
+| fdm | log(Mstar) + Re | GBR | 0.5920 | 0.3539 |
+
+Running this first turned out to matter for fdm. Mass and size alone
+reach val R2 0.354 there, unlike sSFR, where the same baseline got
+0.00 to 0.04 and made almost any CNN number look like real signal. A
+dark-matter-fraction model has to clear 0.354 before it demonstrates
+anything beyond a two-variable fit, which is also what makes the
+[vmap ablation][vmap-ablation]'s 0.00 so damning: without that
+channel the CNN cannot even match the trivial baseline.
+
+Rows here are per image rather than per galaxy, so one galaxy appears
+about eleven times with identical scalars and different orientations.
+Val galaxies stay disjoint from train galaxies, so the val numbers
+remain honest.
+
+### Head-size sweep on the new targets (2026-09-08)
+
+The first use of the new `--head-size` flag, which replaced the
+hardcoded head. Every run uses `--model resnet`, the avg_sfr split
+against each target's own dataset, lr=1e-3, batch_size=32, two seeds,
+50 epochs then extended to 75 (see [epoch budget][epoch-budget]).
+Val R2 at each run's best checkpoint:
+
+| target | head | narrowest layer | head params | seed 42 | seed 7 | mean |
+|---|---|---|---|---|---|---|
+| fgas | minimal (64/32) | 32 | ~10K | 0.6228 | 0.6154 | 0.6191 |
+| fgas | tiny (32/16/8/4) | 4 | ~316K | 0.6163 | 0.6187 | 0.6175 |
+| fgas | small (128..8) | 8 | ~339K | 0.6150 | 0.6110 | 0.6130 |
+| fgas | large (2048..64) | 64 | ~2.99M | 0.6015 | 0.5701 | 0.5858 |
+| fdm | minimal | 32 | ~10K | 0.7631 | 0.7694 | 0.7663 |
+| fdm | small | 8 | ~339K | 0.7585 | 0.7728 | 0.7657 |
+| fdm | tiny | 4 | ~316K | 0.7331 | 0.7618 | 0.7475 |
+| fdm | large | 64 | ~2.99M | 0.7523 | 0.7317 | 0.7420 |
+
+(fgas large seed 42 is `lively-morning-94`, reused rather than rerun.
+It ran 100 epochs and peaked at 40, inside this sweep's budget, so
+its best checkpoint is comparable.)
+
+**Verdict**: cutting the head from ~2.99M parameters to ~10K costs
+nothing and helps slightly. The large head posts the lowest mean on
+both targets, and comes last in three of the four target-seed
+combinations, losing only to fdm's tiny at seed 42. That is the one
+ordering here with real support. Among the three narrow heads on fgas
+the spread is 0.006, smaller than some within-config seed spreads, so
+they are indistinguishable there.
+
+Parameter count is not the operative variable. On fdm, tiny sits
+0.019 below minimal while carrying 32 times more parameters. What
+separates them is the narrowest layer, 4 units against 32. A
+4-dimensional bottleneck discards real information for a target this
+well determined, which fgas at 0.62 tolerates and fdm at 0.77 does
+not. The lesson is to avoid pinching the head, not to shrink it.
+
+Even that reading deserves caution. tiny's gap to minimal on fdm
+swings from 0.030 at seed 42 to 0.008 at seed 7, and small's own
+seed spread is 0.014, so the direction holds on both seeds while the
+magnitude does not. This doc has declined to call weaker versions of
+that pattern a real effect before.
+
+These runs also show much tighter seed variance than the sSFR sweeps
+did, roughly 0.004 against the 0.03 to 0.05 that flipped conclusions
+there. Higher-signal targets make the two-seed rule cheaper to
+satisfy, though the [dropout][head-dropout] result below shows it is
+still doing necessary work.
+
+### Epoch budget: 50 was enough (2026-09-08)
+
+The sweep ran at 50 epochs, and its first runs peaked at 36 to 40,
+close enough to the cap to raise the question. Rather than rerun,
+every run resumed from its own `checkpoint_epoch050.pt` for another
+25 epochs. `train.py` saves a final checkpoint alongside best-loss
+ones and restores the optimizer, scheduler, and shuffling generator
+state, and the loop runs `range(start_epoch, start_epoch + n_epochs)`,
+so this is equivalent to having trained 75 epochs uninterrupted, in
+the same wandb run.
+
+Of twelve runs, exactly one improved. `fdm_head-tiny_seed7` moved
+from 0.7398 to 0.7618 with its best at epoch 60, then plateaued
+through 75. Every other run kept its pre-50 best, most by a wide
+margin.
+
+The one that moved is the informative one. tiny is the most
+constrained head tested, and this doc's earlier
+[capacity work][head-sweep-sfr] already found that smaller models fit
+more slowly and peak later. Without the extension, tiny's fdm result
+would have read 0.019 worse than it is, exaggerating the bottleneck
+effect the sweep above reports.
+
+### Pre-head dropout, on against off (2026-09-08)
+
+`cnn.ResNet.forward` applied p=0.5 dropout to the pooled feature
+vector, a rate that arrived by convention and had never been tested
+here. The [dropout post-mortem][pm-dropout] tested only eval-time
+behavior, with both arms training at 0.5, and its no-dropout
+comparison point was StandardNet, a different architecture. Making
+the rate a parameter allowed the clean test. fgas, two head widths,
+two seeds:
+
+| head | seed | p=0.5 | p=0.0 | change |
+|---|---|---|---|---|
+| small | 42 | 0.6150 | 0.5963 | -0.0187 |
+| small | 7 | 0.6110 | 0.6319 | +0.0209 |
+| small | mean | | | +0.0011 |
+| minimal | 42 | 0.6228 | 0.6224 | -0.0004 |
+| minimal | 7 | 0.6154 | 0.6034 | -0.0120 |
+| minimal | mean | | | -0.0062 |
+
+**Verdict**: no reproducible effect either way. Both mean changes sit
+inside the seed spread, and small's two seeds disagree in sign by
+almost equal amounts. This confirms the post-mortem's conclusion with
+better evidence than it had, and it means `head_dropout` can go to
+0.0 to drop a hyperparameter nobody needs to justify, or stay at 0.5,
+with the data indifferent.
+
+Worth recording how close this came to entering the doc as a finding.
+The seed-42 small run alone showed dropout helping by 0.019, with a
+tidy overfitting story attached, since removing dropout dropped train
+loss from 0.167 to 0.050. Seed 7 reversed it. That is the third time
+this project has caught a single-seed result that looked mechanistic
+and was not.
+
+### A failed ablation, twice (2026-09-08)
+
+The vmap ablation took three attempts, and the two failures are worth
+recording because both produced plausible-looking output.
+
+The first patched `preprocessing.sasinh_imgs_sscale_vmaps`. Training
+never calls it. `LazyGalaxyDataset.__getitem__` reimplements those
+transforms inline against precomputed stats, and
+`cnn.ResNet.scaling_function` is vestigial during training. The
+second patched `__getitem__` itself, in the parent process.
+`train.main()` builds its DataLoaders with `num_workers=4`, and macOS
+spawns workers, so each one re-imported the module and got the
+unpatched class.
+
+Both produced ablation runs bit-identical to their controls, which
+reads as a clean null result. What exposed it was the deltas being
+exactly 0.0000 across two independently seeded pairs. Genuinely null
+effects scatter around zero; exact agreement to four decimals means
+the same computation ran twice.
+
+The fix was to stop patching. `zero_channels` now lives on
+`LazyGalaxyDataset` as an instance attribute, which reaches workers
+because the DataLoader pickles the dataset, and `train.main()`
+records it in `train_config` so a run's own config states which
+channels it trained on. The verification that should have run from
+the start reads batches through a `num_workers=4` DataLoader and
+checks the channel is zero there, not in the parent.
+
+The general lesson for one-off experiment scripts here: verifying
+that a patch is installed is not the same as verifying it changes
+what the model sees.
+
 ## Post-mortem: pretrained initialization
 
 We hoped pretrained ImageNet weights would give `StandardNet`'s
@@ -1140,3 +1391,11 @@ out flat regardless of galaxy properties, that argues against it.
 [reopened]: #project-status-reopened-2026-08-25
 [considered]: #considered-and-set-aside-a-different-architecture
 [nll]: #appendix-what-is-gaussian-nll
+[vmap-status]: #project-status-the-vmap-carries-the-signal-2026-09-08
+[vmap-ablation]: #project-status-the-vmap-carries-the-signal-2026-09-08
+[ceiling-new]: #ceiling-check-fgas-and-fdm-2026-09-08
+[head-sweep-new]: #head-size-sweep-on-the-new-targets-2026-09-08
+[epoch-budget]: #epoch-budget-50-was-enough-2026-09-08
+[head-dropout]: #pre-head-dropout-on-against-off-2026-09-08
+[ablation-fail]: #a-failed-ablation-twice-2026-09-08
+[head-sweep-sfr]: #capacity-sweep-head-width-2026-07-19
