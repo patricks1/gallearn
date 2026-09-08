@@ -365,7 +365,6 @@ def create_model(
             out_channels_list=[16, 32, 64, 128],
             N_img_channels=4,
             head_widths=HEAD_PRESETS[head_size],
-            auto_load=False,
         )
     else:
         raise ValueError(

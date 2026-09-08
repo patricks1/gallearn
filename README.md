@@ -350,9 +350,7 @@ Run it as:
 `main()` with no argparse, so it can also be driven from a notebook or
 REPL via `gallearn.train.main(...)`. `cnn.py` holds the model
 definitions (`StandardNet`, `ResNet`, `BasicResBlock`) that `train.py`
-imports. It also still carries an older standalone `main()` that
-`scripts/run_cnn.py` launches; `gallearn/train.py` supersedes that
-driver.
+imports.
 
 ## Tests
 
