@@ -1038,10 +1038,16 @@ The sweep ran at 50 epochs, and its first runs peaked at 36 to 40,
 close enough to the cap to raise the question. Rather than rerun,
 every run resumed from its own `checkpoint_epoch050.pt` for another
 25 epochs. `train.py` saves a final checkpoint alongside best-loss
-ones and restores the optimizer, scheduler, and shuffling generator
-state, and the loop runs `range(start_epoch, start_epoch + n_epochs)`,
-so this is equivalent to having trained 75 epochs uninterrupted, in
-the same wandb run.
+ones, and a resumed run restores the optimizer state and the
+shuffling generator before running
+`range(start_epoch, start_epoch + n_epochs)` in the same wandb run.
+Two loop-state pieces do not survive the resume and reset instead:
+the `ReduceLROnPlateau` bad-epoch counter and the best-val tracker
+that gates checkpoint saves. The decayed learning rate itself carries
+over inside the optimizer state, and across a single 25-epoch resume
+with `patience=5` the counter reset only pushes any further LR decay
+a few epochs later, so a resume stays close enough to an
+uninterrupted 75-epoch run for this comparison.
 
 Of twelve runs, exactly one improved. `fdm_head-tiny_seed7` moved
 from 0.7398 to 0.7618 with its best at epoch 60, then plateaued
