@@ -631,6 +631,7 @@ def main(
         head_dropout=None,
         train_orientations=None,
         zero_channels=None,
+        noise_channels=None,
         tgt_type=None,
         dataset=None):
     """
@@ -768,6 +769,15 @@ def main(
         config says which channels it actually trained on. Like
         train_orientations, this is an experiment argument with no
         CLI flag.
+    noise_channels : list of int, optional
+        Image channels to replace with fresh standard-normal noise
+        after scaling, in both datasets, redrawn on every read so a
+        frozen per-galaxy field can't turn into a memorizable
+        fingerprint. Same purpose as zero_channels, but it leaves
+        every conv1 input channel live with no dead kernel slice, so
+        it separates "this channel carried the signal" from anything
+        else zeroing a channel changes. Also an experiment argument
+        with no CLI flag, and also recorded in train_config.
     """
     device = get_device()
     print('Using device: {0}'.format(device))
@@ -799,6 +809,13 @@ def main(
                 ' training on different input channels than the'
                 ' restored weights saw is a different experiment,'
                 ' not a continuation.'
+            )
+        if noise_channels is not None:
+            raise ValueError(
+                'noise_channels has no effect when resume_from is'
+                ' given, for the same reason as zero_channels. A'
+                ' resumed run reuses the checkpoint\'s own recorded'
+                ' noise_channels.'
             )
         if dataset is not None:
             raise ValueError(
@@ -945,6 +962,7 @@ def main(
         # attributes below, exactly as a fresh run would.
         tgt_type = saved_config.get('tgt_type')
         zero_channels = saved_config.get('zero_channels')
+        noise_channels = saved_config.get('noise_channels')
     else:
         if task is None or model_type is None:
             raise ValueError(
@@ -1027,6 +1045,7 @@ def main(
         'head_dropout': head_dropout,
         'train_orientations': train_orientations,
         'zero_channels': zero_channels,
+        'noise_channels': noise_channels,
         'run_name': run_name,
         'wandb_run_id': wandb_run_id,
     }
@@ -1235,6 +1254,7 @@ def main(
         targets[train_idxs],
         rs[train_idxs],
         zero_channels=zero_channels,
+        noise_channels=noise_channels,
     )
     val_dataset = preprocessing.LazyGalaxyDataset(
         hdf5_path,
@@ -1245,6 +1265,7 @@ def main(
         targets[val_idxs],
         rs[val_idxs],
         zero_channels=zero_channels,
+        noise_channels=noise_channels,
     )
 
     # train_loader's shuffling order is controlled entirely by this

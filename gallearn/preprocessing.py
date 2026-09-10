@@ -222,6 +222,7 @@ class LazyGalaxyDataset(torch.utils.data.Dataset):
                 ys,
                 rs,
                 zero_channels=None,
+                noise_channels=None,
             ):
         '''
         zero_channels: channel indices to zero after scaling, for
@@ -232,6 +233,13 @@ class LazyGalaxyDataset(torch.utils.data.Dataset):
             would never see a patched __getitem__. Instance
             attributes reach those workers, since the DataLoader
             pickles the dataset itself (see __getstate__).
+        noise_channels: channel indices to replace with fresh
+            standard-normal noise after scaling, or None. A noise
+            channel carries nothing about the target, like a zeroed
+            one, but keeps conv1's input variance up, so it separates
+            "this channel held the signal" from "feeding conv1 a
+            constant broke training". Reaches workers the same way
+            zero_channels does.
         '''
         self.hdf5_path = hdf5_path
         self.indices = indices
@@ -241,6 +249,7 @@ class LazyGalaxyDataset(torch.utils.data.Dataset):
         self.ys = ys
         self.rs = rs
         self.zero_channels = zero_channels
+        self.noise_channels = noise_channels
         self._file = None
 
     def __len__(self):
@@ -266,6 +275,21 @@ class LazyGalaxyDataset(torch.utils.data.Dataset):
         if self.zero_channels is not None:
             for c in self.zero_channels:
                 x[c] = 0.
+
+        # Fresh standard-normal noise on every read, so a given
+        # galaxy gets a different field each epoch. Freezing one
+        # field per galaxy would instead hand the network a unique
+        # fingerprint it could memorize to fit the training set,
+        # making this arm look better than the zeroed one for a
+        # reason unrelated to optimization. Redrawn, the channel
+        # carries nothing about the target on any epoch, exactly as
+        # zeroing does, but it still leaves every conv1 input
+        # channel live with no dead kernel slice. A result matching
+        # the zeroed run therefore points at the lost signal, not
+        # the constant input, as the cause of the collapse.
+        if self.noise_channels is not None:
+            for c in self.noise_channels:
+                x[c] = torch.randn_like(x[c])
 
         return x, self.rs[idx], self.ys[idx]
 
