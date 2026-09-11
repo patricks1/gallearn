@@ -41,6 +41,16 @@ class TargetSpec:
         Whether raw values of this target want log axes. A target
         that can legitimately be zero has to say False, since a log
         axis cannot show those points.
+    scatter_scale : str
+        Axis scale for evaluate.py's ground-truth-vs-prediction
+        scatter plot: 'linear', 'log', or 'logit'. A separate choice
+        from log_scale, which governs the distribution plot's zero
+        handling and the population summary. Unlike a raw log or
+        logit transform of the whole population, the scatter plot
+        already drops points a bad prediction pushes outside the
+        axis's range and reports how many, so a target with real
+        zeros or ones can still use 'log' or 'logit' here if that is
+        what its predictions look like once plotted.
     """
 
     name = None
@@ -49,6 +59,7 @@ class TargetSpec:
     axis_label = None
     unit = ''
     log_scale = False
+    scatter_scale = 'linear'
 
     def select_valid(self, vals):
         """
@@ -112,6 +123,7 @@ class SsfrTarget(TargetSpec):
     # The regressor only ever sees star-forming galaxies, so every
     # ground-truth value it handles is strictly positive.
     log_scale = True
+    scatter_scale = 'log'
     stretch = 1.e11
 
     def _star_forming(self, vals):
@@ -172,6 +184,13 @@ class FgasTarget(TargetSpec):
     narrow range, so plain standardization replaces sSFR's asinh
     step. Standardizing keeps the exact zeros well behaved, which a
     log or logit transform would not.
+
+    The predicted-vs-true scatter plot is a different question from
+    training or the distribution plot: most galaxies sit close to
+    zero (median around 0.06), so a linear axis crowds nearly every
+    point into one corner. Log axes handle that well once the small
+    fraction of non-positive points are dropped, which is what the
+    scatter plot already does explicitly rather than silently.
     """
 
     name = 'fgas'
@@ -182,6 +201,7 @@ class FgasTarget(TargetSpec):
     # Gas-free galaxies sit at exactly zero, which a log axis would
     # drop silently.
     log_scale = False
+    scatter_scale = 'log'
 
     def select_valid(self, vals):
         return torch.arange(len(vals))
@@ -222,6 +242,13 @@ class FdmTarget(TargetSpec):
     standardization, since the range is narrow enough that no
     stretch is needed and a log axis would be pointless without any
     zeros to worry about.
+
+    The population is bimodal rather than skewed toward zero like
+    gas fraction: most galaxies sit near one, a smaller group sits
+    near zero, and few sit in between. Plain log would only spread
+    out the near-zero group while further crowding the much larger
+    near-one group it already compresses on a linear axis. Logit
+    spreads out both ends at once, which matches this shape.
     """
 
     name = 'fdm'
@@ -230,6 +257,7 @@ class FdmTarget(TargetSpec):
     axis_label = 'dark-matter fraction'
     unit = ''
     log_scale = False
+    scatter_scale = 'logit'
 
     def select_valid(self, vals):
         return torch.arange(len(vals))

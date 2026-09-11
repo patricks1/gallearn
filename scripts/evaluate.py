@@ -18,6 +18,7 @@ import re
 import h5py
 import matplotlib.backends.backend_pdf
 import matplotlib.pyplot as plt
+import matplotlib.ticker
 import numpy as np
 import torch
 import torch.nn as nn
@@ -352,23 +353,34 @@ def plot_regression_scatter(
         outputs, target_stats, tgt_type
     ).flatten().numpy()
 
-    # On a log-scaled target, a bad-enough prediction can invert to a
-    # non-positive value, which a log axis can't show. Drop those
-    # points rather than error or silently clip, and say how many
-    # were dropped. A target plotted on linear axes keeps every
-    # point, including any legitimate zeros.
-    if spec.log_scale:
-        positive = (y_true > 0) & (y_pred > 0)
-        n_dropped = len(y_true) - positive.sum()
+    # A log axis can't show a non-positive value and a logit axis
+    # can't show a value at or outside [0, 1]. A bad-enough
+    # prediction can invert outside that range even for a target
+    # whose ground truth never does, so drop those points rather
+    # than error or silently clip, and say how many were dropped. A
+    # target plotted on linear axes keeps every point, including any
+    # legitimate zeros or ones.
+    if spec.scatter_scale == 'log':
+        in_range = (y_true > 0) & (y_pred > 0)
+    elif spec.scatter_scale == 'logit':
+        in_range = (
+            (y_true > 0) & (y_true < 1)
+            & (y_pred > 0) & (y_pred < 1)
+        )
+    else:
+        in_range = None
+    if in_range is not None:
+        n_dropped = len(y_true) - in_range.sum()
         if n_dropped > 0:
             print(
-                'Note: dropping {0} points with non-positive'
-                ' predicted {1} (can\'t show on a log-scale'
-                ' plot)'.format(n_dropped, spec.axis_label)
+                'Note: dropping {0} points with predicted {1}'
+                ' outside the {2} axis\'s range'.format(
+                    n_dropped, spec.axis_label, spec.scatter_scale
+                )
             )
-        y_true = y_true[positive]
-        y_pred = y_pred[positive]
-        masses = masses[positive]
+        y_true = y_true[in_range]
+        y_pred = y_pred[in_range]
+        masses = masses[in_range]
 
     # A galaxy absent from the mass CSV (see
     # gallearn.splitting.load_avg_sfr_csv) has a NaN mass; those
@@ -406,9 +418,26 @@ def plot_regression_scatter(
     lo = min(y_true.min(), y_pred.min())
     hi = max(y_true.max(), y_pred.max())
     ax.plot([lo, hi], [lo, hi], 'k--', linewidth=1)
-    if spec.log_scale:
-        ax.set_xscale('log')
-        ax.set_yscale('log')
+    if spec.scatter_scale != 'linear':
+        ax.set_xscale(spec.scatter_scale)
+        ax.set_yscale(spec.scatter_scale)
+    if spec.scatter_scale == 'logit':
+        # matplotlib's default logit tick labels read "1 - 10^-3"
+        # and "1/2", which are exact but not something a reader
+        # parses at a glance. Plain decimals at the same positions
+        # say the same thing more directly, restricted to what the
+        # plotted range actually spans.
+        candidates = [
+            .001, .01, .05, .1, .3, .5, .7, .9, .95, .99, .999,
+        ]
+        ticks = [t for t in candidates if lo <= t <= hi]
+        labels = ['{0:g}'.format(t) for t in ticks]
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(labels)
+        ax.set_yticks(ticks)
+        ax.set_yticklabels(labels)
+        ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+        ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
     unit_suffix = ' ({0})'.format(spec.unit) if spec.unit else ''
     ax.set_xlabel(
         'Ground truth {0}{1}'.format(spec.axis_label, unit_suffix)
@@ -502,7 +531,7 @@ def add_sample_slides(
         for slide_start in range(0, len(sample_idxs), 5):
             slide_idxs = sample_idxs[slide_start:slide_start + 5]
             fig, axes = plt.subplots(
-                1, len(slide_idxs), figsize=(14, 3.5),
+                1, len(slide_idxs), figsize=(14, 4.),
             )
             if len(slide_idxs) == 1:
                 axes = [axes]
@@ -549,16 +578,36 @@ def add_sample_slides(
                     pred_val = invert_target_scaling(
                         outputs[si:si + 1], target_stats, tgt_type,
                     ).item()
+                    # Absolute error rather than percent: fgas and
+                    # fdm both have galaxies with a true value near
+                    # zero (fgas's bulk, fdm's low tail), where
+                    # percent error blows up to thousands of percent
+                    # for an unremarkable absolute miss.
+                    err = pred_val - galaxy_true
+                    # sSFR spans many orders of magnitude and reads
+                    # better in scientific notation; gas and
+                    # dark-matter fraction are narrow-range values in
+                    # [0, 1] and read better fixed-point.
+                    num_fmt = (
+                        '{0:.2e}' if spec.log_scale else '{0:.3f}'
+                    )
                     title = (
-                        'true: {0:.2e}\n'
-                        'pred: {1:.2e} {2}'.format(
-                            galaxy_true, pred_val, spec.unit,
+                        'true: {0}\n'
+                        'pred: {1} {2}\n'
+                        'error: {3}'.format(
+                            num_fmt.format(galaxy_true),
+                            num_fmt.format(pred_val),
+                            spec.unit,
+                            num_fmt.format(err),
                         )
                     )
                 ax.set_title(title, fontsize=8)
 
             fig.suptitle('Sample Val Images', fontsize=12)
-            fig.tight_layout()
+            # tight_layout doesn't reserve space for the suptitle,
+            # which otherwise overlaps a regressor slide's 3-line
+            # per-image title (true/pred/error).
+            fig.tight_layout(rect=[0, 0, 1, 0.88])
             pdf.savefig(fig)
             plt.close(fig)
 
