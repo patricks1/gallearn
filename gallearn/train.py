@@ -587,6 +587,29 @@ def save_checkpoint(
     return path
 
 
+def update_best_symlink(run_dir, checkpoint_path):
+    """
+    Point run_dir/best.pt at checkpoint_path.
+
+    Callers update this after every new-best save, so best.pt
+    always names the current best checkpoint without any
+    caller needing to know its epoch number. Uses a temporary
+    link plus os.replace so a reader never sees a missing or
+    half-written symlink.
+
+    Parameters
+    ----------
+    run_dir : str
+        Directory holding both the checkpoint and the symlink.
+    checkpoint_path : str
+        Path to the checkpoint best.pt should point at.
+    """
+    link_path = os.path.join(run_dir, 'best.pt')
+    tmp_path = os.path.join(run_dir, '.best.pt.tmp')
+    os.symlink(os.path.basename(checkpoint_path), tmp_path)
+    os.replace(tmp_path, link_path)
+
+
 def load_checkpoint(checkpoint_path):
     """
     Load a training checkpoint.
@@ -1525,6 +1548,7 @@ def main(
                 scaling_stds,
                 target_stats=target_stats,
             )
+            update_best_symlink(run_dir, path)
             print(
                 '  -> New best {0}! '
                 'Saved checkpoint to {1}'.format(
