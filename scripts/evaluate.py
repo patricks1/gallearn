@@ -360,9 +360,9 @@ def plot_regression_scatter(
     # than error or silently clip, and say how many were dropped. A
     # target plotted on linear axes keeps every point, including any
     # legitimate zeros or ones.
-    if spec.scatter_scale == 'log':
+    if spec.plot_scale == 'log':
         in_range = (y_true > 0) & (y_pred > 0)
-    elif spec.scatter_scale == 'logit':
+    elif spec.plot_scale == 'logit':
         in_range = (
             (y_true > 0) & (y_true < 1)
             & (y_pred > 0) & (y_pred < 1)
@@ -375,7 +375,7 @@ def plot_regression_scatter(
             print(
                 'Note: dropping {0} points with predicted {1}'
                 ' outside the {2} axis\'s range'.format(
-                    n_dropped, spec.axis_label, spec.scatter_scale
+                    n_dropped, spec.axis_label, spec.plot_scale
                 )
             )
         y_true = y_true[in_range]
@@ -418,10 +418,10 @@ def plot_regression_scatter(
     lo = min(y_true.min(), y_pred.min())
     hi = max(y_true.max(), y_pred.max())
     ax.plot([lo, hi], [lo, hi], 'k--', linewidth=1)
-    if spec.scatter_scale != 'linear':
-        ax.set_xscale(spec.scatter_scale)
-        ax.set_yscale(spec.scatter_scale)
-    if spec.scatter_scale == 'logit':
+    if spec.plot_scale != 'linear':
+        ax.set_xscale(spec.plot_scale)
+        ax.set_yscale(spec.plot_scale)
+    if spec.plot_scale == 'logit':
         # matplotlib's default logit tick labels read "1 - 10^-3"
         # and "1/2", which are exact but not something a reader
         # parses at a glance. Plain decimals at the same positions
@@ -584,12 +584,14 @@ def add_sample_slides(
                     # percent error blows up to thousands of percent
                     # for an unremarkable absolute miss.
                     err = pred_val - galaxy_true
-                    # sSFR spans many orders of magnitude and reads
-                    # better in scientific notation; gas and
-                    # dark-matter fraction are narrow-range values in
-                    # [0, 1] and read better fixed-point.
+                    # sSFR's values run from just above zero to of
+                    # order unity and read better in scientific
+                    # notation; gas and dark-matter fraction stay in
+                    # [0, 1] and read better fixed-point, regardless
+                    # of whether the distribution plot for either
+                    # target happens to use a log axis.
                     num_fmt = (
-                        '{0:.2e}' if spec.log_scale else '{0:.3f}'
+                        '{0:.2e}' if spec.sci_notation else '{0:.3f}'
                     )
                     title = (
                         'true: {0}\n'

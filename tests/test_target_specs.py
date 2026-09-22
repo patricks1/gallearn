@@ -96,14 +96,27 @@ def test_only_ssfr_supports_the_classifier():
     assert not target_specs.get('fdm').supports_classifier
 
 
-def test_fgas_avoids_log_axes():
-    '''Verify that gas fraction asks for linear axes. A log axis
-    silently drops the gas-free galaxies sitting at exactly zero.'''
-    assert not target_specs.get('fgas').log_scale
-    assert target_specs.get('avg_sfr').log_scale
+def test_fgas_and_ssfr_use_log_plot_scale():
+    '''Verify that gas fraction and sSFR both ask for a log
+    plot_scale. Their exact-zero (gas-free, quenched) galaxies still
+    get shown: the distribution plot's separate excluded-galaxy bar
+    rather than the log axis itself, and evaluate.py's scatter plot
+    drops and counts any prediction pushed out of range.'''
+    assert target_specs.get('fgas').plot_scale == 'log'
+    assert target_specs.get('avg_sfr').plot_scale == 'log'
 
 
-def test_fdm_avoids_log_axes():
-    '''Verify that dark-matter fraction also asks for linear axes,
-    matching gas fraction's scaling choice.'''
-    assert not target_specs.get('fdm').log_scale
+def test_fdm_uses_logit_plot_scale():
+    '''Verify that dark-matter fraction asks for a logit plot_scale,
+    matching its bimodal shape: most galaxies near one, a smaller
+    group near zero.'''
+    assert target_specs.get('fdm').plot_scale == 'logit'
+
+
+def test_sci_notation_is_ssfr_only():
+    '''Verify that only sSFR asks evaluate.py for scientific
+    notation. Gas and dark-matter fraction stay fixed-point
+    regardless of plot_scale, since both are confined to [0, 1].'''
+    assert target_specs.get('avg_sfr').sci_notation
+    assert not target_specs.get('fgas').sci_notation
+    assert not target_specs.get('fdm').sci_notation

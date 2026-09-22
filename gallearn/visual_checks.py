@@ -13,16 +13,23 @@ def plot_mass_target_distributions(
 
     The dataset says which target it holds, and target_specs says how
     to draw it, so this works for whichever target the file carries
-    rather than assuming sSFR. A target whose spec sets log_scale
-    plots log10 of the value, and represents each group's
-    non-positive galaxies as a single 'Quenched' bar instead of
-    placing them on the continuous axis, matching how
-    stratify_galaxies treats quenched galaxies as their own stratum.
-    That bar and the continuous histogram share one normalization per
-    group (both divide by the group's total galaxy count), so their
-    areas sum to 1 and are directly comparable. A target that plots
-    linearly, such as gas fraction or dark-matter fraction, needs no
-    such split, since a linear axis shows zeros fine.
+    rather than assuming sSFR. A target whose spec sets a
+    plot_scale of 'log' or 'logit' gets two target panels instead of
+    one: a linear one showing every galaxy, and a second one
+    transformed onto that scale (log10 for 'log', log-odds for
+    'logit'), which represents each group's values the transform
+    can't show (non-positive for 'log'; outside (0, 1) for 'logit')
+    as a single bar at the left, marked to say so, instead of
+    placing them on the continuous axis. For sSFR that bar matches
+    how stratify_galaxies treats quenched galaxies as their own
+    stratum; for gas fraction it separates out the small gas-free
+    population the same way. That bar and the scaled panel's
+    continuous histogram share one normalization per group (both
+    divide by the group's total galaxy count), so their areas sum to
+    1 and are directly comparable. A target with plot_scale 'linear'
+    gets only the one linear panel, since a linear axis already
+    shows its population's shape fine and a second transformed
+    panel would add nothing.
 
     Excludes galaxies missing from avg_sfr_csv from every panel
     (their mass is unknown).
@@ -46,11 +53,12 @@ def plot_mass_target_distributions(
         whatever target the dataset holds.
     tgt_type : str, optional
         Which target the dataset holds, for datasets built before
-        src/Dataset.jl recorded that in the HDF5 itself. Those
-        datasets require it, since nothing else says what their
-        values mean. Passing it for a dataset that does declare its
-        own target is an error when the two disagree, matching how
-        gallearn.train.main guards --target.
+        src/Dataset.jl recorded that in the HDF5 itself. Must be a
+        key of target_specs.REGISTRY: 'sfr', 'avg_sfr', 'fgas', or
+        'fdm'. Those datasets require it, since nothing else says
+        what their values mean. Passing it for a dataset that does
+        declare its own target is an error when the two disagree,
+        matching how gallearn.train.main guards --target.
     n_bins : int, optional
         Number of histogram bins per panel. Default 30.
 
@@ -124,17 +132,149 @@ def plot_mass_target_distributions(
             ' plot.'.format(n_unknown, avg_sfr_csv)
         )
 
+    # log10 and logit (log-odds) transforms for plot_scale, plus
+    # everything about how each renders that a bare transform
+    # function can't say: which raw values it can't show, what to
+    # call those values' bar and axis label, and where to put ticks.
+    # The logit candidates match scripts/evaluate.py's scatter-plot
+    # ticks, so the two views speak the same visual language.
+    def _log_ticks(edges):
+        ticks = [
+            t for t in mpl.ticker.MaxNLocator(nbins=6).tick_values(
+                edges[0], edges[-1]
+            )
+            if edges[0] <= t <= edges[-1]
+        ]
+        return ticks, ['{0:g}'.format(t) for t in ticks]
+
+    def _logit_ticks(edges):
+        candidates = [
+            .001, .01, .05, .1, .3, .5, .7, .9, .95, .99, .999,
+        ]
+        ticks, labels = [], []
+        for frac in candidates:
+            pos = np.log(frac / (1. - frac))
+            if edges[0] <= pos <= edges[-1]:
+                ticks.append(pos)
+                labels.append('{0:g}'.format(frac))
+        return ticks, labels
+
+    def _place_legends_below_xlabels(
+            fig, legends, pad_pts=8., gap_frac=0.02, max_iter=4):
+        """
+        Anchor each (ax, legend) pair's legend just below that axis's
+        actual rendered xlabel, then grow the figure's bottom margin
+        until the lowest legend clears the figure's edge.
+
+        Measuring the real label instead of guessing a fixed offset
+        is what lets this handle a label of any length or rotation
+        (a plain one-line title, or the scaled panel's rotated
+        tick-crowded one) without a per-case magic number. Iterates
+        because changing the bottom margin changes every axes'
+        height, which changes what each axes-fraction anchor below
+        maps to in figure coordinates, including the one just placed.
+        """
+        for _ in range(max_iter):
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            for ax, legend in legends:
+                label_bbox = ax.xaxis.label.get_window_extent(
+                    renderer
+                )
+                pad_px = pad_pts / 72. * fig.dpi
+                y_display = label_bbox.y0 - pad_px
+                y_axes = ax.transAxes.inverted().transform(
+                    (0., y_display)
+                )[1]
+                legend.set_bbox_to_anchor(
+                    (0.5, y_axes), transform=ax.transAxes
+                )
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            min_fig_y = min(
+                legend.get_window_extent(renderer)
+                .transformed(fig.transFigure.inverted()).y0
+                for _, legend in legends
+            )
+            overshoot = gap_frac - min_fig_y
+            if abs(overshoot) < 0.005:
+                break
+            new_bottom = min(
+                max(fig.subplotpars.bottom + overshoot, 0.05), 0.6
+            )
+            fig.subplots_adjust(bottom=new_bottom)
+
+    # Each scale can exclude values from one side (log: non-positive)
+    # or two (logit: at or below 0, at or above 1); a boundary is one
+    # excluded side, with its own bar, tick, and legend count, since
+    # log10(0) and logit(0) both go to -inf but logit(1) goes to
+    # +inf, so a single '-inf' label would misdescribe a galaxy
+    # excluded for sitting at 1.
+    scales = {
+        'log': {
+            'forward': np.log10,
+            'axis_fmt': 'log$_{{10}}$({0}{1})',
+            'tick_fn': _log_ticks,
+            # log10's ticks land at even integer steps, so they never
+            # crowd each other and read fine horizontal.
+            'tick_rotation': 0,
+            'boundaries': [
+                {
+                    'side': 'left',
+                    'excludes': lambda x: x <= 0.,
+                    'tick': r'$-\infty$',
+                    'legend': 'at zero',
+                },
+            ],
+        },
+        'logit': {
+            'forward': lambda x: np.log(x / (1. - x)),
+            'axis_fmt': 'logit({0}{1})',
+            'tick_fn': _logit_ticks,
+            # Unlike log10, logit's fixed fraction candidates land at
+            # uneven, sometimes tight, log-odds spacing near each end
+            # (0.9/0.95/0.99/0.999 all sit close together); rotate so
+            # neighboring labels don't overlap.
+            'tick_rotation': 45,
+            'boundaries': [
+                {
+                    'side': 'left',
+                    'excludes': lambda x: x <= 0.,
+                    'tick': r'$-\infty$',
+                    'legend': 'at 0',
+                },
+                {
+                    'side': 'right',
+                    'excludes': lambda x: x >= 1.,
+                    'tick': r'$+\infty$',
+                    'legend': 'at 1',
+                },
+            ],
+        },
+    }
+    for _scale in scales.values():
+        _boundaries = _scale['boundaries']
+        _scale['valid'] = lambda x, bs=_boundaries: not any(
+            b['excludes'](x) for b in bs
+        )
+
     log_mass = {g: np.log10(masses[g]) for g in known_ids}
-    # A log-scaled target drops its non-positive galaxies out of the
-    # continuous axis and counts them separately below. A linear one
-    # keeps every galaxy, zeros included.
-    if spec.log_scale:
-        plotted = {
-            g: np.log10(values[g]) for g in known_ids
-            if values[g] > 0.
+    # Always available: every galaxy, zeros included. This is the
+    # only target data a linear panel needs, whether that panel is
+    # the target's sole panel (plot_scale 'linear') or the extra
+    # linear panel shown beside a scaled one (plot_scale 'log' or
+    # 'logit').
+    linear_plotted = {g: values[g] for g in known_ids}
+    # A non-linear plot_scale drops the values its transform can't
+    # show out of the continuous axis and counts them separately
+    # below, via scale_plotted here and the excluded-bar block
+    # further down.
+    if spec.plot_scale != 'linear':
+        scale = scales[spec.plot_scale]
+        scale_plotted = {
+            g: scale['forward'](values[g]) for g in known_ids
+            if scale['valid'](values[g])
         }
-    else:
-        plotted = {g: values[g] for g in known_ids}
 
     groups = {
         'population': known_ids,
@@ -147,23 +287,47 @@ def plot_mass_target_distributions(
     mass_edges = np.histogram_bin_edges(
         list(log_mass.values()), bins=n_bins,
     )
-    tgt_edges = np.histogram_bin_edges(
-        list(plotted.values()), bins=n_bins,
+    linear_edges = np.histogram_bin_edges(
+        list(linear_plotted.values()), bins=n_bins,
     )
-    tgt_bin_width = tgt_edges[1] - tgt_edges[0]
-    # Placed a few bin widths left of the plotted range, with a
-    # dashed separator, so it reads as a distinct category rather
-    # than a point on the continuous axis.
-    excluded_x = tgt_edges[0] - 3. * tgt_bin_width
-    separator_x = tgt_edges[0] - 1.5 * tgt_bin_width
+    if spec.plot_scale != 'linear':
+        scale_edges = np.histogram_bin_edges(
+            list(scale_plotted.values()), bins=n_bins,
+        )
+        scale_bin_width = scale_edges[1] - scale_edges[0]
+        # Each boundary gets an excluded slot a few bin widths beyond
+        # the plotted range, on the side it belongs to, with a dashed
+        # separator so it reads as a distinct category rather than a
+        # point on the continuous axis.
+        boundary_x = {}
+        for boundary in scale['boundaries']:
+            if boundary['side'] == 'left':
+                edge = scale_edges[0]
+                sign = -1.
+            else:
+                edge = scale_edges[-1]
+                sign = 1.
+            boundary_x[boundary['side']] = {
+                'excluded_x': edge + sign * 3. * scale_bin_width,
+                'separator_x': edge + sign * 1.5 * scale_bin_width,
+            }
+        # Sub-width per group's bar so groups sit side by side inside
+        # an excluded slot, rather than fully overlapping (which
+        # could hide a shorter bar entirely behind a taller one).
+        excluded_bar_width = scale_bin_width / len(groups)
 
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-    # Sub-width per group's bar so groups sit side by side inside the
-    # excluded slot, rather than fully overlapping (which could hide
-    # a shorter bar entirely behind a taller one).
-    excluded_bar_width = tgt_bin_width / len(groups)
 
-    fig, (ax_mass, ax_tgt) = plt.subplots(1, 2, figsize=(12, 5))
+    # A non-linear plot_scale gets three panels (mass, linear target,
+    # scaled target) laid out left to right so the linear view sits
+    # right beside the scaled one it complements; otherwise just mass
+    # and the target's one linear panel.
+    n_panels = 3 if spec.plot_scale != 'linear' else 2
+    fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 5))
+    ax_mass = axes[0]
+    ax_tgt_linear = axes[1]
+    ax_tgt_scaled = axes[2] if spec.plot_scale != 'linear' else None
+
     for i, ((label, ids), color) in enumerate(
             zip(groups.items(), colors)):
         mass_vals = [log_mass[g] for g in ids]
@@ -180,117 +344,177 @@ def plot_mass_target_distributions(
         )
 
         n_total = len(ids)
-        shown_vals = [plotted[g] for g in ids if g in plotted]
-        n_excluded = n_total - len(shown_vals)
-        # Weight each shown galaxy by 1 / (n_total * tgt_bin_width)
-        # rather than passing density=True (which would normalize
-        # against only the shown count), so this histogram's area is
-        # (n_shown / n_total) and lines up with the excluded bar's
-        # area of (n_excluded / n_total) below.
-        weight = (
-            1. / (n_total * tgt_bin_width) if n_total else 0.
-        )
-        if spec.log_scale:
-            hist_label = (
-                r'{0} ($N_{{\mathrm{{gal}}}}={1}$, {2} quenched)'
-                .format(label, n_total, n_excluded)
-            )
-        else:
-            hist_label = r'{0} ($N_{{\mathrm{{gal}}}}={1}$)'.format(
-                label, n_total
-            )
-        ax_tgt.hist(
-            shown_vals,
-            bins=tgt_edges,
-            weights=[weight] * len(shown_vals),
+        linear_vals = [linear_plotted[g] for g in ids]
+        ax_tgt_linear.hist(
+            linear_vals,
+            bins=linear_edges,
+            density=True,
             histtype='step',
             linewidth=2,
             color=color,
-            label=hist_label,
+            label=r'{0} $(N_{{\mathrm{{gal}}}}={1})$'.format(
+                label, n_total
+            ),
         )
-        if spec.log_scale:
-            excluded_frac = (
-                n_excluded / n_total if n_total else 0.
-            )
-            bar_x = (
-                excluded_x
-                - tgt_bin_width / 2.
-                + (i + 0.5) * excluded_bar_width
-            )
-            ax_tgt.bar(
-                bar_x,
-                excluded_frac / tgt_bin_width,
-                width=excluded_bar_width,
-                color=color,
-            )
 
-    legend_anchor = (0.5, -0.15)
+        if spec.plot_scale != 'linear':
+            shown_vals = [
+                scale_plotted[g] for g in ids if g in scale_plotted
+            ]
+            # Weight each shown galaxy by
+            # 1 / (n_total * scale_bin_width) rather than passing
+            # density=True (which would normalize against only the
+            # shown count), so this histogram's area is
+            # (n_shown / n_total) and lines up with the excluded
+            # bars' combined area of (n_excluded / n_total) below.
+            weight = (
+                1. / (n_total * scale_bin_width) if n_total else 0.
+            )
+            # One count and bar per boundary, e.g. logit's separate
+            # 'at 0' and 'at 1' rather than one combined count that
+            # can't say which side a galaxy was excluded from.
+            boundary_counts = [
+                (
+                    boundary,
+                    sum(
+                        1 for g in ids
+                        if boundary['excludes'](values[g])
+                    ),
+                )
+                for boundary in scale['boundaries']
+            ]
+            hist_label = (
+                r'{0} ($N_{{\mathrm{{gal}}}}={1}$, {2})'.format(
+                    label, n_total,
+                    ', '.join(
+                        '{0} {1}'.format(n_b, boundary['legend'])
+                        for boundary, n_b in boundary_counts
+                    ),
+                )
+            )
+            ax_tgt_scaled.hist(
+                shown_vals,
+                bins=scale_edges,
+                weights=[weight] * len(shown_vals),
+                histtype='step',
+                linewidth=2,
+                color=color,
+                label=hist_label,
+            )
+            for boundary, n_b in boundary_counts:
+                pos = boundary_x[boundary['side']]
+                frac_b = n_b / n_total if n_total else 0.
+                bar_x = (
+                    pos['excluded_x']
+                    - scale_bin_width / 2.
+                    + (i + 0.5) * excluded_bar_width
+                )
+                ax_tgt_scaled.bar(
+                    bar_x,
+                    frac_b / scale_bin_width,
+                    width=excluded_bar_width,
+                    color=color,
+                )
 
     ax_mass.set_xlabel(r'$\log_{10}(M_\star / \mathrm{M}_\odot)$')
     ax_mass.set_ylabel('Density')
     ax_mass.set_title('Distribution of stellar mass')
-    ax_mass.legend(bbox_to_anchor=legend_anchor, loc='upper center')
-
-    if spec.log_scale:
-        ax_tgt.axvline(separator_x, color='gray', linestyle=':')
-        # Explicit ticks replace the default locator, which would
-        # otherwise autoscale to the excluded bars' and separator's x
-        # positions too and place numeric ticks in that gap,
-        # cluttering right where the dashed separator is meant to
-        # keep those bars visually distinct from the real axis.
-        numeric_ticks = [
-            t for t in mpl.ticker.MaxNLocator(nbins=6).tick_values(
-                tgt_edges[0], tgt_edges[-1]
-            )
-            if tgt_edges[0] <= t <= tgt_edges[-1]
-        ]
-        ax_tgt.set_xticks([excluded_x] + numeric_ticks)
-        ax_tgt.set_xticklabels(
-            ['Quenched']
-            + ['{0:g}'.format(t) for t in numeric_ticks]
-        )
+    # Placed at loc='upper center' for now; _place_legends_below_
+    # xlabels moves every legend to its actual rendered xlabel's
+    # bottom edge once all three panels' labels are set, rather than
+    # guessing a fixed offset that only fits an unrotated one-line
+    # label.
+    mass_legend = ax_mass.legend(loc='upper center')
 
     # Built in text mode with math only around the pieces that need
-    # it, the way scripts/evaluate.py writes its axis labels. A spec's
-    # unit is itself a mixed fragment (sSFR's is 'yr$^{-1}$'), so
-    # wrapping the whole label in $...$ would nest delimiters and
+    # it, the way scripts/evaluate.py writes its axis labels. A
+    # spec's unit is itself a mixed fragment (sSFR's is 'yr$^{-1}$'),
+    # so wrapping the whole label in $...$ would nest delimiters and
     # mathtext would render the label wrong.
-    if spec.log_scale:
-        unit_suffix = ' / {0}'.format(spec.unit) if spec.unit else ''
-        ax_tgt.set_xlabel(
-            'log$_{{10}}$({0}{1})'.format(
-                spec.axis_label, unit_suffix
-            )
-        )
-    else:
-        unit_suffix = (
-            ' ({0})'.format(spec.unit) if spec.unit else ''
-        )
-        ax_tgt.set_xlabel(
-            '{0}{1}'.format(
-                spec.axis_label,
-                unit_suffix,
-            )
-        )
-    ax_tgt.set_ylabel('Density')
+    unit_suffix = ' ({0})'.format(spec.unit) if spec.unit else ''
+    linear_xlabel = '{0}{1}'.format(spec.axis_label, unit_suffix)
     # The spec spells its own target, so this passes axis_label
     # through untouched. str.capitalize would rewrite 'sSFR' as
     # 'Ssfr', and scripts/evaluate.py already treats the label as
     # authoritative.
-    ax_tgt.set_title(
-        'Distribution of {0}'.format(spec.axis_label)
-    )
-    # bbox_to_anchor's y is negative (below the axes, in axes-fraction
-    # coordinates) and loc='upper center' aligns the legend's top edge
-    # (not its center) to that anchor, so the legend hangs downward
-    # below the plot instead of sitting inside it.
-    ax_tgt.legend(bbox_to_anchor=legend_anchor, loc='upper center')
+    linear_title = 'Distribution of {0}'.format(spec.axis_label)
+    if spec.plot_scale != 'linear':
+        # Two target panels share one title otherwise, so suffix
+        # each to say which axis it's on.
+        linear_title += ' (linear)'
+
+    ax_tgt_linear.set_xlabel(linear_xlabel)
+    ax_tgt_linear.set_ylabel('Density')
+    ax_tgt_linear.set_title(linear_title)
+    linear_legend = ax_tgt_linear.legend(loc='upper center')
+    legends = [(ax_mass, mass_legend), (ax_tgt_linear, linear_legend)]
+
+    if spec.plot_scale != 'linear':
+        for pos in boundary_x.values():
+            ax_tgt_scaled.axvline(
+                pos['separator_x'], color='gray', linestyle=':'
+            )
+        # Explicit ticks replace the default locator, which would
+        # otherwise autoscale to the excluded bars' and separators' x
+        # positions too and place numeric ticks in that gap,
+        # cluttering right where the dashed separators are meant to
+        # keep those bars visually distinct from the real axis.
+        numeric_ticks, numeric_labels = scale['tick_fn'](scale_edges)
+        left_boundaries = [
+            b for b in scale['boundaries'] if b['side'] == 'left'
+        ]
+        right_boundaries = [
+            b for b in scale['boundaries'] if b['side'] == 'right'
+        ]
+        all_ticks = (
+            [boundary_x[b['side']]['excluded_x']
+             for b in left_boundaries]
+            + numeric_ticks
+            + [boundary_x[b['side']]['excluded_x']
+               for b in right_boundaries]
+        )
+        all_labels = (
+            [b['tick'] for b in left_boundaries]
+            + numeric_labels
+            + [b['tick'] for b in right_boundaries]
+        )
+        ax_tgt_scaled.set_xticks(all_ticks)
+        rotation = scale['tick_rotation']
+        ax_tgt_scaled.set_xticklabels(
+            all_labels,
+            rotation=rotation,
+            ha='right' if rotation else 'center',
+            # 'anchor' pins the label's corner (rather than its
+            # center) to the tick, which is what lets tight_layout
+            # below correctly measure how far a rotated label
+            # actually reaches and reserve room for it.
+            rotation_mode='anchor' if rotation else None,
+        )
+
+        scale_unit_suffix = (
+            ' / {0}'.format(spec.unit) if spec.unit else ''
+        )
+        ax_tgt_scaled.set_xlabel(
+            scale['axis_fmt'].format(
+                spec.axis_label, scale_unit_suffix
+            )
+        )
+        ax_tgt_scaled.set_ylabel('Density')
+        ax_tgt_scaled.set_title(
+            'Distribution of {0} ({1})'.format(
+                spec.axis_label, spec.plot_scale
+            )
+        )
+        scaled_legend = ax_tgt_scaled.legend(loc='upper center')
+        legends.append((ax_tgt_scaled, scaled_legend))
 
     fig.tight_layout()
     # tight_layout() doesn't reserve space for a legend placed outside
-    # the axes via bbox_to_anchor, so it can get clipped off the
-    # bottom of the figure without this.
-    fig.subplots_adjust(bottom=0.3)
+    # the axes via bbox_to_anchor, so each legend still needs an
+    # explicit position and the figure still needs extra bottom room
+    # reserved for it, or it gets clipped off the bottom of the
+    # figure.
+    _place_legends_below_xlabels(fig, legends)
     plt.show()
 
 

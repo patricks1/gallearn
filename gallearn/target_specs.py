@@ -37,20 +37,39 @@ class TargetSpec:
     unit : str
         Unit to show beside axis_label, matplotlib mathtext
         allowed. Empty for a dimensionless target.
-    log_scale : bool
-        Whether raw values of this target want log axes. A target
-        that can legitimately be zero has to say False, since a log
-        axis cannot show those points.
-    scatter_scale : str
-        Axis scale for evaluate.py's ground-truth-vs-prediction
-        scatter plot: 'linear', 'log', or 'logit'. A separate choice
-        from log_scale, which governs the distribution plot's zero
-        handling and the population summary. Unlike a raw log or
-        logit transform of the whole population, the scatter plot
-        already drops points a bad prediction pushes outside the
-        axis's range and reports how many, so a target with real
-        zeros or ones can still use 'log' or 'logit' here if that is
-        what its predictions look like once plotted.
+    plot_scale : str
+        The one axis-scale choice shared by every plot that has to
+        transform this target's raw values to show them well:
+        'linear', 'log', or 'logit'. Two call sites read it.
+        evaluate.py's ground-truth-vs-prediction scatter plot sets
+        both axes to this scale directly (via Axes.set_xscale /
+        set_yscale) and, for 'log' or 'logit', drops points a bad
+        prediction pushes outside that scale's valid range (at or
+        below zero for 'log'; at or outside [0, 1] for 'logit'),
+        reporting how many. visual_checks.plot_mass_target_
+        distributions' target panel does the analogous thing for the
+        training population: 'linear' draws one panel on a linear
+        axis; 'log' or 'logit' draws that same linear panel plus a
+        second panel transformed onto the given scale, with the
+        values the transform can't show (non-positive for 'log';
+        outside (0, 1) for 'logit') broken out as a separate bar
+        rather than dropped. A target whose out-of-range values are
+        real data, not missing data, can still choose 'log' or
+        'logit' (gas fraction does, for its exact zeros); 'linear'
+        is for when the plain axis already shows the population's
+        shape fine and a transform would add nothing.
+    sci_notation : bool
+        Whether evaluate.py's per-galaxy true/pred/error titles
+        format numbers as '{0:.2e}' rather than '{0:.3f}'. Controls
+        those titles only, independent of plot_scale: sSFR sets this
+        because its values run from just above zero to of order
+        unity and fixed-point would bury the meaningful digits under
+        leading zeros, regardless of how its plots choose to scale
+        their axes. A target need not have a "wide range" in any
+        global sense to want plot_scale off 'linear'; conversely a
+        target can have a long thin tail (gas fraction does) and
+        still read better fixed-point here, since its bulk sits at
+        ordinary values like 0.06, not vanishingly small ones.
     """
 
     name = None
@@ -58,8 +77,8 @@ class TargetSpec:
     supports_classifier = False
     axis_label = None
     unit = ''
-    log_scale = False
-    scatter_scale = 'linear'
+    plot_scale = 'linear'
+    sci_notation = False
 
     def select_valid(self, vals):
         """
@@ -122,8 +141,11 @@ class SsfrTarget(TargetSpec):
     unit = 'yr$^{-1}$'
     # The regressor only ever sees star-forming galaxies, so every
     # ground-truth value it handles is strictly positive.
-    log_scale = True
-    scatter_scale = 'log'
+    plot_scale = 'log'
+    # sSFR runs from just above zero to of order unity, so
+    # fixed-point titles in evaluate.py would bury the meaningful
+    # digits under leading zeros.
+    sci_notation = True
     stretch = 1.e11
 
     def _star_forming(self, vals):
@@ -179,18 +201,21 @@ class FgasTarget(TargetSpec):
     gas (their Mgas is exactly zero too, so this is a real physical
     value and not a missing-data sentinel). That is far too small a
     population to justify a hurdle stage the way sSFR's much larger
-    quenched fraction does, and those galaxies carry real signal, so
-    the regressor trains on all of them. Gas fraction also spans a
+    quenched fraction does.
+    The regressor trains on all of them. Gas fraction also spans a
     narrow range, so plain standardization replaces sSFR's asinh
     step. Standardizing keeps the exact zeros well behaved, which a
-    log or logit transform would not.
+    log or logit transform would not, which is why this only affects
+    training scaling and not the distribution plot below.
 
-    The predicted-vs-true scatter plot is a different question from
-    training or the distribution plot: most galaxies sit close to
-    zero (median around 0.06), so a linear axis crowds nearly every
-    point into one corner. Log axes handle that well once the small
-    fraction of non-positive points are dropped, which is what the
-    scatter plot already does explicitly rather than silently.
+    The bulk of the population sits close to zero (median around
+    0.06) with a long thin tail out toward one, so the distribution
+    plot's target panel goes log-scaled too: a linear axis crowds
+    nearly every galaxy into one corner. That is the same reasoning
+    the predicted-vs-true scatter plot already uses. Both plots drop
+    the exact-zero galaxies from the continuous log axis rather than
+    silently losing them; the distribution panel shows them as a
+    separate bar instead, the scatter plot as a reported drop count.
     """
 
     name = 'fgas'
@@ -198,10 +223,7 @@ class FgasTarget(TargetSpec):
     supports_classifier = False
     axis_label = 'gas fraction'
     unit = ''
-    # Gas-free galaxies sit at exactly zero, which a log axis would
-    # drop silently.
-    log_scale = False
-    scatter_scale = 'log'
+    plot_scale = 'log'
 
     def select_valid(self, vals):
         return torch.arange(len(vals))
@@ -239,16 +261,18 @@ class FdmTarget(TargetSpec):
     Unlike gas fraction, no galaxy sits at exactly zero or exactly
     one, so there is no edge case to carve out. The regressor trains
     on every galaxy, scaled the same way as gas fraction: plain
-    standardization, since the range is narrow enough that no
-    stretch is needed and a log axis would be pointless without any
-    zeros to worry about.
+    standardization, since a bounded [0, 1] target needs no stretch
+    the way sSFR's unbounded one does. That training scale is
+    unrelated to plot_scale below; it only affects fit/scale/unscale.
 
     The population is bimodal rather than skewed toward zero like
     gas fraction: most galaxies sit near one, a smaller group sits
     near zero, and few sit in between. Plain log would only spread
     out the near-zero group while further crowding the much larger
     near-one group it already compresses on a linear axis. Logit
-    spreads out both ends at once, which matches this shape.
+    spreads out both ends at once, which matches this shape, so
+    both the distribution plot's extra panel and the scatter plot
+    use it.
     """
 
     name = 'fdm'
@@ -256,8 +280,7 @@ class FdmTarget(TargetSpec):
     supports_classifier = False
     axis_label = 'dark-matter fraction'
     unit = ''
-    log_scale = False
-    scatter_scale = 'logit'
+    plot_scale = 'logit'
 
     def select_valid(self, vals):
         return torch.arange(len(vals))
