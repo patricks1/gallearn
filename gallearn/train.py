@@ -558,8 +558,10 @@ def save_checkpoint(
         Per-channel image scaling stds, fit on train_idxs alone.
         Same as scaling_means: a resumed run reuses this directly.
     target_stats : dict, optional
-        Target scaling stats for regressor (means, stds,
-        stretch), fit on train_idxs alone. None for classifier.
+        Target scaling stats for regressor, fit on train_idxs
+        alone. The target's spec decides the keys (sSFR stores
+        means, stds and stretch; fgas and fdm store means and
+        stds), so treat it as opaque. None for classifier.
 
     Returns
     -------
