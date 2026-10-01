@@ -268,7 +268,7 @@ def gen():
     output_dir = pathlib.Path(
         config_paths['octant_img_dir']
     )
-    objects_dir = firebox_dir / config_paths['firebox_snap']
+    objects_dir = firebox_dir / ('objects_' + config_paths['firebox_snap'])
 
     # Scan existing image directories to build the galaxy
     # catalogue.  Each entry carries the source file's

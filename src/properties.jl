@@ -30,8 +30,8 @@ function test(host_ids)
     id_str = string(id)
     fname = joinpath(
         direc,
-        firebox_snap,
-        "particles_within_Rvir_object_" * id_str * ".hdf5"
+        "objects_" * firebox_snap,
+        "particles_within_Rvir_object_" * id_str * ".hdf5",
     )
     h5open(fname, "r") do file
         global sfrs, gas_masses, Mstar, snap_time

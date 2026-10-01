@@ -751,7 +751,7 @@ def vmap_img_overlay(
     firebox_snap = config.config.get('paths', 'firebox_snap')
     obj_path = os.path.join(
         super_dir,
-        firebox_snap,
+        'objects_' + firebox_snap,
         'particles_within_Rvir_' + obj_str + '.hdf5',
     )
 

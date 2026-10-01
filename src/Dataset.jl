@@ -22,6 +22,8 @@ sat_2d_shapes_path = ""
 octant_2d_shapes_path = ""
 output_dir = ""
 maps_dir = ""
+firebox_data_dir = ""
+firebox_snap = ""
 
 function __init__()
     conf = GalLearnConfig.read_config()
@@ -34,6 +36,8 @@ function __init__()
     global octant_2d_shapes_path = conf["gallearn_paths"]["octant_shapes"]
     global output_dir = conf["gallearn_paths"]["project_data_dir"]
     global maps_dir = conf["gallearn_paths"]["vmaps_dir"]
+    global firebox_data_dir = conf["gallearn_paths"]["firebox_data_dir"]
+    global firebox_snap = conf["gallearn_paths"]["firebox_snap"]
 end
 
 function fmt_time(secs)
@@ -219,6 +223,27 @@ end
 
 const HALO_STATS_FNAME = "firebox_summary_stats.csv"
 
+# FIREbox galaxy catalog produced by Jorge Moreno's group.
+# It keeps only objects that pass: Nbaryon >= 128, Nstar >= 128,
+# Rvir > 2 kpc/h, fgas < 0.2, fstar < 0.5. load_images filters
+# every target against this set so that gas clumps and other
+# non-galaxy structures are excluded regardless of which target
+# is being built.
+function galaxy_catalog_path()
+    snap_int = split(firebox_snap, "_")[1]
+    return joinpath(
+        firebox_data_dir,
+        "catalogs_" * firebox_snap,
+        "galaxies_" * snap_int * ".hdf5",
+    )
+end
+
+function read_galaxy_catalog_ids()
+    HDF5.h5open(galaxy_catalog_path(), "r") do f
+        return Set{Int}(f["galaxyID"][:])
+    end
+end
+
 # Every `tgt_type` the pipeline knows how to build. load_images and
 # build_training_data each branch on tgt_type in more than one place,
 # so keep the list of valid values here rather than restating it at
@@ -352,10 +377,31 @@ function load_images(
         "have a matching row in the target $tgt_type dataframe."
     ); flush(stdout)
 
-    good_files = files[.!is_bad .& in_tgt]
-    good_paths = paths[.!is_bad .& in_tgt]
+    println("Loading galaxy catalog IDs..."); flush(stdout)
+    catalog_ids = read_galaxy_catalog_ids()
+    # Extract the integer galaxy ID from each filename and check whether
+    # it is a member of catalog_ids (the `in` operator tests set
+    # membership). Files are named like
+    # "object_<id>_host_ugrband_..." or "object_<id>_sate_ugrband_...",
+    # so findall(isequal('_'), f) returns the indices of every underscore
+    # and f[us[1]+1 : us[2]-1] slices out the digits between the first
+    # two underscores, which parse(Int, ...) then converts to an integer.
+    in_catalog = [
+        begin
+            us = findall(isequal('_'), f)
+            parse(Int, f[us[1]+1 : us[2]-1]) in catalog_ids
+        end
+        for f in files
+    ]
     println(
-        "$(length(good_files)) good files after filtering baddies."
+        "$(sum(in_catalog)) of $(length(files)) files pass the " *
+        "galaxy catalog filter."
+    ); flush(stdout)
+
+    good_files = files[.!is_bad .& in_tgt .& in_catalog]
+    good_paths = paths[.!is_bad .& in_tgt .& in_catalog]
+    println(
+        "$(length(good_files)) good files after all filters."
     ); flush(stdout)
     if Nfiles === nothing
         # If the user hasn't specified the number of files to run through,

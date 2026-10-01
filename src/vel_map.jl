@@ -22,8 +22,8 @@ function make_vel_map_gal(gal_id)
     id_str = string(gal_id)
     path = joinpath(
         super_dir,
-        firebox_snap,
-        "particles_within_Rvir_object_" * id_str * ".hdf5"
+        "objects_" * firebox_snap,
+        "particles_within_Rvir_object_" * id_str * ".hdf5",
     )
     if isfile(path)
         data = Dict()

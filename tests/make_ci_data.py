@@ -48,7 +48,7 @@ def pick_fixture_ids(ids, n=2):
     firebox_data_dir = pathlib.Path(
         config.config['gallearn_paths']['firebox_data_dir']
     )
-    objects_dir = firebox_data_dir / FIREBOX_SNAP
+    objects_dir = firebox_data_dir / ('objects_' + FIREBOX_SNAP)
 
     chosen = []
     for gal_id in dict.fromkeys(ids):
@@ -418,12 +418,12 @@ def make_bound_particle_filters(ids):
     )
     # No clearing needed here: make_firebox_data (which must run first)
     # already wipes and recreates this directory.
-    test_objects_dir = TEST_DATA_DIR / FIREBOX_SNAP
+    test_objects_dir = TEST_DATA_DIR / ('objects_' + FIREBOX_SNAP)
 
     for gal_id in ids:
         src_ahf_path = (
             firebox_data_dir
-            / FIREBOX_SNAP
+            / ('objects_' + FIREBOX_SNAP)
             / f'bound_particle_filters_object_{gal_id}.hdf5'
         )
         test_particles_path = (
@@ -483,7 +483,7 @@ def make_firebox_data(ids):
     firebox_data_dir = pathlib.Path(
         gallearn.config.config['gallearn_paths']['firebox_data_dir']
     )
-    output_dir = TEST_DATA_DIR / FIREBOX_SNAP
+    output_dir = TEST_DATA_DIR / ('objects_' + FIREBOX_SNAP)
     # Clear before repopulating so files for galaxies that were selected in a
     # previous run but are no longer selected don't linger as stale fixtures.
     if output_dir.exists():
@@ -493,7 +493,11 @@ def make_firebox_data(ids):
 
     for gal_id in ids:
         fname = f'particles_within_Rvir_object_{gal_id}.hdf5'
-        orig_path = firebox_data_dir / FIREBOX_SNAP / fname
+        orig_path = (
+            firebox_data_dir
+            / ('objects_' + FIREBOX_SNAP)
+            / fname
+        )
         output_path = output_dir / fname
         grps = uci_tools.tools.get_downsample_groups(orig_path, 3)
         uci_tools.tools.downsample_data(orig_path, output_path, grps, 1.e-2)
