@@ -505,11 +505,48 @@ def make_firebox_data(ids):
     return None
 
 
+def make_galaxy_catalog(ids):
+    '''
+    Write a minimal galaxy catalog HDF5 fixture for catalog-filter tests.
+
+    The fixture contains the given galaxy IDs plus a sentinel ID (99999)
+    that has no corresponding image stub. Tests can use the sentinel to
+    confirm that the in_catalog filter excludes objects absent from the
+    catalog.
+
+    Consumed by: tests/test_load_images_filter.py.
+
+    Parameters
+    ----------
+    ids: list of int
+        Galaxy IDs to include in the catalog (typically the fixture IDs
+        returned by pick_fixture_ids).
+
+    Returns
+    -------
+    None
+    '''
+    _NON_FIXTURE_SENTINEL = 99999
+    snap_int = FIREBOX_SNAP.split('_')[0]
+    catalog_dir = TEST_DATA_DIR / f'catalogs_{FIREBOX_SNAP}'
+    catalog_dir.mkdir(parents=True, exist_ok=True)
+    catalog_path = catalog_dir / f'galaxies_{snap_int}.hdf5'
+    all_ids = list(ids) + [_NON_FIXTURE_SENTINEL]
+    with h5py.File(catalog_path, 'w') as f:
+        f.create_dataset(
+            'galaxyID',
+            data=np.array(all_ids, dtype=np.int64),
+        )
+    print(f'Wrote galaxy catalog fixture: {catalog_path}')
+    return None
+
+
 if __name__ == '__main__':
     ids, orientations = make_sfr_data()
     fixture_ids = pick_fixture_ids(ids, n=2)
     make_shapes_data(ids)
     make_scan_dir_stubs(fixture_ids)
+    make_galaxy_catalog(fixture_ids)
     make_octant_image_files(fixture_ids)
     make_octant_shapes_reference(fixture_ids, fitter='fit_sersic')
     make_octant_shapes_reference(fixture_ids, fitter='astrophot')
