@@ -568,10 +568,15 @@ def add_sample_slides(
                         else 'quenched'
                     )
                     title = (
+                        '{5}\n'
                         '{0}: {1:.2e} {2}\n'
                         'pred: {3} ({4:.2f})'.format(
-                            spec.axis_label, galaxy_true,
-                            spec.unit, pred_label, probs[si],
+                            spec.axis_label,
+                            galaxy_true,
+                            spec.unit,
+                            pred_label,
+                            probs[si],
+                            f['obs_sorted'][hdf5_idx],
                         )
                     )
                 else:
@@ -594,6 +599,7 @@ def add_sample_slides(
                         '{0:.2e}' if spec.sci_notation else '{0:.3f}'
                     )
                     title = (
+                        '{4}\n'
                         'true: {0}\n'
                         'pred: {1} {2}\n'
                         'error: {3}'.format(
@@ -601,6 +607,7 @@ def add_sample_slides(
                             num_fmt.format(pred_val),
                             spec.unit,
                             num_fmt.format(err),
+                            f['obs_sorted'][hdf5_idx],
                         )
                     )
                 ax.set_title(title, fontsize=8)

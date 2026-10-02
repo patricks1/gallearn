@@ -832,15 +832,16 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
             string(res) *
             "x" *
             string(res) *
-            "_11proj_wsat_wvmap"
-
-        # Filtered for true Galaxies using Jorge's galaxy catalog
-        fname *= "_galfiltered"
+            "_11proj" *
+            "_wsat_wvmap"
 
         # Sample type
         if Nfiles !== nothing
             fname *= "_" * string(Nfiles) * "gal_subsample"
         end
+        
+        # Filtered for true Galaxies using Jorge's galaxy catalog
+        fname *= "_galfiltered"
 
         # 2d, 3d, sfr, or avg_sfr target data
         fname *= "_" * tgt_type * "_tgt"
