@@ -538,11 +538,12 @@ def add_sample_slides(
 
             for ax, si in zip(axes, slide_idxs):
                 hdf5_idx = val_idxs[si].item()
-                # X shape: (N, C, H, W); C order: u, g, r, vmap
+                obj_name = f['obs_sorted'][hdf5_idx].decode('utf-8')
+                # X shape: (N, C, H, W); C order: r, g, b, vmap
                 img = f['X'][hdf5_idx]
-                r_band = img[2]
+                r_band = img[0]
                 g_band = img[1]
-                u_band = img[0]
+                u_band = img[2]
 
                 # Compose RGB from r, g, u bands using asinh
                 # stretch for visualization.
@@ -576,7 +577,7 @@ def add_sample_slides(
                             spec.unit,
                             pred_label,
                             probs[si],
-                            f['obs_sorted'][hdf5_idx],
+                            obj_name,
                         )
                     )
                 else:
@@ -607,7 +608,7 @@ def add_sample_slides(
                             num_fmt.format(pred_val),
                             spec.unit,
                             num_fmt.format(err),
-                            f['obs_sorted'][hdf5_idx],
+                            obj_name,
                         )
                     )
                 ax.set_title(title, fontsize=8)
