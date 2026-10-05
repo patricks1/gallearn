@@ -140,9 +140,10 @@ def verify_dataset(dataset_fname):
     if not lock_path.exists():
         raise FileNotFoundError(
             '{0} has no dataset lock at {1}. Run'
-            ' `scripts/lock_dataset.py --dataset {0}` before using'
+            ' `scripts/lock_dataset.py {0}` before using'
             ' it with scripts/split.py or scripts/train.py.'.format(
-                dataset_fname, lock_path
+                dataset_fname,
+                lock_path
             )
         )
     with open(lock_path) as f:
