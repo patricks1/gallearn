@@ -559,7 +559,7 @@ def add_sample_slides(
                     else:
                         rgb[:, :, c] = 0.
 
-                ax.imshow(rgb, origin='lower')
+                ax.imshow(rgb)
                 ax.axis('off')
 
                 galaxy_true = target_values[si].item()
