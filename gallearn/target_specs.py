@@ -260,19 +260,20 @@ class FdmTarget(TargetSpec):
 
     Unlike gas fraction, no galaxy sits at exactly zero or exactly
     one, so there is no edge case to carve out. The regressor trains
-    on every galaxy, scaled the same way as gas fraction: plain
-    standardization, since a bounded [0, 1] target needs no stretch
-    the way sSFR's unbounded one does. That training scale is
-    unrelated to plot_scale below; it only affects fit/scale/unscale.
+    on every galaxy.
 
-    The population is bimodal rather than skewed toward zero like
-    gas fraction: most galaxies sit near one, a smaller group sits
-    near zero, and few sit in between. Plain log would only spread
-    out the near-zero group while further crowding the much larger
-    near-one group it already compresses on a linear axis. Logit
-    spreads out both ends at once, which matches this shape, so
-    both the distribution plot's extra panel and the scatter plot
-    use it.
+    The galfiltered fdm dataset is unimodal, concentrated near 1
+    (range 0.33 to 0.999, median 0.90). Training uses logit then
+    standardize. Logit spreads the near-1 concentration dramatically
+    (logit(0.96) ≈ 3.18, logit(0.999) ≈ 6.91), giving the optimizer
+    a well-spread gradient signal across the whole distribution rather
+    than letting MSE ignore the dense near-1 tail. Predictions
+    unscale through sigmoid, so they are guaranteed to land in (0, 1).
+
+    That training scale is unrelated to plot_scale below; it only
+    affects fit/scale/unscale. Note that training metrics (RMSE, MAE,
+    R²) are in log-odds units during a run; unscale predictions
+    before comparing against a plain-standardization baseline.
     """
 
     name = 'fdm'
@@ -291,22 +292,24 @@ class FdmTarget(TargetSpec):
         )
 
     def fit(self, vals):
+        logit_vals = torch.logit(vals)
         _, means, stds = preprocessing.std_scale(
-            vals,
+            logit_vals,
             return_distrib=True,
         )
         return {'means': means, 'stds': stds}
 
     def scale(self, vals, stats):
         return preprocessing.std_scale(
-            vals,
+            torch.logit(vals),
             means=stats['means'],
             stds=stats['stds'],
         )
 
     def unscale(self, scaled, stats):
-        # std_scale computes scaled = (x - means) / stds.
-        return scaled * stats['stds'] + stats['means']
+        # logit + std_scale: scaled = (logit(x) - means) / stds.
+        # Inverse: x = sigmoid(scaled * stds + means).
+        return torch.sigmoid(scaled * stats['stds'] + stats['means'])
 
 
 # Keyed by the `tgt_type` src/Dataset.jl writes into the HDF5 root
