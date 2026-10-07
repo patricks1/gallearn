@@ -331,9 +331,10 @@ def plot_regression_scatter(
         tgt_type,
         pdf):
     """Add a ground-truth-vs-prediction scatter plot page, in raw
-    target units (metrics are still computed in scaled space, to
-    match the numbers train.py itself logs), color-coded by stellar
-    mass.
+    target units, color-coded by stellar mass. The title shows two
+    metric lines: one in the scaled space that runs through the model
+    in train.py, and one in the target's intuitive space (unscaled,
+    or dex for sSFR).
 
     Parameters
     ----------
@@ -381,6 +382,14 @@ def plot_regression_scatter(
         y_true = y_true[in_range]
         y_pred = y_pred[in_range]
         masses = masses[in_range]
+
+    int_label = spec.intuitive_label or 'unscaled'
+    y_int_true = spec.to_intuitive(y_true)
+    y_int_pred = spec.to_intuitive(y_pred)
+    int_metrics = gallearn.train.compute_regression_metrics(
+        torch.tensor(y_int_pred, dtype=torch.float32),
+        torch.tensor(y_int_true, dtype=torch.float32),
+    )
 
     # A galaxy absent from the mass CSV (see
     # gallearn.splitting.load_avg_sfr_csv) has a NaN mass; those
@@ -447,18 +456,24 @@ def plot_regression_scatter(
     )
     ax.set_title(
         '{0}\nN={1}, R2={2:.3f}, RMSE={3:.3f}, MAE={4:.3f}'
-        ' (scaled space)'.format(
+        ' (scaled space)\n'
+        'R2={5:.3f}, RMSE={6:.3f}, MAE={7:.3f} ({8})'.format(
             run_name,
             len(y_true),
             metrics['r2'],
             metrics['rmse'],
             metrics['mae'],
+            int_metrics['r2'],
+            int_metrics['rmse'],
+            int_metrics['mae'],
+            int_label,
         )
     )
     fig.tight_layout()
     pdf.savefig(fig)
     plt.close(fig)
     print('Metrics (scaled space): {0}'.format(metrics))
+    print('Metrics ({0}): {1}'.format(int_label, int_metrics))
 
 
 def add_sample_slides(

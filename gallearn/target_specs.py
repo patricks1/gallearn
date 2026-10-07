@@ -79,6 +79,17 @@ class TargetSpec:
     unit = ''
     plot_scale = 'linear'
     sci_notation = False
+    intuitive_label = None
+    # Unit label for the space that to_intuitive maps raw target
+    # values into. None means the raw target units are already
+    # intuitive; evaluate.py will label that line "(unscaled)".
+    # Override with a string (e.g. 'dex') when to_intuitive applies
+    # a transform that changes the units.
+
+    def to_intuitive(self, y):
+        """Transform raw numpy values y to the physically intuitive
+        reporting space for metrics. Identity by default."""
+        return y
 
     def select_valid(self, vals):
         """
@@ -146,7 +157,12 @@ class SsfrTarget(TargetSpec):
     # fixed-point titles in evaluate.py would bury the meaningful
     # digits under leading zeros.
     sci_notation = True
+    intuitive_label = 'dex'
     stretch = 1.e11
+
+    def to_intuitive(self, y):
+        import numpy as np
+        return np.log10(y)
 
     def _star_forming(self, vals):
         return (vals > 0).squeeze()
