@@ -229,7 +229,7 @@ def plot_mass_target_distributions(
         },
         'logit': {
             'forward': lambda x: np.log(x / (1. - x)),
-            'axis_fmt': 'logit({0}{1})',
+            'axis_fmt': '{0}{1} (logit scale)',
             'tick_fn': _logit_ticks,
             # Unlike log10, logit's fixed fraction candidates land at
             # uneven, sometimes tight, log-odds spacing near each end
