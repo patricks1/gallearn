@@ -18,6 +18,89 @@ import torch
 from . import preprocessing
 
 
+def _dispatch(methods, stats, target_name):
+    """Return the (scale_fn, unscale_fn) pair for the method
+    recorded in stats, raising clearly for unknown or absent keys.
+    """
+    method = stats.get('method')
+    if method is None:
+        raise ValueError(
+            'checkpoint predates self-describing scaling; run'
+            ' scripts/patch_scaling_method.py or re-evaluate'
+            ' with the code version that trained this model'
+        )
+    if method not in methods:
+        raise ValueError(
+            '{} has no scaling method {!r}'.format(
+                target_name, method
+            )
+        )
+    return methods[method]
+
+
+def _plain_std_scale(vals, stats):
+    return preprocessing.std_scale(
+        vals,
+        means=stats['means'],
+        stds=stats['stds'],
+    )
+
+
+def _plain_std_unscale(scaled, stats):
+    return scaled * stats['stds'] + stats['means']
+
+
+def _sv_squish(vals, n):
+    return (vals * (n - 1) + 0.5) / n
+
+
+def _sv_unsquish(vals, n):
+    return (vals * n - 0.5) / (n - 1)
+
+
+def _sv_logit_std_scale(vals, stats):
+    return preprocessing.std_scale(
+        torch.logit(_sv_squish(vals, stats['n'])),
+        means=stats['means'],
+        stds=stats['stds'],
+    )
+
+
+def _sv_logit_std_unscale(scaled, stats):
+    return _sv_unsquish(
+        torch.sigmoid(scaled * stats['stds'] + stats['means']),
+        stats['n'],
+    )
+
+
+def _asinh_std_scale(vals, stats):
+    return preprocessing.std_asinh(
+        vals,
+        stats['stretch'],
+        means=stats['means'],
+        stds=stats['stds'],
+    )
+
+
+def _asinh_std_unscale(scaled, stats):
+    return (
+        torch.sinh(scaled * stats['stds'] + stats['means'])
+        / stats['stretch']
+    )
+
+
+def _logit_std_scale(vals, stats):
+    return preprocessing.std_scale(
+        torch.logit(vals),
+        means=stats['means'],
+        stds=stats['stds'],
+    )
+
+
+def _logit_std_unscale(scaled, stats):
+    return torch.sigmoid(scaled * stats['stds'] + stats['means'])
+
+
 class TargetSpec:
     """
     Base class describing how to train on one target.
@@ -160,6 +243,10 @@ class SsfrTarget(TargetSpec):
     intuitive_label = 'dex'
     stretch = 1.e11
 
+    _METHODS = {
+        'asinh_std': (_asinh_std_scale, _asinh_std_unscale),
+    }
+
     def to_intuitive(self, y):
         import numpy as np
         return np.log10(y)
@@ -186,23 +273,22 @@ class SsfrTarget(TargetSpec):
             self.stretch,
             return_distrib=True,
         )
-        return {'means': means, 'stds': stds, 'stretch': self.stretch}
+        return {
+            'method': 'asinh_std',
+            'means': means,
+            'stds': stds,
+            'stretch': self.stretch,
+        }
 
     def scale(self, vals, stats):
-        return preprocessing.std_asinh(
-            vals,
-            stats['stretch'],
-            means=stats['means'],
-            stds=stats['stds'],
-        )
+        scale_fn, _ = _dispatch(self._METHODS, stats, self.name)
+        return scale_fn(vals, stats)
 
     def unscale(self, scaled, stats):
-        # std_asinh computes scaled = (asinh(stretch * x) - means)
-        # / stds, so the inverse is
-        # x = sinh(scaled * stds + means) / stretch.
-        return torch.sinh(
-            scaled * stats['stds'] + stats['means']
-        ) / stats['stretch']
+        _, unscale_fn = _dispatch(
+            self._METHODS, stats, self.name
+        )
+        return unscale_fn(scaled, stats)
 
     def classifier_targets(self, vals):
         return self._star_forming(vals).float().unsqueeze(-1)
@@ -239,6 +325,13 @@ class FgasTarget(TargetSpec):
     unit = ''
     plot_scale = 'log'
 
+    _METHODS = {
+        'plain_std': (_plain_std_scale, _plain_std_unscale),
+        'sv_logit_std': (
+            _sv_logit_std_scale, _sv_logit_std_unscale,
+        ),
+    }
+
     def select_valid(self, vals):
         return torch.arange(len(vals))
 
@@ -254,18 +347,17 @@ class FgasTarget(TargetSpec):
             vals,
             return_distrib=True,
         )
-        return {'means': means, 'stds': stds}
+        return {'method': 'plain_std', 'means': means, 'stds': stds}
 
     def scale(self, vals, stats):
-        return preprocessing.std_scale(
-            vals,
-            means=stats['means'],
-            stds=stats['stds'],
-        )
+        scale_fn, _ = _dispatch(self._METHODS, stats, self.name)
+        return scale_fn(vals, stats)
 
     def unscale(self, scaled, stats):
-        # std_scale computes scaled = (x - means) / stds.
-        return scaled * stats['stds'] + stats['means']
+        _, unscale_fn = _dispatch(
+            self._METHODS, stats, self.name
+        )
+        return unscale_fn(scaled, stats)
 
 
 class FdmTarget(TargetSpec):
@@ -297,6 +389,11 @@ class FdmTarget(TargetSpec):
     unit = ''
     plot_scale = 'logit'
 
+    _METHODS = {
+        'plain_std': (_plain_std_scale, _plain_std_unscale),
+        'logit_std': (_logit_std_scale, _logit_std_unscale),
+    }
+
     def select_valid(self, vals):
         return torch.arange(len(vals))
 
@@ -306,24 +403,21 @@ class FdmTarget(TargetSpec):
         )
 
     def fit(self, vals):
-        logit_vals = torch.logit(vals)
         _, means, stds = preprocessing.std_scale(
-            logit_vals,
+            torch.logit(vals),
             return_distrib=True,
         )
-        return {'means': means, 'stds': stds}
+        return {'method': 'logit_std', 'means': means, 'stds': stds}
 
     def scale(self, vals, stats):
-        return preprocessing.std_scale(
-            torch.logit(vals),
-            means=stats['means'],
-            stds=stats['stds'],
-        )
+        scale_fn, _ = _dispatch(self._METHODS, stats, self.name)
+        return scale_fn(vals, stats)
 
     def unscale(self, scaled, stats):
-        # logit + std_scale: scaled = (logit(x) - means) / stds.
-        # Inverse: x = sigmoid(scaled * stds + means).
-        return torch.sigmoid(scaled * stats['stds'] + stats['means'])
+        _, unscale_fn = _dispatch(
+            self._METHODS, stats, self.name
+        )
+        return unscale_fn(scaled, stats)
 
 
 # Keyed by the `tgt_type` src/Dataset.jl writes into the HDF5 root
