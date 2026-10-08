@@ -745,6 +745,15 @@ def main(
         indices, instead of resolving them again, so main() raises
         if the caller also passes split_file_path rather than
         silently ignoring it.
+    dataset : str, optional
+        Path to the HDF5 dataset. Absolute paths and bare filenames
+        both work. main() extracts the bare filename for the lock
+        check and checkpoint records, and passes the path directly
+        to the load functions. Overrides the dataset recorded in
+        the split file, so one split's galaxy partition can train
+        against a dataset holding a different target while the
+        split file stays an unedited record of its own origin. Must
+        be omitted when resume_from is given.
     use_scheduler : bool, optional
         Whether to use a ReduceLROnPlateau scheduler. Defaults to
         True on a fresh run. Must be omitted when resume_from is
@@ -1044,23 +1053,28 @@ def main(
         # was passed in as, which is often absolute and specific to
         # whatever machine started the run. Recording just the
         # filename keeps train_config, checkpoints, and wandb config
-        # portable across machines, matching how 'dataset' above is
-        # always a bare filename resolved through project_data_dir
-        # rather than a stored path.
+        # portable across machines. dataset_fname below follows the
+        # same rule for the dataset path.
         split_fname = os.path.basename(split_file_path)
+
+    # Bare filename for the lock check, train_config, and model
+    # record. The load functions receive dataset (the full path if
+    # one was given, otherwise the bare filename — both work since
+    # os.path.join returns an absolute path unchanged).
+    dataset_fname = os.path.basename(dataset)
 
     # Raises if dataset has no recorded hash lock yet, or if its
     # content has drifted since locking, so a checkpoint's cached
     # train_idxs/val_idxs (raw row indices) can't silently end up
     # pointing at different rows than the ones they were resolved
     # against originally.
-    dataset_lock.verify_dataset(dataset)
+    dataset_lock.verify_dataset(dataset_fname)
 
     train_config = {
         'task': task,
         'model_type': model_type,
         'split_fname': split_fname,
-        'dataset': dataset,
+        'dataset': dataset_fname,
         'batch_size': batch_size,
         'lr': lr,
         'seed': seed,
@@ -1336,7 +1350,7 @@ def main(
     model = create_model(
         model_type,
         lr,
-        dataset,
+        dataset_fname,
         run_name,
         pretrained=pretrained,
         head_size=head_size,

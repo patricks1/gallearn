@@ -51,13 +51,14 @@ if __name__ == '__main__':
         type=str,
         default=None,
         help=(
-            'Train against this dataset instead of the one'
-            ' --split records. Use it to run an existing split\'s'
-            ' galaxy partition against a dataset holding a'
-            ' different target, which keeps results comparable'
-            ' across targets and leaves the split file an'
-            ' unedited record of its own origin. Must be omitted'
-            ' when --resume is given.'
+            'Path to an HDF5 dataset. Trains against this'
+            ' dataset instead of the one --split records. Use'
+            ' it to run an existing split\'s galaxy partition'
+            ' against a dataset holding a different target,'
+            ' which keeps results comparable across targets and'
+            ' leaves the split file an unedited record of its'
+            ' own origin. Must be omitted when --resume is'
+            ' given.'
         ),
     )
     parser.add_argument(
