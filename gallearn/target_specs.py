@@ -217,21 +217,23 @@ class FgasTarget(TargetSpec):
     gas (their Mgas is exactly zero too, so this is a real physical
     value and not a missing-data sentinel). That is far too small a
     population to justify a hurdle stage the way sSFR's much larger
-    quenched fraction does.
-    The regressor trains on all of them. Gas fraction also spans a
-    narrow range, so plain standardization replaces sSFR's asinh
-    step. Standardizing keeps the exact zeros well behaved, which a
-    log or logit transform would not, which is why this only affects
-    training scaling and not the distribution plot below.
+    quenched fraction does, so the regressor trains on all of them.
 
-    The bulk of the population sits close to zero (median around
-    0.06) with a long thin tail out toward one, so the distribution
-    plot's target panel goes log-scaled too: a linear axis crowds
-    nearly every galaxy into one corner. That is the same reasoning
-    the predicted-vs-true scatter plot already uses. Both plots drop
-    the exact-zero galaxies from the continuous log axis rather than
-    silently losing them; the distribution panel shows them as a
-    separate bar instead, the scatter plot as a reported drop count.
+    Training uses a Smithson-Verkuilen squish followed by logit then
+    standardize. The squish maps [0, 1] -> (0.5/n, 1 - 0.5/n),
+    where n is the training sample size, which pushes exact zeros
+    just inside the logit domain without arbitrary epsilon choices.
+    Logit then spreads the near-zero concentration (median ~0.06)
+    across the real line, giving the optimizer a well-spread gradient
+    signal. Predictions unscale through sigmoid then the inverse
+    squish, so they are guaranteed to stay close to [0, 1].
+
+    The bulk of the population sits close to zero with a long thin
+    tail out toward one, so the distribution plot's target panel goes
+    log-scaled: a linear axis crowds nearly every galaxy into one
+    corner. Both plots drop the exact-zero galaxies from the
+    continuous log axis; the distribution panel shows them as a
+    separate bar, the scatter plot as a reported drop count.
     """
 
     name = 'fgas'
@@ -240,6 +242,12 @@ class FgasTarget(TargetSpec):
     axis_label = 'gas fraction'
     unit = ''
     plot_scale = 'log'
+
+    def _squish(self, vals, n):
+        return (vals * (n - 1) + 0.5) / n
+
+    def _unsquish(self, vals, n):
+        return (vals * n - 0.5) / (n - 1)
 
     def select_valid(self, vals):
         return torch.arange(len(vals))
@@ -252,22 +260,29 @@ class FgasTarget(TargetSpec):
         )
 
     def fit(self, vals):
+        n = len(vals)
+        logit_vals = torch.logit(self._squish(vals, n))
         _, means, stds = preprocessing.std_scale(
-            vals,
+            logit_vals,
             return_distrib=True,
         )
-        return {'means': means, 'stds': stds}
+        return {'means': means, 'stds': stds, 'n': n}
 
     def scale(self, vals, stats):
         return preprocessing.std_scale(
-            vals,
+            torch.logit(self._squish(vals, stats['n'])),
             means=stats['means'],
             stds=stats['stds'],
         )
 
     def unscale(self, scaled, stats):
-        # std_scale computes scaled = (x - means) / stds.
-        return scaled * stats['stds'] + stats['means']
+        # squish + logit + std_scale:
+        # scaled = (logit(squish(x)) - means) / stds
+        # inverse: x = unsquish(sigmoid(scaled * stds + means))
+        return self._unsquish(
+            torch.sigmoid(scaled * stats['stds'] + stats['means']),
+            stats['n'],
+        )
 
 
 class FdmTarget(TargetSpec):
