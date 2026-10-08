@@ -1016,7 +1016,7 @@ def main(
         if batch_size is None:
             batch_size = 32
         if lr is None:
-            lr = 1e-3
+            lr = 3e-4
         if seed is None:
             seed = 42
         if use_scheduler is None:
@@ -1407,8 +1407,8 @@ def main(
             torch.optim.lr_scheduler.ReduceLROnPlateau(
                 model.optimizer,
                 mode='min',
-                factor=0.5,
-                patience=5,
+                factor=0.7,
+                patience=10,
             )
         )
     else:
