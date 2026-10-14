@@ -6,7 +6,9 @@ Slides
 ------
 1. Classifier: confusion matrix. Regressor: ground-truth-vs-
    prediction scatter, color-coded by stellar mass.
-2+. Sample val images (RGB composites) with true/predicted labels.
+2. Regressor only: residuals histogram (training space and
+   intuitive space).
+3+. Sample val images (RGB composites) with true/predicted labels.
 
 Read-only: no optimizer, no training loop, no wandb.
 """
@@ -346,6 +348,7 @@ def plot_regression_scatter(
         gallearn.target_specs.REGISTRY.
     """
     spec = gallearn.target_specs.get(tgt_type)
+    train_method = target_stats.get('method', 'scaled')
     metrics = gallearn.train.compute_regression_metrics(outputs, targets)
     y_true = invert_target_scaling(
         targets, target_stats, tgt_type
@@ -355,30 +358,51 @@ def plot_regression_scatter(
     ).flatten().numpy()
 
     # A log axis can't show a non-positive value and a logit axis
-    # can't show a value at or outside [0, 1]. A bad-enough
-    # prediction can invert outside that range even for a target
-    # whose ground truth never does, so drop those points rather
-    # than error or silently clip, and say how many were dropped. A
-    # target plotted on linear axes keeps every point, including any
-    # legitimate zeros or ones.
+    # can't show a value at or outside [0, 1]. Track ground-truth
+    # zeros and out-of-range predictions separately so the title can
+    # report both: true zeros are real data (e.g. gas-free galaxies),
+    # while out-of-range predictions are model failures.
     if spec.plot_scale == 'log':
+        grnd_truth_out = ~(y_true > 0)
+        false_out = (y_true > 0) & ~(y_pred > 0)
         in_range = (y_true > 0) & (y_pred > 0)
     elif spec.plot_scale == 'logit':
+        grnd_truth_out = ~((y_true > 0) & (y_true < 1))
+        false_out = (
+            (y_true > 0) & (y_true < 1)
+            & ~((y_pred > 0) & (y_pred < 1))
+        )
         in_range = (
             (y_true > 0) & (y_true < 1)
             & (y_pred > 0) & (y_pred < 1)
         )
     else:
+        grnd_truth_out = np.zeros(len(y_true), dtype=bool)
+        false_out = np.zeros(len(y_true), dtype=bool)
         in_range = None
-    if in_range is not None:
-        n_dropped = len(y_true) - in_range.sum()
-        if n_dropped > 0:
-            print(
-                'Note: dropping {0} points with predicted {1}'
-                ' outside the {2} axis\'s range'.format(
-                    n_dropped, spec.axis_label, spec.plot_scale
-                )
+
+    n_grnd_truth_out = int(grnd_truth_out.sum())
+    n_false_out = int(false_out.sum())
+    if n_grnd_truth_out > 0:
+        print(
+            'Note: dropping {0} ground-truth {1} values outside'
+            ' the {2} axis range'.format(
+                n_grnd_truth_out,
+                spec.axis_label,
+                spec.plot_scale,
             )
+        )
+    if n_false_out > 0:
+        print(
+            'Note: dropping {0} points where ground-truth {1} is'
+            ' within {2} range but prediction is outside'
+            ' (incorrect prediction)'.format(
+                n_false_out,
+                spec.axis_label,
+                spec.plot_scale,
+            )
+        )
+    if in_range is not None:
         y_true = y_true[in_range]
         y_pred = y_pred[in_range]
         masses = masses[in_range]
@@ -448,21 +472,52 @@ def plot_regression_scatter(
         ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
         ax.yaxis.set_minor_locator(matplotlib.ticker.NullLocator())
     unit_suffix = ' ({0})'.format(spec.unit) if spec.unit else ''
+    scale_suffix = (
+        '' if spec.plot_scale == 'linear'
+        else ' ({0} axis)'.format(spec.plot_scale)
+    )
     ax.set_xlabel(
-        'Ground truth {0}{1}'.format(spec.axis_label, unit_suffix)
+        'Ground truth {0}{1}{2}'.format(
+            spec.axis_label, unit_suffix, scale_suffix
+        )
     )
     ax.set_ylabel(
-        'Predicted {0}{1}'.format(spec.axis_label, unit_suffix)
+        'Predicted {0}{1}{2}'.format(
+            spec.axis_label, unit_suffix, scale_suffix
+        )
+    )
+    drop_parts = []
+    if n_grnd_truth_out > 0:
+        drop_parts.append(
+            '{0} grnd-truth outside {1} range'.format(
+                n_grnd_truth_out,
+                spec.plot_scale,
+            )
+        )
+    if n_false_out > 0:
+        drop_parts.append(
+            '{0} (incorrect) pred outside {1} range'.format(
+                n_false_out,
+                spec.plot_scale,
+            )
+        )
+    drop_note = (
+        '  [{0} excluded]'.format(', '.join(drop_parts))
+        if drop_parts else ''
     )
     ax.set_title(
-        '{0}\nN={1}, R2={2:.3f}, RMSE={3:.3f}, MAE={4:.3f}'
-        ' (scaled space)\n'
-        'R2={5:.3f}, RMSE={6:.3f}, MAE={7:.3f} ({8})'.format(
+        '{0}\n'
+        'N={1}{2}\n'
+        'R2={3:.3f}, RMSE={4:.3f}, MAE={5:.3f}'
+        ' [training space ({6})]\n'
+        'R2={7:.3f}, RMSE={8:.3f}, MAE={9:.3f} [{10}]'.format(
             run_name,
             len(y_true),
+            drop_note,
             metrics['r2'],
             metrics['rmse'],
             metrics['mae'],
+            train_method,
             int_metrics['r2'],
             int_metrics['rmse'],
             int_metrics['mae'],
@@ -472,8 +527,108 @@ def plot_regression_scatter(
     fig.tight_layout()
     pdf.savefig(fig)
     plt.close(fig)
-    print('Metrics (scaled space): {0}'.format(metrics))
+    print('Metrics ({0}): {1}'.format(train_method, metrics))
     print('Metrics ({0}): {1}'.format(int_label, int_metrics))
+
+
+def plot_residuals_hist(
+        outputs,
+        targets,
+        target_stats,
+        run_name,
+        tgt_type,
+        pdf):
+    """Add a two-panel residuals histogram page.
+
+    Left panel: residuals in the training space (pred minus true,
+    standardized units). All N val points appear; scaled residuals
+    are always finite regardless of plot_scale. Right panel:
+    residuals in the target's intuitive space (raw units for
+    fgas/fdm, dex for sSFR). Only points where to_intuitive
+    produces a finite value are shown: for sSFR (log10) that
+    excludes any predicted value at or below zero; for fgas and fdm
+    (identity) every point is finite, so ground-truth zeros for fgas
+    appear naturally.
+
+    Parameters
+    ----------
+    tgt_type : str
+        Which target these values belong to. See
+        gallearn.target_specs.REGISTRY.
+    """
+    spec = gallearn.target_specs.get(tgt_type)
+    train_method = target_stats.get('method', 'scaled')
+    int_label = spec.intuitive_label or 'unscaled'
+    unit_suffix = ' ({0})'.format(spec.unit) if spec.unit else ''
+
+    scaled_resid = (outputs - targets).flatten().numpy()
+
+    y_true = invert_target_scaling(
+        targets, target_stats, tgt_type
+    ).flatten().numpy()
+    y_pred = invert_target_scaling(
+        outputs, target_stats, tgt_type
+    ).flatten().numpy()
+    y_int_true = spec.to_intuitive(y_true)
+    y_int_pred = spec.to_intuitive(y_pred)
+    int_finite = np.isfinite(y_int_true) & np.isfinite(y_int_pred)
+    int_resid = (y_int_pred - y_int_true)[int_finite]
+    n_int_dropped = int((~int_finite).sum())
+    if n_int_dropped > 0:
+        print(
+            'Note: dropping {0} points from intuitive residuals'
+            ' where to_intuitive is undefined (e.g. log of a'
+            ' non-positive prediction)'.format(n_int_dropped)
+        )
+
+    fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(10, 4))
+
+    ax_left.hist(scaled_resid, bins=50, color='steelblue', alpha=0.8)
+    ax_left.axvline(0, color='k', linestyle='--', linewidth=1)
+    ax_left.set_xlabel(
+        'Residual {0} ({1} space)'.format(
+            spec.axis_label,
+            train_method,
+        )
+    )
+    ax_left.set_ylabel('Count')
+    ax_left.set_title(
+        '{0} space  N={1}\nmean={2:.3f}  std={3:.3f}'.format(
+            train_method,
+            len(scaled_resid),
+            scaled_resid.mean(),
+            scaled_resid.std(),
+        )
+    )
+
+    int_drop_note = (
+        '  [{0} dropped]'.format(n_int_dropped)
+        if n_int_dropped > 0 else ''
+    )
+    ax_right.hist(int_resid, bins=50, color='steelblue', alpha=0.8)
+    ax_right.axvline(0, color='k', linestyle='--', linewidth=1)
+    ax_right.set_xlabel(
+        'Residual {0}{1} ({2})'.format(
+            spec.axis_label,
+            unit_suffix,
+            int_label,
+        )
+    )
+    ax_right.set_ylabel('Count')
+    ax_right.set_title(
+        '{0}  N={1}{2}\nmean={3:.3f}  std={4:.3f}'.format(
+            int_label,
+            len(int_resid),
+            int_drop_note,
+            int_resid.mean(),
+            int_resid.std(),
+        )
+    )
+
+    fig.suptitle('{0}  --  residuals'.format(run_name))
+    fig.tight_layout()
+    pdf.savefig(fig)
+    plt.close(fig)
 
 
 def add_sample_slides(
@@ -685,6 +840,14 @@ def main(model_path, split_file_path, output_path=None, n_samples=10):
                 targets,
                 checkpoint['target_stats'],
                 masses,
+                run_name,
+                tgt_type,
+                pdf,
+            )
+            plot_residuals_hist(
+                outputs,
+                targets,
+                checkpoint['target_stats'],
                 run_name,
                 tgt_type,
                 pdf,

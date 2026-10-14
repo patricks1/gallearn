@@ -3,7 +3,8 @@ Training script for galaxy models.
 
 Supports two tasks:
 - classifier: binary classification (quenched vs star-forming)
-- regressor: sSFR regression (trained on star-forming galaxies only)
+- regressor: regression on a dataset-specified target (fgas, fdm,
+  avg_sfr, or other targets defined in target_specs.py)
 
 And two model architectures:
 - standard: StandardNet, a torchvision ResNet-18 backbone
@@ -1016,7 +1017,7 @@ def main(
         if batch_size is None:
             batch_size = 32
         if lr is None:
-            lr = 3e-4
+            lr = 1e-3
         if seed is None:
             seed = 42
         if use_scheduler is None:
@@ -1407,8 +1408,8 @@ def main(
             torch.optim.lr_scheduler.ReduceLROnPlateau(
                 model.optimizer,
                 mode='min',
-                factor=0.7,
-                patience=10,
+                factor=0.5,
+                patience=5,
             )
         )
     else:

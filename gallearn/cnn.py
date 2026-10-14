@@ -416,8 +416,8 @@ class ResNet(nn.Module):
         ----------
             resblock: residual block type, BasicResBlock for ResNet-18, 34 or
                       BottleNeck for ResNet-50, 101, 152
-            n_class: number of classes for image classifcation (used in
-                classfication head)
+            N_out_channels: output dimension of the model's final
+                linear layer.
             n_blocks_list: number of residual blocks for each conv layer
                 (conv2_x - conv5_x)
             out_channels_list: list of the output channel numbers for conv2_x
@@ -567,8 +567,10 @@ class ResNet(nn.Module):
 
     def forward(self, x, rs):
         """
-        Args: 
-            x: input image
+        Args:
+            x: input image tensor
+            rs: auxiliary redshift scalar tensor, concatenated to the
+                pooled feature vector before the head
         Returns:
             x: target prediction
         """
