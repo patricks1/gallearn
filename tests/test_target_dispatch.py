@@ -46,6 +46,7 @@ def test_prepare_targets_reuses_cached_stats():
     raw = _vals([0.1, 0.2, 0.3, 0.4])
     d = {'ys_sorted': raw}
     cached = {
+        'method': 'plain_std',
         'means': torch.tensor([0.5]),
         'stds': torch.tensor([2.0]),
     }
