@@ -191,6 +191,18 @@ if __name__ == '__main__':
         ),
     )
 
+    parser.add_argument(
+        '--scheduler-patience',
+        type=int,
+        default=None,
+        help=(
+            'Number of epochs ReduceLROnPlateau waits for val loss to'
+            ' improve before halving the lr (default: 5). Must be'
+            ' omitted when --resume is given, since a resumed run'
+            ' reuses the checkpoint\'s own recorded scheduler_patience'
+        ),
+    )
+
     args = parser.parse_args()
 
     use_scheduler = (
@@ -214,4 +226,5 @@ if __name__ == '__main__':
         head_dropout=args.head_dropout,
         tgt_type=args.target,
         dataset=args.dataset,
+        scheduler_patience=args.scheduler_patience,
     )

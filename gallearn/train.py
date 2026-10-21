@@ -260,7 +260,7 @@ def prepare_targets(
         targets = torch.zeros_like(vals)
         targets[valid_indices] = scaled
         print(
-            'Regressor: {0:.0f} galaxy images available'.format(
+            'Regressor: {0:.0f} galaxy images in dataset'.format(
                 len(valid_indices)
             )
         )
@@ -659,7 +659,8 @@ def main(
         zero_channels=None,
         noise_channels=None,
         tgt_type=None,
-        dataset=None):
+        dataset=None,
+        scheduler_patience=None):
     """
     Main training function.
 
@@ -764,6 +765,13 @@ def main(
         decayed to, and switching it on for a checkpoint trained
         without one would start decaying from an lr no scheduler
         has ever evaluated a plateau against.
+    scheduler_patience : int, optional
+        Number of epochs with no val-loss improvement before
+        ReduceLROnPlateau halves the learning rate. Defaults to 5
+        on a fresh run. Must be omitted when resume_from is given,
+        since the checkpoint's own recorded patience governs the
+        continuation; changing it mid-run would alter the decay
+        schedule the optimizer was trained under.
     pretrained : bool, optional
         Only affects model_type='standard'. See create_model's
         pretrained parameter. Defaults to False on a fresh run. Must
@@ -813,6 +821,11 @@ def main(
         it separates "this channel carried the signal" from anything
         else zeroing a channel changes. Also an experiment argument
         with no CLI flag, and also recorded in train_config.
+    scheduler_patience : int, optional
+        Number of epochs ReduceLROnPlateau waits for val loss to
+        improve before halving the lr. Defaults to 5 on a fresh run.
+        Checkpoints record what patience was used, so a resumed run
+        always reuses it; must be omitted when resume_from is given.
     """
     device = get_device()
     print('Using device: {0}'.format(device))
@@ -964,6 +977,16 @@ def main(
                 ' regularization its restored weights were trained'
                 ' under. Omit --head-dropout when passing --resume.'
             )
+        if scheduler_patience is not None:
+            raise ValueError(
+                'scheduler_patience has no effect when resume_from'
+                ' is given. A resumed run always reuses the'
+                ' checkpoint\'s own recorded scheduler_patience,'
+                ' since changing it mid-run would alter the'
+                ' plateau-detection logic for a scheduler that has'
+                ' already decayed to some lr. Omit'
+                ' --scheduler-patience when passing --resume.'
+            )
         checkpoint = load_checkpoint(resume_from)
         saved_config = checkpoint.get('train_config', {})
         dataset = saved_config.get('dataset')
@@ -998,6 +1021,9 @@ def main(
         tgt_type = saved_config.get('tgt_type')
         zero_channels = saved_config.get('zero_channels')
         noise_channels = saved_config.get('noise_channels')
+        # Checkpoints predating scheduler_patience all ran the value
+        # that was hardcoded at the time, 5.
+        scheduler_patience = saved_config.get('scheduler_patience', 5)
     else:
         if task is None or model_type is None:
             raise ValueError(
@@ -1040,6 +1066,8 @@ def main(
             # to every result already in hand, not because anything
             # has shown 0.5 to be right here.
             head_dropout = 0.5
+        if scheduler_patience is None:
+            scheduler_patience = 5
         with open(split_file_path) as f:
             split_dict = json.load(f)
         # The split file records the dataset it was built against.
@@ -1088,6 +1116,7 @@ def main(
         'noise_channels': noise_channels,
         'run_name': run_name,
         'wandb_run_id': wandb_run_id,
+        'scheduler_patience': scheduler_patience,
     }
 
     # Load metadata (not the full image tensor) and resolve tgt_type
@@ -1279,6 +1308,11 @@ def main(
         train_idxs = train_idxs[keep_mask]
 
     print(
+        'Drawing {0} according to the split file.'.format(
+            len(train_idxs) + len(val_idxs)
+        )
+    )
+    print(
         'Train: {0}, Val: {1}'.format(
             len(train_idxs), len(val_idxs)
         )
@@ -1409,7 +1443,7 @@ def main(
                 model.optimizer,
                 mode='min',
                 factor=0.5,
-                patience=5,
+                patience=scheduler_patience,
             )
         )
     else:
