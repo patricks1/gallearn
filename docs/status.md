@@ -11,6 +11,17 @@ the signal][vmap-status] first, then [Project status:
 reopened][reopened] for the pivot to these targets, then [Project
 status: concluded][status] for the sSFR work that came before.
 
+## Current flagship models
+
+Best val R² at best checkpoint, two seeds, from the most recent
+clean experiment per target.
+
+| target | architecture | head | val R² (s42) | val R² (s7) | source |
+|--------|--------------|------|-------------|-------------|--------|
+| avg_sfr | ResNet | small (128..8, ~339K params) | 0.299 | 0.287 | [backbone-dropout baseline][backbone-dropout] |
+| fgas | ResNet | minimal (64/32, ~10K params) | 0.6228 | 0.6154 | [head-size sweep][head-sweep-new] |
+| fdm | ResNet | minimal (64/32, ~10K params) | 0.7631 | 0.7694 | [head-size sweep][head-sweep-new] |
+
 ## Project status: the vmap carries the signal (2026-09-08)
 
 The first real experiments on the new targets landed a result that
@@ -265,421 +276,305 @@ active next steps.
 
 ## Experiment log
 
-Everything tried so far, grouped by theme, oldest first:
+Everything tried so far, grouped by theme, newest first:
 
-- [Classifier: generalizes fine][classifier]: val F1 ≈ 0.97, not the
-  problem. All effort below is the regressor.
-- [Regressor: earliest results][earliest]: pre-split-refactor runs,
-  kept for history, confounded.
-- [Ceiling check][ceiling]: `log10(Mstar)` + `Re` with no images gets
-  val R² ≈ 0-0.04, so the CNN's ~0.24-0.31 is real signal.
-- [Controlled regressor experiments][controlled]: lr and projection
-  count tested cleanly. Neither is the lever.
-- [Bug 1: `--resume` didn't restore settings][bug1]: fixed. It
-  invalidated some earlier resumed runs.
-- [Bug 2: eval-mode dropout][bug2]: fixed. Dropout was silently
-  active during validation.
-- [Dropout bug A/B][dropout-ab]: fixing Bug 2 made no real
-  difference.
-- [Capacity sweep: head width][head-sweep]: no robust effect. The
-  first-seed result was noise, caught on reseed.
-- [Capacity sweep: backbone width][backbone-sweep]: shrinking the
-  backbone made things monotonically worse, closing capacity as a
-  lever in both directions.
-- [Dropout placement: dropout in the backbone][backbone-dropout]:
-  nearly closed the train/val gap and made val *worse*, the
-  strongest evidence yet that the ceiling isn't an overfitting
-  problem.
+- [A failed ablation, twice][ablation-fail]: two monkeypatch attempts
+  silently did nothing and looked like clean null results.
+- [Velocity-map ablation][vmap-ablation]: zeroing the vmap takes both
+  targets to R² ≈ 0. The photometry carries nothing on its own.
+- [Pre-head dropout, on against off][head-dropout]: no reproducible
+  effect, the clean test the dropout post-mortem never ran.
+- [Epoch budget][epoch-budget]: 50 epochs was enough. Of twelve runs
+  extended to 75, one improved, and it was the most constrained head.
+- [Head-size sweep on the new targets][head-sweep-new]: a ~10K
+  parameter head matches or beats the ~2.99M one on both targets.
+  Bottleneck width matters, parameter count barely does.
+- [Ceiling check: fgas and fdm][ceiling-new]: mass and size alone
+  reach val R² 0.354 on fdm, a far higher bar than sSFR's 0-0.04.
+- [Heteroscedastic regression head][het-head]: predicted variance
+  correlates with actual error, but mostly because both track target
+  magnitude. Little left once that's controlled for.
 - [sSFR target noise check][target-noise]: shot noise is too small to
   explain the ceiling. Real burstiness shows up between windows, but
   a 0.3 Gyr target made generalization worse, not better. Also
   covers the color baseline check.
-- [Heteroscedastic regression head][het-head]: predicted variance
-  correlates with actual error, but mostly because both track target
-  magnitude. Little left once that's controlled for.
-- [Ceiling check: fgas and fdm][ceiling-new]: mass and size alone
-  reach val R² 0.354 on fdm, a far higher bar than sSFR's 0-0.04.
-- [Head-size sweep on the new targets][head-sweep-new]: a ~10K
-  parameter head matches or beats the ~2.99M one on both targets.
-  Bottleneck width matters, parameter count barely does.
-- [Epoch budget][epoch-budget]: 50 epochs was enough. Of twelve runs
-  extended to 75, one improved, and it was the most constrained head.
-- [Pre-head dropout, on against off][head-dropout]: no reproducible
-  effect, the clean test the dropout post-mortem never ran.
-- [Velocity-map ablation][vmap-ablation]: zeroing the vmap takes both
-  targets to R² ≈ 0. The photometry carries nothing on its own.
-- [A failed ablation, twice][ablation-fail]: two monkeypatch attempts
-  silently did nothing and looked like clean null results.
+- [Dropout placement: dropout in the backbone][backbone-dropout]:
+  nearly closed the train/val gap and made val *worse*, the
+  strongest evidence yet that the ceiling isn't an overfitting
+  problem.
+- [Capacity sweep: backbone width][backbone-sweep]: shrinking the
+  backbone made things monotonically worse, closing capacity as a
+  lever in both directions.
+- [Capacity sweep: head width][head-sweep]: no robust effect. The
+  first-seed result was noise, caught on reseed.
+- [Dropout bug A/B][dropout-ab]: fixing Bug 2 made no real
+  difference.
+- [Bug 2: eval-mode dropout][bug2]: fixed. Dropout was silently
+  active during validation.
+- [Bug 1: `--resume` didn't restore settings][bug1]: fixed. It
+  invalidated some earlier resumed runs.
+- [Controlled regressor experiments][controlled]: lr and projection
+  count tested cleanly. Neither is the lever.
+- [Ceiling check][ceiling]: `log10(Mstar)` + `Re` with no images gets
+  val R² ≈ 0-0.04, so the CNN's ~0.24-0.31 is real signal.
+- [Regressor: earliest results][earliest]: pre-split-refactor runs,
+  kept for history, confounded.
+- [Classifier: generalizes fine][classifier]: val F1 ≈ 0.97, not the
+  problem. All effort below is the regressor.
 
-### Classifier: generalizes fine
 
-wandb project `gallearn_quenched_classifier`, 3 runs (all 3
-projections, lr=1e-4):
+### A failed ablation, twice (2026-09-08)
 
-| run | train acc | val acc | val F1 |
-|---|---|---|---|
-| sleek-spaceship-6 | 99.9% | ~94.5-95% | ~0.97 |
-| summer-capybara-7 | 99.8% | ~94.5-95% | ~0.97 |
-| expert-sky-8 | 99.8% | ~94.5-97% | ~0.97-0.98 |
+The vmap ablation took three attempts, and the two failures are worth
+recording because both produced plausible-looking output.
 
-Only a ~5-point train/val gap. Quenched-vs-star-forming is a coarse
-binary call with a strong signal (concentration, color, smoothness);
-regression to a continuous sSFR value needs much finer-grained
-information and is a much harder small-N problem. This is why effort
-below is all on the regressor.
+The first patched `preprocessing.sasinh_imgs_sscale_vmaps`. Training
+never calls it. `LazyGalaxyDataset.__getitem__` reimplements those
+transforms inline against precomputed stats, and
+`cnn.ResNet.scaling_function` is vestigial during training. The
+second patched `__getitem__` itself, in the parent process.
+`train.main()` builds its DataLoaders with `num_workers=4`, and macOS
+spawns workers, so each one re-imported the module and got the
+unpatched class.
 
-### Regressor: earliest results (pre-split-refactor, early resnet)
+Both produced ablation runs bit-identical to their controls, which
+reads as a clean null result. What exposed it was the deltas being
+exactly 0.0000 across two independently seeded pairs. Genuinely null
+effects scatter around zero; exact agreement to four decimals means
+the same computation ran twice.
 
-wandb project `sfr_gallearn`, the earliest `resnet`-architecture
-regressor runs, predating the locked-test-set/split-file system and
-today's `StandardNet`/`--model standard`:
+The fix was to stop patching. `zero_channels` now lives on
+`LazyGalaxyDataset` as an instance attribute, which reaches workers
+because the DataLoader pickles the dataset, and `train.main()`
+records it in `train_config` so a run's own config states which
+channels it trained on. The verification that should have run from
+the start reads batches through a `num_workers=4` DataLoader and
+checks the channel is zero there, not in the parent.
 
-| run | projections | lr | epochs | train loss | val R² |
+The general lesson for one-off experiment scripts here: verifying
+that a patch is installed is not the same as verifying it changes
+what the model sees.
+
+### Pre-head dropout, on against off (2026-09-08)
+
+`cnn.ResNet.forward` applied p=0.5 dropout to the pooled feature
+vector, a rate that arrived by convention and had never been tested
+here. The [dropout post-mortem][pm-dropout] tested only eval-time
+behavior, with both arms training at 0.5, and its no-dropout
+comparison point was StandardNet, a different architecture. Making
+the rate a parameter allowed the clean test. fgas, two head widths,
+two seeds:
+
+| head | seed | p=0.5 | p=0.0 | change |
+|---|---|---|---|---|
+| small | 42 | 0.6150 | 0.5963 | -0.0187 |
+| small | 7 | 0.6110 | 0.6319 | +0.0209 |
+| small | mean | | | +0.0011 |
+| minimal | 42 | 0.6228 | 0.6224 | -0.0004 |
+| minimal | 7 | 0.6154 | 0.6034 | -0.0120 |
+| minimal | mean | | | -0.0062 |
+
+**Verdict**: no reproducible effect either way. Both mean changes sit
+inside the seed spread, and small's two seeds disagree in sign by
+almost equal amounts. This confirms the post-mortem's conclusion with
+better evidence than it had, and it means `head_dropout` can go to
+0.0 to drop a hyperparameter nobody needs to justify, or stay at 0.5,
+with the data indifferent.
+
+Worth recording how close this came to entering the doc as a finding.
+The seed-42 small run alone showed dropout helping by 0.019, with a
+tidy overfitting story attached, since removing dropout dropped train
+loss from 0.167 to 0.050. Seed 7 reversed it. That is the third time
+this project has caught a single-seed result that looked mechanistic
+and was not.
+
+### Epoch budget: 50 was enough (2026-09-08)
+
+The sweep ran at 50 epochs, and its first runs peaked at 36 to 40,
+close enough to the cap to raise the question. Rather than rerun,
+every run resumed from its own `checkpoint_epoch050.pt` for another
+25 epochs. `train.py` saves a final checkpoint alongside best-loss
+ones, and a resumed run restores the optimizer state and the
+shuffling generator before running
+`range(start_epoch, start_epoch + n_epochs)` in the same wandb run.
+Two loop-state pieces do not survive the resume and reset instead:
+the `ReduceLROnPlateau` bad-epoch counter and the best-val tracker
+that gates checkpoint saves. The decayed learning rate itself carries
+over inside the optimizer state, and across a single 25-epoch resume
+with `patience=5` the counter reset only pushes any further LR decay
+a few epochs later, so a resume stays close enough to an
+uninterrupted 75-epoch run for this comparison.
+
+Of twelve runs, exactly one improved. `fdm_head-tiny_seed7` moved
+from 0.7398 to 0.7618 with its best at epoch 60, then plateaued
+through 75. Every other run kept its pre-50 best, most by a wide
+margin.
+
+The one that moved is the informative one. tiny is the most
+constrained head tested, and this doc's earlier
+[capacity work][head-sweep-sfr] already found that smaller models fit
+more slowly and peak later. Without the extension, tiny's fdm result
+would have read 0.019 worse than it is, exaggerating the bottleneck
+effect the sweep above reports.
+
+### Head-size sweep on the new targets (2026-09-08)
+
+The first use of the new `--head-size` flag, which replaced the
+hardcoded head. Every run uses `--model resnet`, the avg_sfr split
+against each target's own dataset, lr=1e-3, batch_size=32, two seeds,
+50 epochs then extended to 75 (see [epoch budget][epoch-budget]).
+Val R2 at each run's best checkpoint:
+
+| target | head | narrowest layer | head params | seed 42 | seed 7 | mean |
+|---|---|---|---|---|---|---|
+| fgas | minimal (64/32) | 32 | ~10K | 0.6228 | 0.6154 | 0.6191 |
+| fgas | tiny (32/16/8/4) | 4 | ~316K | 0.6163 | 0.6187 | 0.6175 |
+| fgas | small (128..8) | 8 | ~339K | 0.6150 | 0.6110 | 0.6130 |
+| fgas | large (2048..64) | 64 | ~2.99M | 0.6015 | 0.5701 | 0.5858 |
+| fdm | minimal | 32 | ~10K | 0.7631 | 0.7694 | 0.7663 |
+| fdm | small | 8 | ~339K | 0.7585 | 0.7728 | 0.7657 |
+| fdm | tiny | 4 | ~316K | 0.7331 | 0.7618 | 0.7475 |
+| fdm | large | 64 | ~2.99M | 0.7523 | 0.7317 | 0.7420 |
+
+(fgas large seed 42 is `lively-morning-94`, reused rather than rerun.
+It ran 100 epochs and peaked at 40, inside this sweep's budget, so
+its best checkpoint is comparable.)
+
+**Verdict**: cutting the head from ~2.99M parameters to ~10K costs
+nothing and helps slightly. The large head posts the lowest mean on
+both targets, and comes last in three of the four target-seed
+combinations, losing only to fdm's tiny at seed 42. That is the one
+ordering here with real support. Among the three narrow heads on fgas
+the spread is 0.006, smaller than some within-config seed spreads, so
+they are indistinguishable there.
+
+Parameter count is not the operative variable. On fdm, tiny sits
+0.019 below minimal while carrying 32 times more parameters. What
+separates them is the narrowest layer, 4 units against 32. A
+4-dimensional bottleneck discards real information for a target this
+well determined, which fgas at 0.62 tolerates and fdm at 0.77 does
+not. The lesson is to avoid pinching the head, not to shrink it.
+
+Even that reading deserves caution. tiny's gap to minimal on fdm
+swings from 0.030 at seed 42 to 0.008 at seed 7, and small's own
+seed spread is 0.014, so the direction holds on both seeds while the
+magnitude does not. This doc has declined to call weaker versions of
+that pattern a real effect before.
+
+These runs also show much tighter seed variance than the sSFR sweeps
+did, roughly 0.004 against the 0.03 to 0.05 that flipped conclusions
+there. Higher-signal targets make the two-seed rule cheaper to
+satisfy, though the [dropout][head-dropout] result below shows it is
+still doing necessary work.
+
+### Ceiling check: fgas and fdm (2026-09-08)
+
+The same scalar-feature baseline the sSFR project ran, refit for the
+new targets: linear regression and gradient-boosted trees on
+`log10(Mstar)` and `Re`, no images, against the same train/val
+galaxies the CNN runs use, with the target standardized on train rows
+alone.
+
+| target | features | model | train R2 | val R2 |
+|---|---|---|---|---|
+| fgas | log(Mstar) | linear | 0.0280 | 0.0048 |
+| fgas | log(Mstar) | GBR | 0.5268 | -0.1787 |
+| fgas | log(Mstar) + Re | linear | 0.0372 | 0.0144 |
+| fgas | log(Mstar) + Re | GBR | 0.5473 | 0.0563 |
+| fdm | log(Mstar) | linear | 0.1062 | 0.1036 |
+| fdm | log(Mstar) | GBR | 0.4637 | 0.1238 |
+| fdm | log(Mstar) + Re | linear | 0.1226 | 0.1295 |
+| fdm | log(Mstar) + Re | GBR | 0.5920 | 0.3539 |
+
+Running this first turned out to matter for fdm. Mass and size alone
+reach val R2 0.354 there, unlike sSFR, where the same baseline got
+0.00 to 0.04 and made almost any CNN number look like real signal. A
+dark-matter-fraction model has to clear 0.354 before it demonstrates
+anything beyond a two-variable fit, which is also what makes the
+[vmap ablation][vmap-ablation]'s 0.00 so damning: without that
+channel the CNN cannot even match the trivial baseline.
+
+Rows here are per image rather than per galaxy, so one galaxy appears
+about eleven times with identical scalars and different orientations.
+Val galaxies stay disjoint from train galaxies, so the val numbers
+remain honest.
+
+### Heteroscedastic regression head (2026-07-20)
+
+With the architecture axis closed (see
+[Considered and set aside][considered] and the
+[backbone dropout][backbone-dropout] result), this tests the
+target-noise explanation directly instead of by elimination. The
+regressor's head now outputs two values, a mean and a log-variance
+of the asinh-scaled sSFR target, trained on `nn.GaussianNLLLoss`
+instead of MSE (see the [appendix][nll] for what that loss does and
+why the learned variance should be meaningful, not arbitrary). Same
+small head and full `[16,32,64,128]` backbone as the recent
+baseline, two seeds, otherwise identical hyperparameters.
+
+**Point accuracy, checkpointed by best NLL:**
+
+| seed | val R² |
+|---|---|
+| 42 | 0.315 (best point-R² of any run in this doc) |
+| 7 | 0.204 (clearly worse than the 0.287 MSE baseline) |
+
+Same seed-inconsistency trap as the head-width sweep: one seed looks
+like a breakthrough, the other looks like a regression. Point
+accuracy is not the reason this experiment was run, and it doesn't
+resolve anything on its own here either.
+
+**Calibration, the actual point of the experiment.** For each val
+galaxy, the predicted variance should track how large its actual
+squared error turns out to be, if the network is genuinely learning
+something about per-galaxy predictability rather than gaming the
+`log(σ²)` term. Binning val galaxies into 5 quantiles of predicted
+variance and comparing to the mean actual squared error in each bin,
+both seeds show a real, monotonic trend:
+
+| seed 42 bin | mean pred var | mean actual sq err | seed 7 bin | mean pred var | mean actual sq err |
 |---|---|---|---|---|---|
-| likely-thunder-55 | 3 | 1e-4 | 1000 | 0.005 | 0.237 |
-| ethereal-violet-61 | 11 | 1e-4 | 78 (killed) | 0.40 | -0.007 |
-| rare-sun-62 | 11 | 1e-3 | 100 | 0.25 | 0.232 |
+| 0 | 0.188 | 0.216 | 0 | 0.275 | 0.339 |
+| 1 | 0.296 | 0.377 | 1 | 0.359 | 0.392 |
+| 2 | 0.374 | 0.576 | 2 | 0.489 | 0.991 |
+| 3 | 0.580 | 0.835 | 3 | 0.808 | 1.088 |
+| 4 | 1.116 | 1.409 | 4 | 1.344 | 1.278 |
 
-At the time, the 3-vs-11-projection comparison here (0.237 vs 0.232)
-looked like projection count made no difference. We never controlled
-that comparison, though (different lr, different epoch counts).
-See the properly controlled version further down, which found a
-real, if modest, effect in the other direction. These three runs
-also predate the eval-mode dropout fix (see "Bug 2" below), which
-may explain some of their val-loss jumpiness, particularly
-`rare-sun-62`'s.
+Spearman rank correlation between predicted variance and actual
+squared error: 0.275 (seed 42), 0.277 (seed 7). Reproducible across
+independent seeds and the right sign, so at face value this looks
+like real, if modest, calibration: the network has learned to flag
+which galaxies it's less sure about, and those galaxies really do
+have bigger errors.
 
-### Ceiling check (2026-07-17)
+**But most of that correlation turned out to be a simpler pattern in
+disguise.** Predicted variance also correlates with the target's
+raw magnitude (`|target|`, Spearman 0.33-0.35 in both seeds), and
+actual squared error correlates with `|target|` even more strongly
+(0.55-0.62). That's expected on its own, asinh-standardized targets
+further from the population mean are intrinsically harder to hit
+exactly, a form of heteroscedasticity that has nothing to do with
+per-galaxy image content. Controlling for it (residualizing both
+predicted variance and squared error against `|target|` within
+quintile bins, then rank-correlating the residuals) collapses the
+correlation to 0.131 at seed 42 and 0.025 at seed 7, weak and not
+seed-consistent.
 
-Fit a plain scalar-feature baseline (linear regression and
-gradient-boosted trees on `log10(Mstar)` and `Re`, no images at all)
-against the exact same train/val galaxies as the real split
-(`splits/split_..._v1.json`), predicting the same asinh-standardized
-sSFR target:
-
-| features | model | train R² | val R² |
-|---|---|---|---|
-| log(Mstar) | linear | 0.0005 | -0.025 |
-| log(Mstar) | GBR | 0.33 | 0.030 |
-| log(Mstar) + Re | linear | 0.003 | -0.012 |
-| log(Mstar) + Re | GBR | 0.32 | 0.038 |
-
-Mass and size alone explain almost nothing (val R² ≈ 0-0.04). Every
-CNN run in this doc clears R² ≈ 0.24+, several times better than the
-best trivial baseline here, so the network is extracting real
-information from the images beyond what a simple scalar summary
-could give it, likely morphology (clumpiness, concentration,
-structure), not just "how big/massive is this galaxy."
-
-Inputs: only `Re` (Sersic radius) goes in as an auxiliary scalar.
-Stellar mass is not currently fed to the network (this ceiling check
-suggests it wouldn't help much on its own, since mass alone barely
-predicts sSFR here).
-
-### Controlled regressor experiments (2026-07-17 - 2026-07-18)
-
-All `--task regressor --model standard` (`StandardNet`, formerly
-`BernoulliNet`), same split, batch size 64, single seed each unless
-noted, each measured at that run's own best-checkpoint val loss
-epoch:
-
-| run | change from baseline | best epoch | train loss | val loss | val R² |
-|---|---|---|---|---|---|
-| baseline | lr=1e-3, scratch | 15 | 0.62 | 0.716 | 0.276 |
-| lr_probe | lr=3e-4, scratch | 17 | ~0.60 | 0.713 | ~0.28 |
-| pretrained (50 ep) | lr=1e-3, pretrained | 50 (still improving) | 0.017 | 0.744 | 0.250 |
-| pretrained (resumed +50 ep) | same, resumed to 100 ep total | 68 | n/a (see caveat) | 0.722 | n/a (see caveat) |
-| 3-proj only | lr=1e-3, scratch, `train_orientations` restricted to the 3 axis-aligned views | 26 | 0.60 | 0.756 | 0.237 |
-
-Every one of these lands in the same narrow band (val loss
-0.71-0.76, R² 0.24-0.28), and every non-pretrained run peaks early
-(epoch 15-26 of 50) then degrades. That consistency is itself the
-finding: lr, pretraining, and projection count all turned out not to
-be the bottleneck. The pattern instead looks like a capacity/
-overfitting problem. The model reaches its best generalization point
-almost as soon as it starts fitting hard, regardless of how it gets
-there.
-
-3-proj-only losing ~0.04 R² relative to full 11-proj (0.237 vs 0.276)
-is a real, if modest, effect in favor of more projections. This is
-the properly controlled version of the comparison the earliest runs
-above got wrong. It doesn't fix the fundamental ~1500-galaxy limit,
-but real multi-view projections (as opposed to synthetic flip/rotate
-augmentation, which would add much less: a flipped image carries no
-new inclination/dust/structure information a real projection would)
-aren't worthless regularization either.
-
-**Caveat on the "pretrained (resumed)" row**: its post-resume portion
-(epochs 51-100) used `batch_size=32` instead of the original run's
-`64`, due to "Bug 1" below. Its train loss and R² for that stretch
-aren't comparable to the other rows, so we omit them; we include the
-val loss for reference only, not as a clean result.
-
-### Bug 1 (2026-07-18, fixed): `--resume` didn't restore settings
-
-Resuming the pretrained run above (to let it finish converging past
-epoch 50) produced a visible train-loss jump right at the resume
-boundary. Root cause: `--resume` was only reusing the checkpoint's
-weights/optimizer state, dataset, and split—not `batch_size`,
-`task`, `model_type`, `run_name`, `lr`, `seed`, `use_scheduler`, or
-`pretrained`. The resume command omitted `--batch-size`, so it
-silently fell back to argparse's default (32) instead of the
-original run's 64. We confirmed this via the optimizer's step
-counter jumping from 8400 to 8736 between checkpoints, almost
-exactly double a normal ~168-step epoch. (Our initial hypothesis was
-a data-shuffling discontinuity from an unseeded DataLoader generator;
-that turned out to be a real issue but not the cause of this
-particular jump. See the seed/generator-state fix we folded in
-below, which addresses the shuffling issue on its own merits.)
-
-We fixed this comprehensively: every parameter
-`gallearn.train.main()` takes is now either (a) restored from the
-checkpoint on resume and rejected if the caller also passes it
-explicitly, or (b) `n_epochs`, the deliberate exception, since
-running a different number of further epochs on each resume is
-expected. `--resume` alone now needs no other flags. We also fixed a
-second bug: `wandb_mode='r'` was calling `wandb.init(resume='must')`
-without a run id, which wandb rejects (it resumes by id, not name);
-a resumed run now automatically reattaches to its checkpoint's own
-wandb run (recorded as `wandb_run_id`) or continues without wandb,
-with no `--wandb r` mode to forget. `seed` also didn't do anything
-before this fix (dead parameter). It now seeds model init and
-`train_loader`'s shuffling generator on a fresh run, and a resumed
-run restores that generator's exact saved RNG state
-(`torch.Generator.get_state()`/`set_state()`, captured in every
-checkpoint) rather than re-seeding, so it draws the same next
-shuffle an uninterrupted run would have.
-
-### Bug 2 (2026-07-19, fixed): eval-mode dropout active in validation
-
-`cnn.ResNet` and `cnn.Net` (the latter not currently wired into
-`train.py`) both called `torch.nn.functional.dropout(x, p)` without
-`training=self.training`. Functional dropout defaults to
-`training=True` regardless of `model.eval()`. Unlike the
-`nn.Dropout` module, it doesn't automatically respect eval mode. So
-every `cnn.ResNet` validation forward pass was randomly zeroing 50%
-of features, adding noise to every val prediction and metric, and
-meaning "best checkpoint" selection was partly picking a lucky
-dropout mask rather than the true best model.
-
-We fixed this by passing `training=self.training` to both calls.
-This likely explains at least some of the very jumpy val curves seen
-in the earliest `--model resnet` runs above (particularly
-`rare-sun-62`). It's unlikely to be the main explanation for the
-generalization ceiling itself, though: `StandardNet` has zero
-dropout, buggy or otherwise, and showed the same early-peak-then-
-plateau pattern in every controlled experiment above. A dropout-free
-architecture reproducing the same failure mode argues against broken
-dropout being the dominant cause. We test this directly next (see
-below).
-
-### Dropout bug A/B (2026-07-19): fix made no real difference
-
-Since we expected dropout to induce generalization, and the bug
-effectively disabled it during training's own model-selection
-process (it corrupted the val loss used to pick "best"), it was
-worth directly testing whether the fix alone changes anything before
-moving to bigger interventions. Two `--model resnet` runs, otherwise
-identical (`--task regressor`, same split, lr=1e-3, batch_size=64,
-50 epochs, seed=42): one with `cnn.ResNet.forward` monkeypatched
-back to the buggy (always-on) dropout, one with the fix.
-
-| run | best epoch | train loss | val loss | val R² |
-|---|---|---|---|---|
-| buggy dropout | 27 | 0.53 | 0.7385 | 0.263 |
-| fixed dropout | 19 | 0.62 | 0.7324 | 0.256 |
-
-Essentially no change: val loss is marginally better fixed, R² is
-marginally *worse* fixed. Those two metrics disagreeing on direction
-is itself informative: this is noise, not a real effect either way.
-Both land squarely in the same 0.71-0.76 val loss / R² ≈ 0.25-0.28
-band as every other experiment in this doc. The bug was real and
-worth fixing (it was adding noise to val metrics and corrupting
-"best checkpoint" selection), but it wasn't the generalization
-bottleneck. That rules out a fourth candidate (after lr, pretraining,
-and projection count) and further strengthens the capacity
-hypothesis below, since it's now the only lever left untested.
-
-This A/B only tested eval-time dropout behavior. Both arms still
-trained with dropout on (p=0.5), so it doesn't by itself say whether
-dropout-as-regularization (on vs. off entirely) matters. We decided
-not to run that as a dedicated experiment, though: the historical
-`cnn.ResNet` runs (dropout present, buggy or fixed, R² ≈ 0.23-0.26)
-and every `StandardNet` run (no dropout at all, R² ≈ 0.24-0.28) all
-land in the same band regardless. Not a single controlled test, but
-enough independent data points pointing the same way that a
-dedicated dropout on/off run isn't worth a ~35 min slot next to the
-capacity sweep below, which targets a genuinely untested axis.
-
-### Capacity sweep: head width (2026-07-19)
-
-`cnn.ResNet`'s head (`nn.LazyLinear(2048)` down through 1024, 256,
-128, 64, to `N_out_channels`) turned out to hold about 87% of the
-whole model's parameters (~2.68M of ~2.99M total). `n_blocks_list`
-and `out_channels_list`, the two knobs the "Next candidates" section
-originally pointed at, barely move total capacity at all by
-comparison. So the real capacity-reduction lever here is the head's
-width, not the conv backbone. We shrank the head across three
-points, holding the backbone fixed at `n_blocks_list=[1,1,1,1]`,
-`out_channels_list=[16,32,64,128]`, same split, lr=1e-3,
-batch_size=64, 50 epochs, `--model resnet`:
-
-| head widths | total params | seed 42 val loss / R² | seed 7 val loss / R² |
-|---|---|---|---|
-| large (2048/1024/256/128/64) | ~2.99M | 0.7324 / 0.256 | 0.7216 / 0.267 |
-| medium (512/256/128/64/32) | ~554K | 0.6924 / 0.306 | 0.7423 / 0.251 |
-| small (128/64/32/16/8) | ~339K | 0.6957 / 0.299 | 0.7104 / 0.287 |
-| tiny (32/16/8/4) | ~316K | 0.7919 / 0.200 | not run |
-
-(The large row's seed 42 result is `dropout_ab_fixed_resnet` from
-the dropout A/B above, reused as the capacity anchor since it's the
-exact same architecture and hyperparameters.)
-
-At seed 42, medium and small both beat large by a real-looking
-margin (R² 0.30-0.31 vs. 0.26, val loss down to 0.69), landing
-outside the 0.71-0.76 band every other experiment in this doc lands
-in, our first result that wasn't obviously noise. Tiny undershot
-large instead, suggesting a non-monotonic capacity/generalization
-curve with a sweet spot somewhere between ~339K and ~554K params.
-
-Reseeding large, medium, and small at seed 7 to check: the medium
-result didn't survive at all (0.7423, now the worst of the three,
-worse than large). Small still beat large in both seeds (0.6957 <
-0.7324 at seed 42, 0.7104 < 0.7216 at seed 7), but the margin shrank
-sharply (0.037 to 0.011), and every seed 7 number landed back inside
-the historical 0.71-0.76 band.
-
-**Verdict**: this sweep did not find a robust capacity effect. The
-medium result was seed noise dressed up as a finding, the exact trap
-this doc has been careful to check for elsewhere (see the dropout
-A/B's noise-signature discussion above), and it slipped past here
-because we only ran one seed per point at first. Small-head's edge
-over large-head is directionally consistent across both seeds but
-small and inconsistent enough in magnitude that it doesn't clear the
-bar this doc has used everywhere else to call something a real
-effect. Capacity, at least via head width at these three points,
-joins lr, pretraining, projection count, and dropout as tested and
-ruled out as the dominant lever.
-
-**Mechanism, and a comparison we initially got wrong**: tiny's best
-checkpoint (epoch 44, train loss 0.55) looked, at first glance, like
-it fit the training set about as well as large's best checkpoint
-(epoch 19, train loss 0.62), which would be a strange result: worse
-capacity fitting just as well but generalizing worse. That
-comparison is confounded, though, since it compares each run at its
-own best-val epoch, and those landed at very different points in
-training. Pulling all four runs' train and val loss at a matched
-epoch (19, large's best) instead:
-
-| model | train loss @ epoch 19 | val loss @ epoch 19 |
-|---|---|---|
-| large | 0.621 | 0.732 |
-| medium | 0.680 | 0.855 |
-| small | 0.686 | 0.786 |
-| tiny | 0.723 | 0.836 |
-
-At a fixed point in training, large fits best and tiny fits worst,
-exactly what raw capacity would predict. There's no paradox: bigger
-models fit faster and start overfitting (val loss degrading) sooner,
-so their best-val checkpoint lands early (large peaks at epoch 19);
-smaller models fit more slowly and take longer to reach the point of
-overfitting, so their best-val checkpoint lands later (tiny peaks at
-epoch 44). That explains the spread in the "best epoch" column
-above without needing any special-case explanation for tiny, and it
-means tiny's weak result is consistent with genuine undercapacity,
-not a fluke, once compared at a matched epoch instead of each run's
-own best checkpoint.
-
-### Capacity sweep: backbone width (2026-07-20)
-
-The head-width sweep above only touched the head; the conv backbone
-stayed fixed at `n_blocks_list=[1,1,1,1]`,
-`out_channels_list=[16,32,64,128]` (~311K backbone params) across
-every point tested so far. This sweep targets the backbone directly:
-`out_channels_list` shrunk to two smaller points, holding the small
-head (`[128,64,32,16,8]`, the one head-width point whose edge over
-large held up across both seeds) and `n_blocks_list=[1,1,1,1]` fixed,
-so only backbone width varies. Two seeds each, same split, lr=1e-3,
-batch_size=64, 50 epochs, `--model resnet`:
-
-| `out_channels_list` | backbone params | total params | seed 42 val loss / R² | seed 7 val loss / R² |
-|---|---|---|---|---|
-| `[16,32,64,128]` (baseline) | 310,960 | 339,105 | 0.6957 / 0.299 | 0.7104 / 0.287 |
-| `[8,16,32,64]` | 79,064 | 99,017 | 0.7595 / 0.250 | 0.7587 / 0.244 |
-| `[4,8,16,32]` | 20,428 | 36,285 | 0.8383 / 0.165 | 0.8415 / 0.157 |
-
-(The baseline row is the small-head point from the head-width sweep
-above, reused rather than rerun, since it's the exact same
-architecture and hyperparameters.)
-
-Unlike the head-width sweep, this result isn't ambiguous: both
-smaller backbones land clearly outside the baseline's range on both
-seeds, with no reseed reversal, and generalization gets steadily
-worse as the backbone shrinks further.
-
-**Verdict**: shrinking the backbone does not help, it hurts,
-monotonically and consistently across both seeds. Read together with
-the head-width sweep's "tiny" point (which also undershot) and the
-pretrained post-mortem (adding capacity via ImageNet weights also
-didn't help, and sharpened overfitting instead), capacity now looks
-like a closed lever in both directions: making the network bigger
-didn't help, and making it smaller doesn't either. The current
-backbone (~310K params) is not obviously carrying unused capacity
-that a smaller network would use more efficiently; if anything, this
-result is more consistent with the current backbone already sitting
-near or below the capacity floor needed to represent the mapping at
-all, not above some capacity ceiling that regularization or shrinking
-needs to bring down.
-
-### Dropout placement: dropout in the backbone (2026-07-20)
-
-The last untested architecture lever. `cnn.ResNet` has a single
-`p=0.5` dropout right before the head, and the standing hypothesis
-(see the [dropout post-mortem][pm-dropout]) was that this is too
-weak or too localized to constrain the conv backbone, where the
-capacity to memorize training galaxies actually lives. This test
-adds `nn.Dropout2d(p=0.2)` after each of `conv2_x`-`conv5_x`,
-keeping the existing pre-head dropout, the small head, and the full
-`[16,32,64,128]` backbone. `nn.Dropout2d` zeroes whole channels
-(spatial dropout), the right granularity for conv feature maps, and
-being a real `nn.Module` it respects `model.eval()` automatically,
-so it cannot reintroduce [Bug 2][bug2]. Two seeds, same split,
-lr=1e-3, batch_size=64, 50 epochs:
-
-| config | seed | final train loss | best val loss | val R² |
-|---|---|---|---|---|
-| baseline (pre-head dropout only) | 42 | 0.372 | 0.6957 | 0.299 |
-| baseline | 7 | 0.462 | 0.7104 | 0.287 |
-| + `Dropout2d(0.2)` in backbone | 42 | 0.710 | 0.7954 | 0.206 |
-| + `Dropout2d(0.2)` in backbone | 7 | 0.710 | 0.7903 | 0.209 |
-
-(The seed 42 run crashed at epoch 22 when its environment restarted
-and resumed from its epoch-18 checkpoint, so its wandb history has 54
-rows, epochs 19-22 twice. The resume restores the generator state, so
-the replayed epochs match; the numbers above are unaffected.)
-
-**Verdict**: backbone dropout worked exactly as a regularizer is
-supposed to, and that made things worse. It clearly did its
-mechanical job: final train loss rose from 0.372/0.462 to 0.710 on
-both seeds, and the train/val gap collapsed from about 0.32 to about
-0.085, close to eliminated. But val loss got *worse* (0.795/0.790 vs.
-0.696/0.710) and val R² dropped from ~0.29 to ~0.21. The model went
-from overfitting to underfitting without ever passing through a
-better val optimum on the way.
-
-That last point is the informative part, and it's the strongest
-evidence in this doc so far that the ceiling is not an overfitting
-problem in the usual sense. The standard story ("the train/val gap
-is large, so constrain the model and val will improve") predicts
-that closing the gap buys generalization. Here we closed the gap
-almost entirely and generalization got worse. Combined with both
-capacity sweeps finding that smaller is worse, the picture is
-consistent: there is no capacity or regularization setting between
-here and a much smaller model that beats the current
-configuration, because what limits val performance isn't the model's
-freedom to memorize. The large train/val gap looks like a symptom of
-a target the images only partly determine, not a cause of the
-ceiling.
+**Verdict**: the network learned that extreme-target galaxies are
+harder to predict precisely, which is true but is a population-level
+fact recoverable from the target distribution alone, not a
+galaxy-specific signal the image adds. Once that's accounted for,
+there's little left, and what's left doesn't survive a reseed check
+either. This is a real result, not a null one: it fails to turn the
+target-noise hypothesis into the kind of galaxy-level evidence hoped
+for (e.g. "the model is specifically unsure about the bursty,
+low-particle-count galaxies flagged in the shot-noise check"). It
+neither confirms nor refutes target noise as the ceiling's cause,
+it just shows this particular diagnostic mostly measured something
+else. A more direct test would need to correlate predicted variance
+against actual burstiness (the multi-window sSFR comparison data)
+rather than against squared error, since squared error is exactly
+where the `|target|` confound comes from.
 
 ### sSFR target noise check (2026-07-19)
 
@@ -873,258 +768,375 @@ already fairly tested), but because the specific concern that
 motivated retrying it, aperture and units, does not apply to this
 dataset.
 
-### Heteroscedastic regression head (2026-07-20)
+### Dropout placement: dropout in the backbone (2026-07-20)
 
-With the architecture axis closed (see
-[Considered and set aside][considered] and the
-[backbone dropout][backbone-dropout] result), this tests the
-target-noise explanation directly instead of by elimination. The
-regressor's head now outputs two values, a mean and a log-variance
-of the asinh-scaled sSFR target, trained on `nn.GaussianNLLLoss`
-instead of MSE (see the [appendix][nll] for what that loss does and
-why the learned variance should be meaningful, not arbitrary). Same
-small head and full `[16,32,64,128]` backbone as the recent
-baseline, two seeds, otherwise identical hyperparameters.
+The last untested architecture lever. `cnn.ResNet` has a single
+`p=0.5` dropout right before the head, and the standing hypothesis
+(see the [dropout post-mortem][pm-dropout]) was that this is too
+weak or too localized to constrain the conv backbone, where the
+capacity to memorize training galaxies actually lives. This test
+adds `nn.Dropout2d(p=0.2)` after each of `conv2_x`-`conv5_x`,
+keeping the existing pre-head dropout, the small head, and the full
+`[16,32,64,128]` backbone. `nn.Dropout2d` zeroes whole channels
+(spatial dropout), the right granularity for conv feature maps, and
+being a real `nn.Module` it respects `model.eval()` automatically,
+so it cannot reintroduce [Bug 2][bug2]. Two seeds, same split,
+lr=1e-3, batch_size=64, 50 epochs:
 
-**Point accuracy, checkpointed by best NLL:**
+| config | seed | final train loss | best val loss | val R² |
+|---|---|---|---|---|
+| baseline (pre-head dropout only) | 42 | 0.372 | 0.6957 | 0.299 |
+| baseline | 7 | 0.462 | 0.7104 | 0.287 |
+| + `Dropout2d(0.2)` in backbone | 42 | 0.710 | 0.7954 | 0.206 |
+| + `Dropout2d(0.2)` in backbone | 7 | 0.710 | 0.7903 | 0.209 |
 
-| seed | val R² |
-|---|---|
-| 42 | 0.315 (best point-R² of any run in this doc) |
-| 7 | 0.204 (clearly worse than the 0.287 MSE baseline) |
+(The seed 42 run crashed at epoch 22 when its environment restarted
+and resumed from its epoch-18 checkpoint, so its wandb history has 54
+rows, epochs 19-22 twice. The resume restores the generator state, so
+the replayed epochs match; the numbers above are unaffected.)
 
-Same seed-inconsistency trap as the head-width sweep: one seed looks
-like a breakthrough, the other looks like a regression. Point
-accuracy is not the reason this experiment was run, and it doesn't
-resolve anything on its own here either.
+**Verdict**: backbone dropout worked exactly as a regularizer is
+supposed to, and that made things worse. It clearly did its
+mechanical job: final train loss rose from 0.372/0.462 to 0.710 on
+both seeds, and the train/val gap collapsed from about 0.32 to about
+0.085, close to eliminated. But val loss got *worse* (0.795/0.790 vs.
+0.696/0.710) and val R² dropped from ~0.29 to ~0.21. The model went
+from overfitting to underfitting without ever passing through a
+better val optimum on the way.
 
-**Calibration, the actual point of the experiment.** For each val
-galaxy, the predicted variance should track how large its actual
-squared error turns out to be, if the network is genuinely learning
-something about per-galaxy predictability rather than gaming the
-`log(σ²)` term. Binning val galaxies into 5 quantiles of predicted
-variance and comparing to the mean actual squared error in each bin,
-both seeds show a real, monotonic trend:
+That last point is the informative part, and it's the strongest
+evidence in this doc so far that the ceiling is not an overfitting
+problem in the usual sense. The standard story ("the train/val gap
+is large, so constrain the model and val will improve") predicts
+that closing the gap buys generalization. Here we closed the gap
+almost entirely and generalization got worse. Combined with both
+capacity sweeps finding that smaller is worse, the picture is
+consistent: there is no capacity or regularization setting between
+here and a much smaller model that beats the current
+configuration, because what limits val performance isn't the model's
+freedom to memorize. The large train/val gap looks like a symptom of
+a target the images only partly determine, not a cause of the
+ceiling.
 
-| seed 42 bin | mean pred var | mean actual sq err | seed 7 bin | mean pred var | mean actual sq err |
+### Capacity sweep: backbone width (2026-07-20)
+
+The head-width sweep above only touched the head; the conv backbone
+stayed fixed at `n_blocks_list=[1,1,1,1]`,
+`out_channels_list=[16,32,64,128]` (~311K backbone params) across
+every point tested so far. This sweep targets the backbone directly:
+`out_channels_list` shrunk to two smaller points, holding the small
+head (`[128,64,32,16,8]`, the one head-width point whose edge over
+large held up across both seeds) and `n_blocks_list=[1,1,1,1]` fixed,
+so only backbone width varies. Two seeds each, same split, lr=1e-3,
+batch_size=64, 50 epochs, `--model resnet`:
+
+| `out_channels_list` | backbone params | total params | seed 42 val loss / R² | seed 7 val loss / R² |
+|---|---|---|---|---|
+| `[16,32,64,128]` (baseline) | 310,960 | 339,105 | 0.6957 / 0.299 | 0.7104 / 0.287 |
+| `[8,16,32,64]` | 79,064 | 99,017 | 0.7595 / 0.250 | 0.7587 / 0.244 |
+| `[4,8,16,32]` | 20,428 | 36,285 | 0.8383 / 0.165 | 0.8415 / 0.157 |
+
+(The baseline row is the small-head point from the head-width sweep
+above, reused rather than rerun, since it's the exact same
+architecture and hyperparameters.)
+
+Unlike the head-width sweep, this result isn't ambiguous: both
+smaller backbones land clearly outside the baseline's range on both
+seeds, with no reseed reversal, and generalization gets steadily
+worse as the backbone shrinks further.
+
+**Verdict**: shrinking the backbone does not help, it hurts,
+monotonically and consistently across both seeds. Read together with
+the head-width sweep's "tiny" point (which also undershot) and the
+pretrained post-mortem (adding capacity via ImageNet weights also
+didn't help, and sharpened overfitting instead), capacity now looks
+like a closed lever in both directions: making the network bigger
+didn't help, and making it smaller doesn't either. The current
+backbone (~310K params) is not obviously carrying unused capacity
+that a smaller network would use more efficiently; if anything, this
+result is more consistent with the current backbone already sitting
+near or below the capacity floor needed to represent the mapping at
+all, not above some capacity ceiling that regularization or shrinking
+needs to bring down.
+
+### Capacity sweep: head width (2026-07-19)
+
+`cnn.ResNet`'s head (`nn.LazyLinear(2048)` down through 1024, 256,
+128, 64, to `N_out_channels`) turned out to hold about 87% of the
+whole model's parameters (~2.68M of ~2.99M total). `n_blocks_list`
+and `out_channels_list`, the two knobs the "Next candidates" section
+originally pointed at, barely move total capacity at all by
+comparison. So the real capacity-reduction lever here is the head's
+width, not the conv backbone. We shrank the head across three
+points, holding the backbone fixed at `n_blocks_list=[1,1,1,1]`,
+`out_channels_list=[16,32,64,128]`, same split, lr=1e-3,
+batch_size=64, 50 epochs, `--model resnet`:
+
+| head widths | total params | seed 42 val loss / R² | seed 7 val loss / R² |
+|---|---|---|---|
+| large (2048/1024/256/128/64) | ~2.99M | 0.7324 / 0.256 | 0.7216 / 0.267 |
+| medium (512/256/128/64/32) | ~554K | 0.6924 / 0.306 | 0.7423 / 0.251 |
+| small (128/64/32/16/8) | ~339K | 0.6957 / 0.299 | 0.7104 / 0.287 |
+| tiny (32/16/8/4) | ~316K | 0.7919 / 0.200 | not run |
+
+(The large row's seed 42 result is `dropout_ab_fixed_resnet` from
+the dropout A/B above, reused as the capacity anchor since it's the
+exact same architecture and hyperparameters.)
+
+At seed 42, medium and small both beat large by a real-looking
+margin (R² 0.30-0.31 vs. 0.26, val loss down to 0.69), landing
+outside the 0.71-0.76 band every other experiment in this doc lands
+in, our first result that wasn't obviously noise. Tiny undershot
+large instead, suggesting a non-monotonic capacity/generalization
+curve with a sweet spot somewhere between ~339K and ~554K params.
+
+Reseeding large, medium, and small at seed 7 to check: the medium
+result didn't survive at all (0.7423, now the worst of the three,
+worse than large). Small still beat large in both seeds (0.6957 <
+0.7324 at seed 42, 0.7104 < 0.7216 at seed 7), but the margin shrank
+sharply (0.037 to 0.011), and every seed 7 number landed back inside
+the historical 0.71-0.76 band.
+
+**Verdict**: this sweep did not find a robust capacity effect. The
+medium result was seed noise dressed up as a finding, the exact trap
+this doc has been careful to check for elsewhere (see the dropout
+A/B's noise-signature discussion above), and it slipped past here
+because we only ran one seed per point at first. Small-head's edge
+over large-head is directionally consistent across both seeds but
+small and inconsistent enough in magnitude that it doesn't clear the
+bar this doc has used everywhere else to call something a real
+effect. Capacity, at least via head width at these three points,
+joins lr, pretraining, projection count, and dropout as tested and
+ruled out as the dominant lever.
+
+**Mechanism, and a comparison we initially got wrong**: tiny's best
+checkpoint (epoch 44, train loss 0.55) looked, at first glance, like
+it fit the training set about as well as large's best checkpoint
+(epoch 19, train loss 0.62), which would be a strange result: worse
+capacity fitting just as well but generalizing worse. That
+comparison is confounded, though, since it compares each run at its
+own best-val epoch, and those landed at very different points in
+training. Pulling all four runs' train and val loss at a matched
+epoch (19, large's best) instead:
+
+| model | train loss @ epoch 19 | val loss @ epoch 19 |
+|---|---|---|
+| large | 0.621 | 0.732 |
+| medium | 0.680 | 0.855 |
+| small | 0.686 | 0.786 |
+| tiny | 0.723 | 0.836 |
+
+At a fixed point in training, large fits best and tiny fits worst,
+exactly what raw capacity would predict. There's no paradox: bigger
+models fit faster and start overfitting (val loss degrading) sooner,
+so their best-val checkpoint lands early (large peaks at epoch 19);
+smaller models fit more slowly and take longer to reach the point of
+overfitting, so their best-val checkpoint lands later (tiny peaks at
+epoch 44). That explains the spread in the "best epoch" column
+above without needing any special-case explanation for tiny, and it
+means tiny's weak result is consistent with genuine undercapacity,
+not a fluke, once compared at a matched epoch instead of each run's
+own best checkpoint.
+
+### Dropout bug A/B (2026-07-19): fix made no real difference
+
+Since we expected dropout to induce generalization, and the bug
+effectively disabled it during training's own model-selection
+process (it corrupted the val loss used to pick "best"), it was
+worth directly testing whether the fix alone changes anything before
+moving to bigger interventions. Two `--model resnet` runs, otherwise
+identical (`--task regressor`, same split, lr=1e-3, batch_size=64,
+50 epochs, seed=42): one with `cnn.ResNet.forward` monkeypatched
+back to the buggy (always-on) dropout, one with the fix.
+
+| run | best epoch | train loss | val loss | val R² |
+|---|---|---|---|---|
+| buggy dropout | 27 | 0.53 | 0.7385 | 0.263 |
+| fixed dropout | 19 | 0.62 | 0.7324 | 0.256 |
+
+Essentially no change: val loss is marginally better fixed, R² is
+marginally *worse* fixed. Those two metrics disagreeing on direction
+is itself informative: this is noise, not a real effect either way.
+Both land squarely in the same 0.71-0.76 val loss / R² ≈ 0.25-0.28
+band as every other experiment in this doc. The bug was real and
+worth fixing (it was adding noise to val metrics and corrupting
+"best checkpoint" selection), but it wasn't the generalization
+bottleneck. That rules out a fourth candidate (after lr, pretraining,
+and projection count) and further strengthens the capacity
+hypothesis below, since it's now the only lever left untested.
+
+This A/B only tested eval-time dropout behavior. Both arms still
+trained with dropout on (p=0.5), so it doesn't by itself say whether
+dropout-as-regularization (on vs. off entirely) matters. We decided
+not to run that as a dedicated experiment, though: the historical
+`cnn.ResNet` runs (dropout present, buggy or fixed, R² ≈ 0.23-0.26)
+and every `StandardNet` run (no dropout at all, R² ≈ 0.24-0.28) all
+land in the same band regardless. Not a single controlled test, but
+enough independent data points pointing the same way that a
+dedicated dropout on/off run isn't worth a ~35 min slot next to the
+capacity sweep below, which targets a genuinely untested axis.
+
+### Bug 2 (2026-07-19, fixed): eval-mode dropout active in validation
+
+`cnn.ResNet` and `cnn.Net` (the latter not currently wired into
+`train.py`) both called `torch.nn.functional.dropout(x, p)` without
+`training=self.training`. Functional dropout defaults to
+`training=True` regardless of `model.eval()`. Unlike the
+`nn.Dropout` module, it doesn't automatically respect eval mode. So
+every `cnn.ResNet` validation forward pass was randomly zeroing 50%
+of features, adding noise to every val prediction and metric, and
+meaning "best checkpoint" selection was partly picking a lucky
+dropout mask rather than the true best model.
+
+We fixed this by passing `training=self.training` to both calls.
+This likely explains at least some of the very jumpy val curves seen
+in the earliest `--model resnet` runs above (particularly
+`rare-sun-62`). It's unlikely to be the main explanation for the
+generalization ceiling itself, though: `StandardNet` has zero
+dropout, buggy or otherwise, and showed the same early-peak-then-
+plateau pattern in every controlled experiment above. A dropout-free
+architecture reproducing the same failure mode argues against broken
+dropout being the dominant cause. We test this directly next (see
+below).
+
+### Bug 1 (2026-07-18, fixed): `--resume` didn't restore settings
+
+Resuming the pretrained run above (to let it finish converging past
+epoch 50) produced a visible train-loss jump right at the resume
+boundary. Root cause: `--resume` was only reusing the checkpoint's
+weights/optimizer state, dataset, and split—not `batch_size`,
+`task`, `model_type`, `run_name`, `lr`, `seed`, `use_scheduler`, or
+`pretrained`. The resume command omitted `--batch-size`, so it
+silently fell back to argparse's default (32) instead of the
+original run's 64. We confirmed this via the optimizer's step
+counter jumping from 8400 to 8736 between checkpoints, almost
+exactly double a normal ~168-step epoch. (Our initial hypothesis was
+a data-shuffling discontinuity from an unseeded DataLoader generator;
+that turned out to be a real issue but not the cause of this
+particular jump. See the seed/generator-state fix we folded in
+below, which addresses the shuffling issue on its own merits.)
+
+We fixed this comprehensively: every parameter
+`gallearn.train.main()` takes is now either (a) restored from the
+checkpoint on resume and rejected if the caller also passes it
+explicitly, or (b) `n_epochs`, the deliberate exception, since
+running a different number of further epochs on each resume is
+expected. `--resume` alone now needs no other flags. We also fixed a
+second bug: `wandb_mode='r'` was calling `wandb.init(resume='must')`
+without a run id, which wandb rejects (it resumes by id, not name);
+a resumed run now automatically reattaches to its checkpoint's own
+wandb run (recorded as `wandb_run_id`) or continues without wandb,
+with no `--wandb r` mode to forget. `seed` also didn't do anything
+before this fix (dead parameter). It now seeds model init and
+`train_loader`'s shuffling generator on a fresh run, and a resumed
+run restores that generator's exact saved RNG state
+(`torch.Generator.get_state()`/`set_state()`, captured in every
+checkpoint) rather than re-seeding, so it draws the same next
+shuffle an uninterrupted run would have.
+
+### Controlled regressor experiments (2026-07-17 - 2026-07-18)
+
+All `--task regressor --model standard` (`StandardNet`, formerly
+`BernoulliNet`), same split, batch size 64, single seed each unless
+noted, each measured at that run's own best-checkpoint val loss
+epoch:
+
+| run | change from baseline | best epoch | train loss | val loss | val R² |
 |---|---|---|---|---|---|
-| 0 | 0.188 | 0.216 | 0 | 0.275 | 0.339 |
-| 1 | 0.296 | 0.377 | 1 | 0.359 | 0.392 |
-| 2 | 0.374 | 0.576 | 2 | 0.489 | 0.991 |
-| 3 | 0.580 | 0.835 | 3 | 0.808 | 1.088 |
-| 4 | 1.116 | 1.409 | 4 | 1.344 | 1.278 |
+| baseline | lr=1e-3, scratch | 15 | 0.62 | 0.716 | 0.276 |
+| lr_probe | lr=3e-4, scratch | 17 | ~0.60 | 0.713 | ~0.28 |
+| pretrained (50 ep) | lr=1e-3, pretrained | 50 (still improving) | 0.017 | 0.744 | 0.250 |
+| pretrained (resumed +50 ep) | same, resumed to 100 ep total | 68 | n/a (see caveat) | 0.722 | n/a (see caveat) |
+| 3-proj only | lr=1e-3, scratch, `train_orientations` restricted to the 3 axis-aligned views | 26 | 0.60 | 0.756 | 0.237 |
 
-Spearman rank correlation between predicted variance and actual
-squared error: 0.275 (seed 42), 0.277 (seed 7). Reproducible across
-independent seeds and the right sign, so at face value this looks
-like real, if modest, calibration: the network has learned to flag
-which galaxies it's less sure about, and those galaxies really do
-have bigger errors.
+Every one of these lands in the same narrow band (val loss
+0.71-0.76, R² 0.24-0.28), and every non-pretrained run peaks early
+(epoch 15-26 of 50) then degrades. That consistency is itself the
+finding: lr, pretraining, and projection count all turned out not to
+be the bottleneck. The pattern instead looks like a capacity/
+overfitting problem. The model reaches its best generalization point
+almost as soon as it starts fitting hard, regardless of how it gets
+there.
 
-**But most of that correlation turned out to be a simpler pattern in
-disguise.** Predicted variance also correlates with the target's
-raw magnitude (`|target|`, Spearman 0.33-0.35 in both seeds), and
-actual squared error correlates with `|target|` even more strongly
-(0.55-0.62). That's expected on its own, asinh-standardized targets
-further from the population mean are intrinsically harder to hit
-exactly, a form of heteroscedasticity that has nothing to do with
-per-galaxy image content. Controlling for it (residualizing both
-predicted variance and squared error against `|target|` within
-quintile bins, then rank-correlating the residuals) collapses the
-correlation to 0.131 at seed 42 and 0.025 at seed 7, weak and not
-seed-consistent.
+3-proj-only losing ~0.04 R² relative to full 11-proj (0.237 vs 0.276)
+is a real, if modest, effect in favor of more projections. This is
+the properly controlled version of the comparison the earliest runs
+above got wrong. It doesn't fix the fundamental ~1500-galaxy limit,
+but real multi-view projections (as opposed to synthetic flip/rotate
+augmentation, which would add much less: a flipped image carries no
+new inclination/dust/structure information a real projection would)
+aren't worthless regularization either.
 
-**Verdict**: the network learned that extreme-target galaxies are
-harder to predict precisely, which is true but is a population-level
-fact recoverable from the target distribution alone, not a
-galaxy-specific signal the image adds. Once that's accounted for,
-there's little left, and what's left doesn't survive a reseed check
-either. This is a real result, not a null one: it fails to turn the
-target-noise hypothesis into the kind of galaxy-level evidence hoped
-for (e.g. "the model is specifically unsure about the bursty,
-low-particle-count galaxies flagged in the shot-noise check"). It
-neither confirms nor refutes target noise as the ceiling's cause,
-it just shows this particular diagnostic mostly measured something
-else. A more direct test would need to correlate predicted variance
-against actual burstiness (the multi-window sSFR comparison data)
-rather than against squared error, since squared error is exactly
-where the `|target|` confound comes from.
+**Caveat on the "pretrained (resumed)" row**: its post-resume portion
+(epochs 51-100) used `batch_size=32` instead of the original run's
+`64`, due to "Bug 1" below. Its train loss and R² for that stretch
+aren't comparable to the other rows, so we omit them; we include the
+val loss for reference only, not as a clean result.
 
-### Ceiling check: fgas and fdm (2026-09-08)
+### Ceiling check (2026-07-17)
 
-The same scalar-feature baseline the sSFR project ran, refit for the
-new targets: linear regression and gradient-boosted trees on
-`log10(Mstar)` and `Re`, no images, against the same train/val
-galaxies the CNN runs use, with the target standardized on train rows
-alone.
+Fit a plain scalar-feature baseline (linear regression and
+gradient-boosted trees on `log10(Mstar)` and `Re`, no images at all)
+against the exact same train/val galaxies as the real split
+(`splits/split_..._v1.json`), predicting the same asinh-standardized
+sSFR target:
 
-| target | features | model | train R2 | val R2 |
-|---|---|---|---|---|
-| fgas | log(Mstar) | linear | 0.0280 | 0.0048 |
-| fgas | log(Mstar) | GBR | 0.5268 | -0.1787 |
-| fgas | log(Mstar) + Re | linear | 0.0372 | 0.0144 |
-| fgas | log(Mstar) + Re | GBR | 0.5473 | 0.0563 |
-| fdm | log(Mstar) | linear | 0.1062 | 0.1036 |
-| fdm | log(Mstar) | GBR | 0.4637 | 0.1238 |
-| fdm | log(Mstar) + Re | linear | 0.1226 | 0.1295 |
-| fdm | log(Mstar) + Re | GBR | 0.5920 | 0.3539 |
+| features | model | train R² | val R² |
+|---|---|---|---|
+| log(Mstar) | linear | 0.0005 | -0.025 |
+| log(Mstar) | GBR | 0.33 | 0.030 |
+| log(Mstar) + Re | linear | 0.003 | -0.012 |
+| log(Mstar) + Re | GBR | 0.32 | 0.038 |
 
-Running this first turned out to matter for fdm. Mass and size alone
-reach val R2 0.354 there, unlike sSFR, where the same baseline got
-0.00 to 0.04 and made almost any CNN number look like real signal. A
-dark-matter-fraction model has to clear 0.354 before it demonstrates
-anything beyond a two-variable fit, which is also what makes the
-[vmap ablation][vmap-ablation]'s 0.00 so damning: without that
-channel the CNN cannot even match the trivial baseline.
+Mass and size alone explain almost nothing (val R² ≈ 0-0.04). Every
+CNN run in this doc clears R² ≈ 0.24+, several times better than the
+best trivial baseline here, so the network is extracting real
+information from the images beyond what a simple scalar summary
+could give it, likely morphology (clumpiness, concentration,
+structure), not just "how big/massive is this galaxy."
 
-Rows here are per image rather than per galaxy, so one galaxy appears
-about eleven times with identical scalars and different orientations.
-Val galaxies stay disjoint from train galaxies, so the val numbers
-remain honest.
+Inputs: only `Re` (Sersic radius) goes in as an auxiliary scalar.
+Stellar mass is not currently fed to the network (this ceiling check
+suggests it wouldn't help much on its own, since mass alone barely
+predicts sSFR here).
 
-### Head-size sweep on the new targets (2026-09-08)
+### Regressor: earliest results (pre-split-refactor, early resnet)
 
-The first use of the new `--head-size` flag, which replaced the
-hardcoded head. Every run uses `--model resnet`, the avg_sfr split
-against each target's own dataset, lr=1e-3, batch_size=32, two seeds,
-50 epochs then extended to 75 (see [epoch budget][epoch-budget]).
-Val R2 at each run's best checkpoint:
+wandb project `sfr_gallearn`, the earliest `resnet`-architecture
+regressor runs, predating the locked-test-set/split-file system and
+today's `StandardNet`/`--model standard`:
 
-| target | head | narrowest layer | head params | seed 42 | seed 7 | mean |
-|---|---|---|---|---|---|---|
-| fgas | minimal (64/32) | 32 | ~10K | 0.6228 | 0.6154 | 0.6191 |
-| fgas | tiny (32/16/8/4) | 4 | ~316K | 0.6163 | 0.6187 | 0.6175 |
-| fgas | small (128..8) | 8 | ~339K | 0.6150 | 0.6110 | 0.6130 |
-| fgas | large (2048..64) | 64 | ~2.99M | 0.6015 | 0.5701 | 0.5858 |
-| fdm | minimal | 32 | ~10K | 0.7631 | 0.7694 | 0.7663 |
-| fdm | small | 8 | ~339K | 0.7585 | 0.7728 | 0.7657 |
-| fdm | tiny | 4 | ~316K | 0.7331 | 0.7618 | 0.7475 |
-| fdm | large | 64 | ~2.99M | 0.7523 | 0.7317 | 0.7420 |
+| run | projections | lr | epochs | train loss | val R² |
+|---|---|---|---|---|---|
+| likely-thunder-55 | 3 | 1e-4 | 1000 | 0.005 | 0.237 |
+| ethereal-violet-61 | 11 | 1e-4 | 78 (killed) | 0.40 | -0.007 |
+| rare-sun-62 | 11 | 1e-3 | 100 | 0.25 | 0.232 |
 
-(fgas large seed 42 is `lively-morning-94`, reused rather than rerun.
-It ran 100 epochs and peaked at 40, inside this sweep's budget, so
-its best checkpoint is comparable.)
+At the time, the 3-vs-11-projection comparison here (0.237 vs 0.232)
+looked like projection count made no difference. We never controlled
+that comparison, though (different lr, different epoch counts).
+See the properly controlled version further down, which found a
+real, if modest, effect in the other direction. These three runs
+also predate the eval-mode dropout fix (see "Bug 2" below), which
+may explain some of their val-loss jumpiness, particularly
+`rare-sun-62`'s.
 
-**Verdict**: cutting the head from ~2.99M parameters to ~10K costs
-nothing and helps slightly. The large head posts the lowest mean on
-both targets, and comes last in three of the four target-seed
-combinations, losing only to fdm's tiny at seed 42. That is the one
-ordering here with real support. Among the three narrow heads on fgas
-the spread is 0.006, smaller than some within-config seed spreads, so
-they are indistinguishable there.
+### Classifier: generalizes fine
 
-Parameter count is not the operative variable. On fdm, tiny sits
-0.019 below minimal while carrying 32 times more parameters. What
-separates them is the narrowest layer, 4 units against 32. A
-4-dimensional bottleneck discards real information for a target this
-well determined, which fgas at 0.62 tolerates and fdm at 0.77 does
-not. The lesson is to avoid pinching the head, not to shrink it.
+wandb project `gallearn_quenched_classifier`, 3 runs (all 3
+projections, lr=1e-4):
 
-Even that reading deserves caution. tiny's gap to minimal on fdm
-swings from 0.030 at seed 42 to 0.008 at seed 7, and small's own
-seed spread is 0.014, so the direction holds on both seeds while the
-magnitude does not. This doc has declined to call weaker versions of
-that pattern a real effect before.
+| run | train acc | val acc | val F1 |
+|---|---|---|---|
+| sleek-spaceship-6 | 99.9% | ~94.5-95% | ~0.97 |
+| summer-capybara-7 | 99.8% | ~94.5-95% | ~0.97 |
+| expert-sky-8 | 99.8% | ~94.5-97% | ~0.97-0.98 |
 
-These runs also show much tighter seed variance than the sSFR sweeps
-did, roughly 0.004 against the 0.03 to 0.05 that flipped conclusions
-there. Higher-signal targets make the two-seed rule cheaper to
-satisfy, though the [dropout][head-dropout] result below shows it is
-still doing necessary work.
-
-### Epoch budget: 50 was enough (2026-09-08)
-
-The sweep ran at 50 epochs, and its first runs peaked at 36 to 40,
-close enough to the cap to raise the question. Rather than rerun,
-every run resumed from its own `checkpoint_epoch050.pt` for another
-25 epochs. `train.py` saves a final checkpoint alongside best-loss
-ones, and a resumed run restores the optimizer state and the
-shuffling generator before running
-`range(start_epoch, start_epoch + n_epochs)` in the same wandb run.
-Two loop-state pieces do not survive the resume and reset instead:
-the `ReduceLROnPlateau` bad-epoch counter and the best-val tracker
-that gates checkpoint saves. The decayed learning rate itself carries
-over inside the optimizer state, and across a single 25-epoch resume
-with `patience=5` the counter reset only pushes any further LR decay
-a few epochs later, so a resume stays close enough to an
-uninterrupted 75-epoch run for this comparison.
-
-Of twelve runs, exactly one improved. `fdm_head-tiny_seed7` moved
-from 0.7398 to 0.7618 with its best at epoch 60, then plateaued
-through 75. Every other run kept its pre-50 best, most by a wide
-margin.
-
-The one that moved is the informative one. tiny is the most
-constrained head tested, and this doc's earlier
-[capacity work][head-sweep-sfr] already found that smaller models fit
-more slowly and peak later. Without the extension, tiny's fdm result
-would have read 0.019 worse than it is, exaggerating the bottleneck
-effect the sweep above reports.
-
-### Pre-head dropout, on against off (2026-09-08)
-
-`cnn.ResNet.forward` applied p=0.5 dropout to the pooled feature
-vector, a rate that arrived by convention and had never been tested
-here. The [dropout post-mortem][pm-dropout] tested only eval-time
-behavior, with both arms training at 0.5, and its no-dropout
-comparison point was StandardNet, a different architecture. Making
-the rate a parameter allowed the clean test. fgas, two head widths,
-two seeds:
-
-| head | seed | p=0.5 | p=0.0 | change |
-|---|---|---|---|---|
-| small | 42 | 0.6150 | 0.5963 | -0.0187 |
-| small | 7 | 0.6110 | 0.6319 | +0.0209 |
-| small | mean | | | +0.0011 |
-| minimal | 42 | 0.6228 | 0.6224 | -0.0004 |
-| minimal | 7 | 0.6154 | 0.6034 | -0.0120 |
-| minimal | mean | | | -0.0062 |
-
-**Verdict**: no reproducible effect either way. Both mean changes sit
-inside the seed spread, and small's two seeds disagree in sign by
-almost equal amounts. This confirms the post-mortem's conclusion with
-better evidence than it had, and it means `head_dropout` can go to
-0.0 to drop a hyperparameter nobody needs to justify, or stay at 0.5,
-with the data indifferent.
-
-Worth recording how close this came to entering the doc as a finding.
-The seed-42 small run alone showed dropout helping by 0.019, with a
-tidy overfitting story attached, since removing dropout dropped train
-loss from 0.167 to 0.050. Seed 7 reversed it. That is the third time
-this project has caught a single-seed result that looked mechanistic
-and was not.
-
-### A failed ablation, twice (2026-09-08)
-
-The vmap ablation took three attempts, and the two failures are worth
-recording because both produced plausible-looking output.
-
-The first patched `preprocessing.sasinh_imgs_sscale_vmaps`. Training
-never calls it. `LazyGalaxyDataset.__getitem__` reimplements those
-transforms inline against precomputed stats, and
-`cnn.ResNet.scaling_function` is vestigial during training. The
-second patched `__getitem__` itself, in the parent process.
-`train.main()` builds its DataLoaders with `num_workers=4`, and macOS
-spawns workers, so each one re-imported the module and got the
-unpatched class.
-
-Both produced ablation runs bit-identical to their controls, which
-reads as a clean null result. What exposed it was the deltas being
-exactly 0.0000 across two independently seeded pairs. Genuinely null
-effects scatter around zero; exact agreement to four decimals means
-the same computation ran twice.
-
-The fix was to stop patching. `zero_channels` now lives on
-`LazyGalaxyDataset` as an instance attribute, which reaches workers
-because the DataLoader pickles the dataset, and `train.main()`
-records it in `train_config` so a run's own config states which
-channels it trained on. The verification that should have run from
-the start reads batches through a `num_workers=4` DataLoader and
-checks the channel is zero there, not in the parent.
-
-The general lesson for one-off experiment scripts here: verifying
-that a patch is installed is not the same as verifying it changes
-what the model sees.
+Only a ~5-point train/val gap. Quenched-vs-star-forming is a coarse
+binary call with a strong signal (concentration, color, smoothness);
+regression to a continuous sSFR value needs much finer-grained
+information and is a much harder small-N problem. This is why effort
+below is all on the regressor.
 
 ## Post-mortem: pretrained initialization
 
