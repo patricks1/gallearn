@@ -20,7 +20,7 @@ clean experiment per target.
 |--------|--------------|------|-------------|-------------|--------|
 | avg_sfr | ResNet | small (128..8, ~339K params) | 0.299 | 0.287 | [backbone-dropout baseline][backbone-dropout] |
 | fgas | ResNet | minimal (64/32, ~10K params) | 0.6228 | 0.6154 | [head-size sweep][head-sweep-new] |
-| fdm | ResNet | minimal (64/32, ~10K params) | 0.7631 | 0.7694 | [head-size sweep][head-sweep-new] |
+| fdm | ResNet | minimal (64/32, ~10K params) | 0.7631 | 0.7694 | [head-size sweep][head-sweep-new] (pre-logit) |
 
 ## Project status: the vmap carries the signal (2026-09-08)
 
@@ -278,6 +278,14 @@ active next steps.
 
 Everything tried so far, grouped by theme, newest first:
 
+- [Galfiltered training: first runs][galfiltered-runs]: initial
+  single-seed results on all three targets under the galfiltered
+  population; several gaps remain.
+- [SV-logit scaling for fgas: abandoned][svlogit-fgas]: exact zeros
+  map to logit ≈ -10, far from the bulk, causing metric crashes.
+- [fdm clamped predictions: switched to logit scaling][fdm-logit]:
+  plain standardization clamps fdm predictions to ~0.8-0.96; logit
+  resolves the near-1 tail.
 - [A failed ablation, twice][ablation-fail]: two monkeypatch attempts
   silently did nothing and looked like clean null results.
 - [Velocity-map ablation][vmap-ablation]: zeroing the vmap takes both
@@ -322,6 +330,115 @@ Everything tried so far, grouped by theme, newest first:
 - [Classifier: generalizes fine][classifier]: val F1 ≈ 0.97, not the
   problem. All effort below is the regressor.
 
+
+### Galfiltered training: first runs (2026-10)
+
+Before retraining, we ran the existing unfiltered models against the
+galfiltered split as a diagnostic. The fdm scatter plot from that
+cross-evaluation (run on `fdm_head-small_seed7`) gave the first
+clear view of the clamped-prediction problem, which led directly to
+the [logit transform fix][fdm-logit]. Both the fdm and fgas cross-
+evaluation scatter plots survive as `eval_regressor_galfiltered-
+split.pdf` alongside their respective checkpoints.
+
+First training runs using the galfiltered population, spanning roughly
+the same period as the fdm logit and svlogit experiments below.
+
+**avg_sfr.** These runs apply the galfiltered fdm split to the
+unfiltered avg_sfr HDF5, training on the avg_sfr values of the
+galfiltered galaxies. The split's source dataset is arbitrary;
+what matters is which galaxy IDs it selects.
+
+| head | seed 42 | seed 7 |
+|------|---------|--------|
+| minimal | 0.338 | — |
+| tiny | 0.334 | 0.336 |
+
+Minimal and tiny are indistinguishable at this noise level. Direct
+comparison to the backbone-dropout baseline (0.299/0.287) is not
+clean because the val populations differ, but the direction is
+consistent with galfiltering removing the noisiest galaxies. Still
+missing: minimal/seed 7.
+
+**fgas.** These runs also use the galfiltered fdm split against the
+galfiltered fgas HDF5; the split's source dataset is arbitrary, and
+the galaxy IDs are the same across galfiltered targets. Head=minimal,
+plain standardization, seed 42 only: val R² = 0.520. Roughly 10
+points below the unfiltered baseline (0.622/0.615), most likely
+because the galfiltered training set is smaller (~878 train
+galaxies vs ~1317 unfiltered). The svlogit galfiltered run (seed
+7) peaked at R² = 0.598 at epoch 19 before the metric crashes
+documented in [SV-logit scaling for fgas: abandoned][svlogit-fgas].
+That transient peak outpaces plain_std but is not a reliable result.
+Still missing: plain_std seed 7.
+
+**fdm.** A plain_std run (seed 7) reached epoch 3 before being
+aborted due to clamped predictions — the same problem the [logit
+transform][fdm-logit] was designed to fix. A logit_std run (head=
+small, seed 42) reached val R² = 0.445 at epoch 51. That number is
+in log-odds space and is not comparable to the unfiltered head-size
+sweep's 0.763/0.769, which were computed in plain fdm space before
+the logit transform existed. The choice of head=small also diverges
+from the [sweep's recommendation][head-sweep-new] of minimal.
+Still missing: re-run with head=minimal, seed 7, and unscaled R²
+via evaluate.py.
+
+### SV-logit scaling for fgas: abandoned (2026-10-07)
+
+The fdm logit transform ([see below][fdm-logit]) motivated trying the
+same approach for fgas. Gas fraction is also bounded in [0, 1], so
+logit similarly linearizes gradient signals near the edges. The
+obstacle is fgas's ~1.5% gas-free galaxies: their exact-zero values
+are a real physical state, and logit(0) = -inf.
+
+We used the Smithson-Verkuilen squish to bring exact zeros inside the
+logit domain without an arbitrary epsilon:
+
+    squish(x, n) = (x * (n - 1) + 0.5) / n
+
+With n equal to the dataset image count (~12,650 for galfiltered with
+11 projections), squish maps 0 to ~4e-5. logit(4e-5) ≈ -10, roughly
+7 units below the bulk of fgas values in logit space (logit(0.06) ≈
+-2.75). That gap dominated MSE loss and produced periodic metric
+crashes in val metrics.
+
+The root cause is structural. The SV squish was designed for rating
+scales where every respondent is expected to land somewhere interior;
+it maps the extreme rating to a near-boundary value, not a genuine
+boundary event. Applied to a physical quantity with a real mass point
+at exactly zero, it pushes the zero stratum to a near-boundary
+position the formula never intended to handle. No squish parameter
+resolves this: smaller n pulls gas-free galaxies further from -inf
+but compresses the whole (0, 1) interval and reduces resolution
+everywhere else.
+
+Reverted to plain standardization. The galfiltered fgas distribution
+is narrow (median 0.06, max ~0.20) with no structural pile-up near
+either edge, so plain standardization is appropriate and the exact
+zeros are well-behaved under it.
+
+### fdm clamped predictions: switched to logit scaling (2026-10-06)
+
+Early scatter plots for fdm under plain standardization showed
+predictions clamped to roughly 0.8-0.96. The model compressed most
+of the distribution into a narrow band rather than resolving the
+near-1 tail. The cause is the distribution's shape: the galfiltered
+fdm dataset is unimodal and concentrated near 1 (range 0.33-0.999,
+median 0.90). In linear space, fdm=0.96 and fdm=0.99 differ by only
+0.03, so MSE gradient on the dense near-1 tail is negligible. The
+optimizer regresses to the bulk rather than fitting the tail.
+
+Switched `FdmTarget` to logit + standardize. Logit spreads the
+near-1 interval dramatically: logit(0.96) ≈ 3.18, logit(0.999) ≈
+6.91, roughly a 48x expansion of the key range. The optimizer now has
+a well-resolved gradient signal throughout the distribution.
+Predictions unscale through sigmoid, guaranteeing outputs in (0, 1).
+
+No full re-sweep was run after this change, so the [head-size
+sweep][head-sweep-new]'s fdm numbers (val R² 0.763/0.769) are
+pre-logit results under plain standardization. Training metrics
+during a logit-transform run are in log-odds units and are not
+directly comparable to those baselines without unscaling first.
 
 ### A failed ablation, twice (2026-09-08)
 
@@ -432,8 +549,8 @@ Val R2 at each run's best checkpoint:
 | fgas | small (128..8) | 8 | ~339K | 0.6150 | 0.6110 | 0.6130 |
 | fgas | large (2048..64) | 64 | ~2.99M | 0.6015 | 0.5701 | 0.5858 |
 | fdm | minimal | 32 | ~10K | 0.7631 | 0.7694 | 0.7663 |
-| fdm | small | 8 | ~339K | 0.7585 | 0.7728 | 0.7657 |
 | fdm | tiny | 4 | ~316K | 0.7331 | 0.7618 | 0.7475 |
+| fdm | small | 8 | ~339K | 0.7585 | 0.7728 | 0.7657 |
 | fdm | large | 64 | ~2.99M | 0.7523 | 0.7317 | 0.7420 |
 
 (fgas large seed 42 is `lively-morning-94`, reused rather than rerun.
@@ -1416,4 +1533,7 @@ out flat regardless of galaxy properties, that argues against it.
 [epoch-budget]: #epoch-budget-50-was-enough-2026-09-08
 [head-dropout]: #pre-head-dropout-on-against-off-2026-09-08
 [ablation-fail]: #a-failed-ablation-twice-2026-09-08
+[galfiltered-runs]: #galfiltered-training-first-runs-2026-10
+[svlogit-fgas]: #sv-logit-scaling-for-fgas-abandoned-2026-10-07
+[fdm-logit]: #fdm-clamped-predictions-switched-to-logit-scaling-2026-10-06
 [head-sweep-sfr]: #capacity-sweep-head-width-2026-07-19
