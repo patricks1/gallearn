@@ -807,7 +807,7 @@ def main(model_path, split_file_path, output_path=None, n_samples=10):
 
     if output_path is None:
         run_dir = os.path.join(
-            gallearn.config.config['gallearn_paths']['project_data_dir'],
+            gallearn.config.config['gallearn_paths']['models_dir'],
             run_name,
         )
         os.makedirs(run_dir, exist_ok=True)
@@ -895,7 +895,7 @@ if __name__ == '__main__':
         default=None,
         help=(
             'Path to save the report PDF. Defaults to'
-            ' <project_data_dir>/<run_name>/eval_<task>.pdf'
+            ' <models_dir>/<run_name>/eval_<task>.pdf'
         ),
     )
     parser.add_argument(

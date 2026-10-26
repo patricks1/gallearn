@@ -76,6 +76,11 @@ def test_main_runs_a_fresh_regressor_epoch(
         'project_data_dir',
         str(tmp_path),
     )
+    monkeypatch.setitem(
+        config.config['gallearn_paths'],
+        'models_dir',
+        str(tmp_path),
+    )
     monkeypatch.setattr(dataset_lock, 'HASHES_DIR', tmp_path / 'hashes')
 
     dataset_fname = 'ds.h5'

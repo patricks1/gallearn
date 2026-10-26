@@ -31,7 +31,7 @@ model = cnn.load_net(run_name)
 
 def show_filters():
     results_dir = os.path.join(
-        config.config['gallearn_paths']['project_data_dir'], run_name,
+        config.config['gallearn_paths']['models_dir'], run_name,
     )
     if not os.path.isdir(results_dir):
         os.mkdir(results_dir)

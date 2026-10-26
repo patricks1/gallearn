@@ -98,6 +98,14 @@ def _ensure_user_config_locked(config_path):
             ):
         changed = True
 
+    if ensure_key(
+                config,
+                'models_dir',
+                os.path.join(home, env_prefix + 'data'),
+                ensure_exists=True
+            ):
+        changed = True
+
     if not config.has_option(f'{__package__}_paths', 'firebox_data_dir'):
         config.set(
             f'{__package__}_paths',

@@ -31,7 +31,7 @@ class Net(nn.Module):
         super().__init__()
 
         self.state_path = os.path.join(
-            config.config[f'{__package__}_paths']['project_data_dir'],
+            config.config[f'{__package__}_paths']['models_dir'],
             run_name + '_state.tar'
         )
 
@@ -49,7 +49,7 @@ class Net(nn.Module):
         self.scaling_function = scaling_function
         self.features = {}
 
-        self.run_dir = os.path.join(config.config[f'{__package__}_paths']['project_data_dir'], self.run_name)
+        self.run_dir = os.path.join(config.config[f'{__package__}_paths']['models_dir'], self.run_name)
         self.states_dir = os.path.join(self.run_dir, 'states')
         if not os.path.isdir(self.run_dir):
             os.mkdir(self.run_dir)
@@ -184,7 +184,7 @@ class Net(nn.Module):
             'dataset': self.dataset,
             'scaling_function': self.scaling_function
         }
-        with open(os.path.join(config.config[f'{__package__}_paths']['project_data_dir'], self.run_name + '_args' + '.pkl'), 
+        with open(os.path.join(config.config[f'{__package__}_paths']['models_dir'], self.run_name + '_args' + '.pkl'),
                   'wb') as f:
             pickle.dump(args, f, protocol=pickle.HIGHEST_PROTOCOL)
         return None
@@ -457,7 +457,7 @@ class ResNet(nn.Module):
         self.run_name = run_name
 
         self.run_dir = os.path.join(
-            config.config[f'{__package__}_paths']['project_data_dir'],
+            config.config[f'{__package__}_paths']['models_dir'],
             run_name
         )
 

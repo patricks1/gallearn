@@ -22,7 +22,9 @@ dependencies:
   - cython
   - wandb
   - rich
+  - pip
   - pip:
     - astrophot==0.17.3
     - git+https://github.com/courtk32/FIRE_studio.git
-    - git+https://github.com/courtk32/mockobservation-tools.git
+    - git+https://github.com/patricks1/mockobservation-tools.git@v1.1.2b1
+    - git+https://github.com/Bullock-Group-UC-Irvine/shared-analysis-tools.git

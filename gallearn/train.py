@@ -1224,7 +1224,7 @@ def main(
     train_config['run_name'] = run_name
 
     run_dir = os.path.join(
-        config.config['gallearn_paths']['project_data_dir'],
+        config.config['gallearn_paths']['models_dir'],
         run_name,
     )
     os.makedirs(run_dir, exist_ok=True)
