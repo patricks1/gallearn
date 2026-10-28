@@ -1453,8 +1453,15 @@ def main(
     print('Starting training...\n')
     # higher_is_better is set per-task above: True for classifier (F1),
     # False for regressor (loss). It controls which direction counts as
-    # an improvement when deciding whether to save a checkpoint.
-    if higher_is_better:
+    # an improvement when deciding whether to save a checkpoint. On a
+    # resume, seed best_metric from best.pt so the resumed run only
+    # overwrites best.pt if it genuinely beats the run's all-time best
+    # (not just the final checkpoint, which may be worse than best.pt).
+    best_symlink = os.path.join(run_dir, 'best.pt')
+    if checkpoint is not None and os.path.exists(best_symlink):
+        best_ckpt = load_checkpoint(best_symlink)
+        best_metric = best_ckpt['val_metrics'][best_metric_key]
+    elif higher_is_better:
         best_metric = 0.0
     else:
         best_metric = float('inf')
