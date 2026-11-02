@@ -178,13 +178,17 @@ if __name__ == '__main__':
     parser.add_argument(
         '--head-size',
         type=str,
-        choices=sorted(gallearn.train.HEAD_PRESETS),
+        choices=['tiny', 'minimal', 'small', 'medium', 'large'],
         default=None,
         help=(
             'Only affects --model resnet: names cnn.ResNet\'s'
-            ' fully-connected head shape (default: small). Must be'
-            ' omitted when --resume is given, since a resumed run'
-            ' reuses the checkpoint\'s own recorded head_size'
+            ' fully-connected head shape (default: small), listed'
+            ' smallest to largest. tiny=[32,16,8,4],'
+            ' minimal=[64,32], small=[128,64,32,16,8],'
+            ' medium=[512,256,128,64,32],'
+            ' large=[2048,1024,256,128,64]. Must be omitted when'
+            ' --resume is given, since a resumed run reuses the'
+            ' checkpoint\'s own recorded head_size'
         ),
     )
 
