@@ -153,6 +153,20 @@ class TargetSpec:
         target can have a long thin tail (gas fraction does) and
         still read better fixed-point here, since its bulk sits at
         ordinary values like 0.06, not vanishingly small ones.
+    resid_scaled_xlim : (float, float) or None
+        Fixed (lo, hi) x-limits for the left (training-space) panel
+        of evaluate.py's residuals histogram. None lets matplotlib
+        auto-range to whatever one run's residuals span. Set it so
+        every run on this target shares one x-axis and their
+        residual histograms line up when compared side by side. The
+        value is a union across the runs it should cover, including
+        both standardizations when a target trains more than one way
+        (plain vs logit standardize to comparable unit-variance
+        residuals, so one range fits both).
+    resid_intuitive_xlim : (float, float) or None
+        The same, for the right (intuitive-space) panel, in the
+        units to_intuitive produces (raw target units for fgas/fdm,
+        dex for sSFR).
     """
 
     name = None
@@ -162,6 +176,8 @@ class TargetSpec:
     unit = ''
     plot_scale = 'linear'
     sci_notation = False
+    resid_scaled_xlim = None
+    resid_intuitive_xlim = None
     intuitive_label = None
     # Unit label for the space that to_intuitive maps raw target
     # values into. None means the raw target units are already
@@ -324,6 +340,13 @@ class FgasTarget(TargetSpec):
     axis_label = 'gas fraction'
     unit = ''
     plot_scale = 'log'
+    # Union residual ranges across the fgas_head-minimal seed42 runs:
+    # the unfiltered run on its own split and cross-evaluated on the
+    # galfiltered split, plus galfiltered_seed42. The unfiltered run
+    # sets both extremes. Plain standardization throughout, so the
+    # scaled range needs no second method.
+    resid_scaled_xlim = (-4.778368949890137, 1.7829281091690063)
+    resid_intuitive_xlim = (-0.6865020394325256, 0.2561509609222412)
 
     _METHODS = {
         'plain_std': (_plain_std_scale, _plain_std_unscale),
@@ -388,6 +411,12 @@ class FdmTarget(TargetSpec):
     axis_label = 'dark-matter fraction'
     unit = ''
     plot_scale = 'logit'
+    # Union residual ranges across the fdm_head-minimal runs:
+    # seed7 on its own split and cross-evaluated on the galfiltered
+    # split, plus galfiltered_seed7 and galfiltered_logit_seed7. The
+    # scaled range spans both the plain and logit standardizations.
+    resid_scaled_xlim = (-3.309326171875, 4.830678462982178)
+    resid_intuitive_xlim = (-0.8943828344345093, 0.7601457834243774)
 
     _METHODS = {
         'plain_std': (_plain_std_scale, _plain_std_unscale),

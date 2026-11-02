@@ -10,22 +10,73 @@ Slides
    intuitive space).
 3+. Sample val images (RGB composites) with true/predicted labels.
 
+The report goes in its own directory, named after the pdf's base
+name and nested inside the run's model directory. Alongside the pdf,
+the regressor writes standalone PNGs of each individual panel (the
+scatter plot, and each residuals histogram), not the whole figure,
+so single panels can be dropped into slides or papers.
+
 Read-only: no optimizer, no training loop, no wandb.
 """
 import argparse
 import json
 import os
+import pathlib
 import re
 
 import h5py
 import matplotlib.backends.backend_pdf
 import matplotlib.pyplot as plt
 import matplotlib.ticker
+import matplotlib.transforms
 import numpy as np
 import torch
 import torch.nn as nn
 
 import gallearn
+
+
+def build_report_basename(run_name, note=None):
+    """
+    Build the eval report's base name from the run name and an
+    optional note.
+
+    The base name is the run name prefixed with 'eval_', for example
+    'eval_fdm_head-minimal_seed7'. A note, when the caller supplies
+    one, goes just before the run name's `_seed<N>` token, so run name
+    'fdm_head-minimal_seed7' with note 'galfiltered-split' yields
+    'eval_fdm_head-minimal_galfiltered-split_seed7'. When the run name
+    has no `_seed<N>` token, the note goes on the end instead. This
+    base name serves as both the report directory's name and the pdf's
+    stem.
+    """
+    core = run_name
+    if note:
+        match = re.search(r'_seed\d+', run_name)
+        if match:
+            core = (
+                run_name[:match.start()]
+                + '_' + note
+                + run_name[match.start():]
+            )
+        else:
+            core = run_name + '_' + note
+    return 'eval_' + core
+
+
+def save_axes_png(fig, axes, path):
+    """
+    Save a PNG cropped to just `axes` (a list of Axes), with their
+    labels, ticks, and titles, rather than the whole multi-panel
+    figure. Pass a panel's colorbar axes alongside it to keep the
+    colorbar in the crop.
+    """
+    fig.canvas.draw()
+    bbox = matplotlib.transforms.Bbox.union(
+        [ax.get_tightbbox() for ax in axes]
+    )
+    extent = bbox.transformed(fig.dpi_scale_trans.inverted())
+    fig.savefig(path, bbox_inches=extent, dpi=150)
 
 
 def infer_head_widths(model_state_dict):
@@ -331,7 +382,8 @@ def plot_regression_scatter(
         masses,
         run_name,
         tgt_type,
-        pdf):
+        pdf,
+        png_dir=None):
     """Add a ground-truth-vs-prediction scatter plot page, in raw
     target units, color-coded by stellar mass. The title shows two
     metric lines: one in the scaled space that runs through the model
@@ -346,6 +398,9 @@ def plot_regression_scatter(
     tgt_type : str
         Which target these values belong to. See
         gallearn.target_specs.REGISTRY.
+    png_dir : str or pathlib.Path, optional
+        Directory to also write a standalone scatter.png of just this
+        panel (with its colorbar). None skips the PNG.
     """
     spec = gallearn.target_specs.get(tgt_type)
     train_method = target_stats.get('method', 'scaled')
@@ -445,7 +500,11 @@ def plot_regression_scatter(
         c=np.log10(masses[has_mass]),
         cmap='viridis',
     )
-    fig.colorbar(sc, ax=ax, label=r'log$_{10}$($M_\star$ / M$_\odot$)')
+    cbar = fig.colorbar(
+        sc,
+        ax=ax,
+        label=r'log$_{10}$($M_\star$ / M$_\odot$)',
+    )
     if n_no_mass > 0:
         ax.legend(loc='upper left', fontsize='small')
     lo = min(y_true.min(), y_pred.min())
@@ -526,6 +585,12 @@ def plot_regression_scatter(
     )
     fig.tight_layout()
     pdf.savefig(fig)
+    if png_dir is not None:
+        save_axes_png(
+            fig,
+            [ax, cbar.ax],
+            os.path.join(png_dir, 'scatter.png'),
+        )
     plt.close(fig)
     print('Metrics ({0}): {1}'.format(train_method, metrics))
     print('Metrics ({0}): {1}'.format(int_label, int_metrics))
@@ -537,7 +602,8 @@ def plot_residuals_hist(
         target_stats,
         run_name,
         tgt_type,
-        pdf):
+        pdf,
+        png_dir=None):
     """Add a two-panel residuals histogram page.
 
     Left panel: residuals in the training space (pred minus true,
@@ -550,11 +616,21 @@ def plot_residuals_hist(
     (identity) every point is finite, so ground-truth zeros for fgas
     appear naturally.
 
+    Each panel's x-limits come from the target's spec
+    (resid_scaled_xlim, resid_intuitive_xlim) when it sets them, so
+    every run on that target shares one axis and their histograms
+    line up across runs. A spec that leaves them None keeps the old
+    per-run auto-range.
+
     Parameters
     ----------
     tgt_type : str
         Which target these values belong to. See
         gallearn.target_specs.REGISTRY.
+    png_dir : str or pathlib.Path, optional
+        Directory to also write standalone residuals_scaled.png and
+        residuals_intuitive.png of the two panels separately. None
+        skips the PNGs.
     """
     spec = gallearn.target_specs.get(tgt_type)
     train_method = target_stats.get('method', 'scaled')
@@ -583,7 +659,15 @@ def plot_residuals_hist(
 
     fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(10, 4))
 
-    ax_left.hist(scaled_resid, bins=50, color='steelblue', alpha=0.8)
+    ax_left.hist(
+        scaled_resid,
+        bins=50,
+        range=spec.resid_scaled_xlim,
+        color='steelblue',
+        alpha=0.8,
+    )
+    if spec.resid_scaled_xlim is not None:
+        ax_left.set_xlim(spec.resid_scaled_xlim)
     ax_left.axvline(0, color='k', linestyle='--', linewidth=1)
     ax_left.set_xlabel(
         'Residual {0} ({1} space)'.format(
@@ -605,7 +689,15 @@ def plot_residuals_hist(
         '  [{0} dropped]'.format(n_int_dropped)
         if n_int_dropped > 0 else ''
     )
-    ax_right.hist(int_resid, bins=50, color='steelblue', alpha=0.8)
+    ax_right.hist(
+        int_resid,
+        bins=50,
+        range=spec.resid_intuitive_xlim,
+        color='steelblue',
+        alpha=0.8,
+    )
+    if spec.resid_intuitive_xlim is not None:
+        ax_right.set_xlim(spec.resid_intuitive_xlim)
     ax_right.axvline(0, color='k', linestyle='--', linewidth=1)
     ax_right.set_xlabel(
         'Residual {0}{1} ({2})'.format(
@@ -628,6 +720,17 @@ def plot_residuals_hist(
     fig.suptitle('{0}  --  residuals'.format(run_name))
     fig.tight_layout()
     pdf.savefig(fig)
+    if png_dir is not None:
+        save_axes_png(
+            fig,
+            [ax_left],
+            os.path.join(png_dir, 'residuals_scaled.png'),
+        )
+        save_axes_png(
+            fig,
+            [ax_right],
+            os.path.join(png_dir, 'residuals_intuitive.png'),
+        )
     plt.close(fig)
 
 
@@ -792,7 +895,12 @@ def add_sample_slides(
             plt.close(fig)
 
 
-def main(model_path, split_file_path, output_path=None, n_samples=10):
+def main(
+        model_path,
+        split_file_path,
+        output_path=None,
+        n_samples=10,
+        note=None):
     checkpoint = gallearn.train.load_checkpoint(model_path)
     run_name = checkpoint['train_config']['run_name']
 
@@ -805,13 +913,24 @@ def main(model_path, split_file_path, output_path=None, n_samples=10):
     device = gallearn.train.get_device()
     outputs, targets = run_inference(model, val_dataset, device)
 
+    # The report lives in its own directory, named after the pdf's
+    # base name, nested inside the run's model directory. An explicit
+    # output_path overrides that (and ignores note); its parent then
+    # holds the panel PNGs.
     if output_path is None:
-        run_dir = os.path.join(
-            gallearn.config.config['gallearn_paths']['models_dir'],
-            run_name,
+        basename = build_report_basename(run_name, note)
+        report_dir = (
+            pathlib.Path(
+                gallearn.config.config['gallearn_paths']['models_dir']
+            )
+            / run_name
+            / basename
         )
-        os.makedirs(run_dir, exist_ok=True)
-        output_path = os.path.join(run_dir, 'eval_{0}.pdf'.format(task))
+        output_path = report_dir / '{0}.pdf'.format(basename)
+    else:
+        output_path = pathlib.Path(output_path)
+        report_dir = output_path.parent
+    report_dir.mkdir(parents=True, exist_ok=True)
 
     if task == 'regressor' and outputs.shape[1] > 1:
         # A heteroscedastic head (see docs/status.md) outputs
@@ -827,7 +946,8 @@ def main(model_path, split_file_path, output_path=None, n_samples=10):
         )
         outputs = outputs[:, 0:1]
 
-    with matplotlib.backends.backend_pdf.PdfPages(output_path) as pdf:
+    with matplotlib.backends.backend_pdf.PdfPages(
+            str(output_path)) as pdf:
         if task == 'classifier':
             plot_confusion_matrix(outputs, targets, run_name, pdf)
         elif task == 'regressor':
@@ -843,6 +963,7 @@ def main(model_path, split_file_path, output_path=None, n_samples=10):
                 run_name,
                 tgt_type,
                 pdf,
+                png_dir=report_dir,
             )
             plot_residuals_hist(
                 outputs,
@@ -851,6 +972,7 @@ def main(model_path, split_file_path, output_path=None, n_samples=10):
                 run_name,
                 tgt_type,
                 pdf,
+                png_dir=report_dir,
             )
         else:
             raise ValueError('Unknown task {0!r}'.format(task))
@@ -894,8 +1016,22 @@ if __name__ == '__main__':
         type=str,
         default=None,
         help=(
-            'Path to save the report PDF. Defaults to'
-            ' <models_dir>/<run_name>/eval_<task>.pdf'
+            'Path to save the report PDF. Overrides the default'
+            ' naming (and --note), and writes the panel PNGs beside'
+            ' it. Defaults to'
+            ' <models_dir>/<run_name>/<basename>/<basename>.pdf,'
+            ' where <basename> is the run name with --note applied.'
+        ),
+    )
+    parser.add_argument(
+        '--note',
+        type=str,
+        default=None,
+        help=(
+            'Optional tag inserted into the report base name, just'
+            ' before the run name\'s _seed<N> token (e.g.'
+            ' "galfiltered-split"). Appended when the run name has'
+            ' no such token. Ignored when --output is given.'
         ),
     )
     parser.add_argument(
@@ -906,4 +1042,10 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    main(args.model, args.split, args.output, args.n_samples)
+    main(
+        args.model,
+        args.split,
+        args.output,
+        args.n_samples,
+        note=args.note,
+    )
