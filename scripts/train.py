@@ -79,11 +79,22 @@ if __name__ == '__main__':
         type=str,
         default=None,
         help=(
-            'Name for this training run (default: timestamp,'
-            ' or a wandb-generated name if --wandb y). Must be'
-            ' omitted when --resume is given, since a resumed'
-            ' run reuses the checkpoint\'s own recorded'
-            ' run_name'
+            'Name for this training run. Default: a composed'
+            ' <tgt>_<head>[_<name-note>]_seed<N>. Must be omitted'
+            ' when --resume is given, since a resumed run reuses the'
+            ' checkpoint\'s own recorded run_name'
+        ),
+    )
+    parser.add_argument(
+        '--name-note',
+        type=str,
+        default=None,
+        help=(
+            'A tag to drop into the composed run name, just before'
+            ' the seed (e.g. "galfiltered-split" ->'
+            ' <tgt>_<head>_galfiltered-split_seed<N>). Affects only'
+            ' the run name. Ignored when --run-name sets the name'
+            ' outright, and must be omitted when --resume is given.'
         ),
     )
     parser.add_argument(
@@ -214,6 +225,7 @@ if __name__ == '__main__':
         model_type=args.model,
         split_file_path=args.split,
         run_name=args.run_name,
+        note=args.name_note,
         n_epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,

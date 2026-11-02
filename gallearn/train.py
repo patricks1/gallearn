@@ -10,7 +10,6 @@ And two model architectures:
 - standard: StandardNet, a torchvision ResNet-18 backbone
 - resnet: custom ResNet from cnn.py
 """
-import datetime
 import json
 import os
 
@@ -640,11 +639,51 @@ def weights_init(module):
             module.bias.data.fill_(0.0)
 
 
+def build_run_name(tgt_type, model_type, head_size, seed, note=None):
+    """
+    Compose a fresh run's name from its defining pieces, as
+    <tgt>_<head>[_<note>]_seed<N>. The head token is head-<head_size>
+    for a resnet preset, or the model type for a headless standard
+    model. An optional note, such as 'galfiltered-split', goes just
+    before the seed, matching how scripts/evaluate.py names its
+    reports. An explicit --run-name bypasses this.
+    """
+    head_token = (
+        'head-{0}'.format(head_size) if head_size is not None
+        else model_type
+    )
+    parts = [tgt_type, head_token]
+    if note:
+        parts.append(note)
+    parts.append('seed{0}'.format(seed))
+    return '_'.join(parts)
+
+
+def _versioned_run_name(run_name, models_dir):
+    """
+    Return run_name, or its first free <run_name>_v<N> (N counting
+    from 2) when models_dir already holds a directory by that name.
+    A rerun of the same composed name then lands beside the earlier
+    run instead of overwriting its checkpoints.
+    """
+    if not os.path.exists(os.path.join(models_dir, run_name)):
+        return run_name
+    version = 2
+    while os.path.exists(
+            os.path.join(
+                models_dir,
+                '{0}_v{1}'.format(run_name, version),
+            )):
+        version += 1
+    return '{0}_v{1}'.format(run_name, version)
+
+
 def main(
         task=None,
         model_type=None,
         split_file_path=None,
         run_name=None,
+        note=None,
         n_epochs=100,
         batch_size=None,
         lr=None,
@@ -691,12 +730,17 @@ def main(
         gallearn.dataset_lock.lock_dataset (e.g. via
         scripts/lock_dataset.py); main() raises otherwise.
     run_name : str, optional
-        Name for this run. If None on a fresh run, uses a timestamp
-        (or wandb's generated name, if wandb_mode='y'). Must be
+        Name for this run. If None on a fresh run, build_run_name
+        composes one from the target, head, note, and seed. Must be
         omitted when resume_from is given, since a resumed run
         reuses the checkpoint's own recorded run_name (needed to
         find its run directory and, if wandb_mode='r', to resume the
         same wandb run rather than starting a new one).
+    note : str, optional
+        A tag for the composed run name (see build_run_name), such as
+        'galfiltered-split'. Only used when run_name is None on a
+        fresh run; must be omitted when resume_from or an explicit
+        run_name is given.
     n_epochs : int
         Number of epochs to train, counting from start_epoch (1 on a
         fresh run, checkpoint['epoch'] + 1 on a resumed run). Unlike
@@ -900,6 +944,13 @@ def main(
                 ' recorded run_name, both to find its run directory'
                 ' and, if it had one, to resume the same wandb run.'
                 ' Omit --run-name when passing --resume.'
+            )
+        if note is not None:
+            raise ValueError(
+                'note has no effect when resume_from is given, since'
+                ' it only shapes a fresh run\'s composed run_name and'
+                ' a resumed run reuses the checkpoint\'s own. Omit'
+                ' --name-note when passing --resume.'
             )
         if wandb_mode is not None:
             raise ValueError(
@@ -1164,6 +1215,37 @@ def main(
     print('Target: {0}'.format(tgt_type))
     train_config['tgt_type'] = tgt_type
 
+    # Compose a fresh run's name now that the target is known, so a
+    # resumed run keeps its recorded name while a fresh one gets a
+    # descriptive <tgt>_<head>[_<note>]_seed<N> rather than a bare
+    # timestamp. An explicit run_name (set above, or restored from a
+    # checkpoint on resume) passes through untouched.
+    if run_name is None:
+        run_name = build_run_name(
+            tgt_type,
+            model_type,
+            head_size,
+            seed,
+            note=note,
+        )
+    # A fresh run whose composed (or explicit) name already has a
+    # directory lands in a _v<N> sibling instead of overwriting the
+    # earlier run's checkpoints. A resumed run keeps its name and
+    # reuses its own directory, so it skips this.
+    if checkpoint is None:
+        models_dir = config.config['gallearn_paths']['models_dir']
+        versioned = _versioned_run_name(run_name, models_dir)
+        if versioned != run_name:
+            print(
+                'WARNING: a run directory named {0!r} already exists.'
+                ' Saving this run as {1!r} to avoid overwriting it.'
+                ' Pass --run-name or --name-note for a different'
+                ' name, or --resume to continue the existing'
+                ' run.'.format(run_name, versioned)
+            )
+            run_name = versioned
+    train_config['run_name'] = run_name
+
     # Task-specific settings
     if task == 'classifier':
         loss_fn = nn.BCEWithLogitsLoss()
@@ -1181,12 +1263,12 @@ def main(
             "got '{0}'".format(task)
         )
 
-    # Initialize wandb if requested (before setting run_name
-    # so wandb can generate one). One project per target keeps
-    # gas-fraction, dark-matter-fraction, and future targets' runs
-    # from mixing into sSFR's history; sfr/avg_sfr keep the original
-    # project name rather than move into the new per-target scheme,
-    # so past sSFR runs stay where they already are.
+    # Initialize wandb if requested. run_name is already composed
+    # above, so wandb adopts it rather than generating its own. One
+    # project per target keeps gas-fraction, dark-matter-fraction, and
+    # future targets' runs from mixing into sSFR's history; sfr/avg_sfr
+    # keep the original project name rather than move into the new
+    # per-target scheme, so past sSFR runs stay where they already are.
     if wandb_mode in ('y', 'r'):
         import wandb
         if task == 'classifier':
@@ -1214,14 +1296,6 @@ def main(
                 config=train_config,
             )
             train_config['wandb_run_id'] = wandb.run.id
-        if run_name is None:
-            run_name = wandb.run.name
-
-    if run_name is None:
-        run_name = datetime.datetime.now().strftime(
-            '%Y%m%d_%H%M%S'
-        )
-    train_config['run_name'] = run_name
 
     run_dir = os.path.join(
         config.config['gallearn_paths']['models_dir'],

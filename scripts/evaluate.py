@@ -36,29 +36,29 @@ import torch.nn as nn
 import gallearn
 
 
-def build_report_basename(run_name, note=None):
+def build_report_basename(run_name, seed, note=None):
     """
     Build the eval report's base name from the run name and an
     optional note.
 
     The base name is the run name prefixed with 'eval_', for example
     'eval_fdm_head-minimal_seed7'. A note, when the caller supplies
-    one, goes just before the run name's `_seed<N>` token, so run name
-    'fdm_head-minimal_seed7' with note 'galfiltered-split' yields
-    'eval_fdm_head-minimal_galfiltered-split_seed7'. When the run name
-    has no `_seed<N>` token, the note goes on the end instead. This
-    base name serves as both the report directory's name and the pdf's
-    stem.
+    one, goes just before the run name's seed token, so run name
+    'fdm_head-minimal_seed7' with seed 7 and note 'galfiltered-split'
+    yields 'eval_fdm_head-minimal_galfiltered-split_seed7'. The seed
+    comes from the checkpoint rather than a pattern match on the name,
+    so a literal '_seed<seed>' locates the split point exactly. When
+    the run name lacks that token (or seed is None, on an older
+    checkpoint that never recorded one), the note goes on the end
+    instead. This base name serves as both the report directory's name
+    and the pdf's stem.
     """
     core = run_name
     if note:
-        match = re.search(r'_seed\d+', run_name)
-        if match:
-            core = (
-                run_name[:match.start()]
-                + '_' + note
-                + run_name[match.start():]
-            )
+        token = '_seed{0}'.format(seed) if seed is not None else None
+        idx = run_name.rfind(token) if token else -1
+        if idx != -1:
+            core = run_name[:idx] + '_' + note + run_name[idx:]
         else:
             core = run_name + '_' + note
     return 'eval_' + core
@@ -918,7 +918,11 @@ def main(
     # output_path overrides that (and ignores note); its parent then
     # holds the panel PNGs.
     if output_path is None:
-        basename = build_report_basename(run_name, note)
+        basename = build_report_basename(
+            run_name,
+            checkpoint['train_config'].get('seed'),
+            note,
+        )
         report_dir = (
             pathlib.Path(
                 gallearn.config.config['gallearn_paths']['models_dir']
