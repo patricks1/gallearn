@@ -1,5 +1,6 @@
 if __name__ == '__main__':
     import argparse
+    import os
 
     import gallearn
 
@@ -51,7 +52,8 @@ if __name__ == '__main__':
         type=str,
         default=None,
         help=(
-            'Path to an HDF5 dataset. Trains against this'
+            'HDF5 dataset filename (resolved against'
+            ' project_data_dir in config). Trains against this'
             ' dataset instead of the one --split records. Use'
             ' it to run an existing split\'s galaxy partition'
             ' against a dataset holding a different target,'
@@ -219,6 +221,13 @@ if __name__ == '__main__':
     )
 
     args = parser.parse_args()
+
+    if args.dataset is not None and os.sep in args.dataset:
+        parser.error(
+            '--dataset must be a bare filename, not a path.'
+            ' Pass just the filename; the script resolves it'
+            ' against project_data_dir in config.'
+        )
 
     use_scheduler = (
         None if args.no_scheduler is None else not args.no_scheduler
