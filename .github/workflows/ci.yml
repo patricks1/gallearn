@@ -23,10 +23,23 @@ jobs:
         # mockobservation-tools, uci_tools) now installs cleanly under
         # normal build isolation, so the old strip-and-
         # --no-build-isolation workaround is gone.
-        conda env update --file environment.yml --name base
+        #
+        # conda env create/update ignore the configured solver and always
+        # use the classic SAT solver, which explodes on this unpinned env:
+        # after conda-forge shipped a new torch stack on 2026-10-29 it
+        # churned ~7h then got OOM-killed, never reaching pytest. mamba
+        # resolves the same env in seconds, so install mamba into base and
+        # build the gallearn env (environment.yml's own name) with it.
+        # Building a separate env instead of updating base also leaves
+        # base's python untouched, avoiding a post-link churn when
+        # environment.yml pins python 3.10.
+        conda install -n base -y -c conda-forge mamba
+        mamba env create -f environment.yml
     - name: Lint with flake8
       run: |
-        conda install flake8
+        # flake8 is a static linter (no imports), so it lives in base, not
+        # the gallearn env. Install it with mamba for a fast solve.
+        mamba install -n base -y flake8
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 
@@ -34,9 +47,10 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Install gallearn
       run: |
-        pip install .
+        # Install into the gallearn env, where the project's deps live.
+        conda run -n gallearn pip install .
     - name: Test with pytest
       env:
         GALLEARN_CONFIG: .github/config_ci.ini
       run: |
-        pytest
+        conda run --no-capture-output -n gallearn pytest
