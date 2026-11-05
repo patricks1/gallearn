@@ -76,7 +76,10 @@ def save_axes_png(fig, axes, path):
         [ax.get_tightbbox() for ax in axes]
     )
     extent = bbox.transformed(fig.dpi_scale_trans.inverted())
-    fig.savefig(path, bbox_inches=extent, dpi=150)
+    # Pad the crop by 0.1 inch on all sides. get_tightbbox is exactly
+    # tight, so without this margin the y-axis label sits flush against
+    # the left edge and anti-aliasing can shave it off.
+    fig.savefig(path, bbox_inches=extent.padded(0.1), dpi=150)
 
 
 def infer_head_widths(model_state_dict):
