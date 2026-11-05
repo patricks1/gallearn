@@ -258,6 +258,9 @@ class SsfrTarget(TargetSpec):
     sci_notation = True
     intuitive_label = 'dex'
     stretch = 1.e11
+    # Union residual ranges across avg_sfr_head-minimal_seed42 and
+    # avg_sfr_head-small_galfiltered_seed7.
+    resid_intuitive_xlim = (-1.3874, 1.6768)
 
     _METHODS = {
         'asinh_std': (_asinh_std_scale, _asinh_std_unscale),
