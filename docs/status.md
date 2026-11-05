@@ -4,13 +4,23 @@ Living summary of where this project stands. See [sSFR experiments](status_sfr.m
 
 ## Current flagship models
 
-Best val R² at best checkpoint, two seeds, from the most recent clean experiment per target.
+Best val R² and intuitive-space MAE at best checkpoint, two seeds, from the most recent clean experiment per target. MAE units differ by target (dex for avg_sfr, raw gas/dark-matter fraction for fgas/fdm), so MAE does not compare across targets. The galfiltered and unfiltered rows are different val populations and do not compare either; note that the galfiltered models reach lower R² yet smaller MAE, the variance artifact described in the [fgas and fdm log](status_fgas_fdm.md).
 
-| target | architecture | head | val R² (s42) | val R² (s7) | source |
-|--------|--------------|------|-------------|-------------|--------|
-| avg_sfr | ResNet | minimal (64/32, ~321K params) | 0.302 | 0.284 | [capacity sweep][head-sweep-sfr] |
-| fgas | ResNet | minimal (64/32, ~10K params) | 0.6228 | 0.6154 | [head-size sweep][head-sweep-new] |
-| fdm | ResNet | minimal (64/32, ~10K params) | 0.7631 | 0.7694 | [head-size sweep][head-sweep-new] (pre-logit) |
+**Galfiltered.** fdm R² is raw-space (scaled logit R² is not comparable).
+
+| target | architecture | head | R² (s42) | R² (s7) | MAE (s42) | MAE (s7) | source |
+|--------|--------------|------|----------|---------|-----------|-----------|--------|
+| avg_sfr | ResNet | small (128..8) | 0.361 | 0.392 | 0.192 dex | 0.189 dex | [galfiltered avg_sfr][galfiltered-avgsfr] |
+| fgas | ResNet | minimal (64/32) | 0.520 | 0.509 | 0.0175 | 0.0176 | [galfiltered fgas/fdm][galfiltered-runs] |
+| fdm | ResNet | minimal (64/32), logit | 0.233 | 0.147 | 0.0358 | 0.0355 | [galfiltered fgas/fdm][galfiltered-runs] |
+
+**Unfiltered.**
+
+| target | architecture | head | R² (s42) | R² (s7) | MAE (s42) | MAE (s7) | source |
+|--------|--------------|------|----------|---------|-----------|-----------|--------|
+| avg_sfr | ResNet | minimal (64/32, ~321K params) | 0.302 | 0.284 | 0.235 dex | 0.240 dex | [capacity sweep][head-sweep-sfr] |
+| fgas | ResNet | minimal (64/32, ~10K params) | 0.6228 | 0.6154 | 0.0367 | 0.0359 | [head-size sweep][head-sweep-new] |
+| fdm | ResNet | minimal (64/32, ~10K params) | 0.7631 | 0.7694 | 0.0641 | 0.0658 | [head-size sweep][head-sweep-new] (pre-logit) |
 
 ## Project status: the vmap carries the signal (2026-09-08)
 
@@ -49,3 +59,5 @@ If fdm survives kinematics-only and dies on mask-only, the dark-matter result is
 [backbone-dropout]: status_sfr.md#dropout-placement-dropout-in-the-backbone-2026-07-20
 [head-sweep-new]: status_fgas_fdm.md#head-size-sweep-on-the-new-targets-2026-09-08
 [head-sweep-sfr]: status_sfr.md#capacity-sweep-head-width-2026-07-19
+[galfiltered-avgsfr]: status_sfr.md#galfiltered-training-avg_sfr-2026-10
+[galfiltered-runs]: status_fgas_fdm.md#galfiltered-training-first-runs-2026-10

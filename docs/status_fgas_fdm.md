@@ -7,7 +7,7 @@ Living document tracking experiments on gas fraction and dark-matter fraction. S
 Everything tried so far, newest first:
 
 - [Galfiltered training: first runs][galfiltered-runs]: cross-evaluation of unfiltered models on the galfiltered split, then galfiltered training results for fgas and fdm; several gaps remain.
-- [SV-logit scaling for fgas: abandoned][svlogit-fgas]: exact zeros map to logit ≈ -10, far from the bulk, causing metric crashes.
+- [SV-logit scaling for fgas: abandoned][svlogit-fgas]: exact zeros map to logit ≈ -10, far from the bulk, causing metric crashes; and in raw fgas units its best checkpoint underperforms plain_std, so the scaled-space R² peak was an artifact.
 - [fdm clamped predictions: switched to logit scaling][fdm-logit]: plain standardization clamps fdm predictions to ~0.8-0.96; logit resolves the near-1 tail.
 - [A failed ablation, twice][ablation-fail]: two monkeypatch attempts silently did nothing and looked like clean null results.
 - [Velocity-map ablation][vmap-ablation]: zeroing the vmap takes both targets to R² ≈ 0. The photometry carries nothing on its own. See [status.md][vmap-status] for the full writeup.
@@ -35,24 +35,31 @@ We ran these first galfiltered-population training runs over roughly the same pe
 
 **fgas.** These runs use the galfiltered fdm split against the galfiltered fgas HDF5. All plain standardization.
 
-| head | val R² (s42) | val R² (s7) |
-|------|-------------|------------|
-| minimal | 0.520 | — |
+R² is in scaled space; it equals raw-space R² here because plain standardization is linear. MAE is in raw fgas units (intuitive space), from evaluate.py.
 
-Roughly 10 points below the unfiltered baseline (0.622/0.615), most likely because the galfiltered training set is smaller (~878 train galaxies vs ~1317 unfiltered). The svlogit galfiltered run (seed 7) peaked at R² = 0.598 at epoch 19 before the metric crashes documented in [SV-logit scaling for fgas: abandoned][svlogit-fgas]; that transient peak outpaces plain_std but is not a reliable result. Still missing: plain_std seed 7.
+| head | R² (s42) | R² (s7) | R² (mean) | MAE (s42) | MAE (s7) | MAE (mean) |
+|------|----------|---------|-----------|-----------|----------|------------|
+| minimal | 0.520 | 0.509 | 0.515 | 0.0175 | 0.0176 | 0.0175 |
+| small | 0.515 | 0.522 | 0.519 | 0.0174 | 0.0172 | 0.0173 |
+| medium | 0.513 | 0.526 | 0.520 | 0.0180 | 0.0177 | 0.0179 |
 
-**fdm.** Both plain_std runs peaked at epoch 3-5 with clamped predictions, the problem the [logit transform][fdm-logit] fixes, and degraded from there. The two R² columns below are the same statistic computed in different spaces, not a rescaling of one number: the scaled-space column scores each run in its own training space (log-odds for logit_std, standardized fdm for plain_std), while the raw-space column scores it in raw fdm units via evaluate.py. Only the raw-space column compares across scalings. For plain_std the two agree, since standardization is a linear transform and R² is invariant to it.
+The galfiltered R² (~0.51-0.52 across heads) sits roughly 10 percentage points below the unfiltered fgas R² (0.622/0.615). As with fdm, that gap is most likely a variance artifact rather than worse predictions, since galfiltering plausibly narrows the fgas target range and so shrinks the Var(y) denominator of R². Raw MAE is the fairer cross-population comparison. The svlogit galfiltered run (seed 7) reached a scaled-space R² of 0.598 at epoch 19, which looks like it beats plain_std but does not. That 0.598 is in sv_logit_std space, the same logit inflation that makes fdm's scaled R² misleading. Evaluated in raw fgas units the same checkpoint scores R² 0.448 and MAE 0.0188, both worse than every plain_std head (0.515-0.520 R², 0.017-0.018 MAE). The svlogit peak was a scaling artifact, not a real gain, quite apart from the metric crashes that led to [abandoning it][svlogit-fgas]. The head sweep is essentially flat. All three heads land at mean R² 0.515-0.520 with raw MAE ~0.017-0.018 gas-fraction units, small and medium edging minimal by less than the seed spread. Head size barely matters for galfiltered fgas.
 
-| head | scaling | seed | R² (scaled space) | R² (raw space) |
-|------|---------|------|-------------------|----------------|
-| minimal | logit_std | 7 | 0.448 | 0.147 |
-| small | logit_std | 42 | 0.445 | 0.233 |
-| minimal | plain_std | 7 | 0.273 | 0.273 |
-| small | plain_std | 7 | 0.272 | 0.272 |
+**fdm.** Both plain_std runs peaked at epoch 3-5 with clamped predictions, the problem the [logit transform][fdm-logit] fixes, and degraded from there. The scaled-space and raw-space R² columns are the same statistic computed in different spaces, not a rescaling of one number: the scaled-space columns score each run in its own training space (log-odds for logit_std, standardized fdm for plain_std), while the raw-space columns score it in raw fdm units via evaluate.py, which also produces the raw-unit MAE. Only the raw-space columns compare across scalings. For plain_std the two agree, since standardization is a linear transform and R² is invariant to it.
 
-The two logit_std runs are nearly tied in log-odds space (0.448 vs 0.445) yet split widely in raw space (0.147 vs 0.233). That gap is the logit transform's doing: the sigmoid inversion expands fdm's packed near-1 tail, so a small log-odds difference on the extreme galaxies maps to a large raw-space one. R² in log-odds space is a poor proxy for R² in raw space, and "best checkpoint by logit val loss" need not be the best by raw-space R².
+Columns: scaled-space R² (sc.R²) and raw-space R² each per seed with mean, then raw-unit MAE per seed with mean. Means are shown only where both seeds exist.
 
-The raw-space R² values look alarmingly low next to the unfiltered head-size sweep's 0.763/0.769, but that comparison is invalid. R² normalizes by the target's variance, and galfiltering collapses the fdm spread by removing the entire low-fdm tail: the unfiltered population runs 0.001 to 0.999 with std 0.27, while the galfiltered val set runs 0.53 to 0.998 with std 0.076, a roughly 13x smaller variance (0.0057 vs 0.073). Since R² = 1 - RMSE²/Var(y), that shrunken denominator drives R² down even when predictions are accurate. Backing the raw-space R² out into raw fdm units, the galfiltered logit models reach RMSE about 0.066-0.070, roughly half the unfiltered model's 0.131. In absolute fdm units the galfiltered models predict more accurately, not less; the low R² reflects the narrower target range alone. Compare fdm models across the filtered and unfiltered populations by raw RMSE or MAE, not R². Still missing: minimal head logit_std seed 42, and small head logit_std seed 7. The unfiltered head sweep only tested minimal as part of the sSFR work; a galfiltered head sweep for fgas and fdm (small, medium, etc.) has not been run and may be worth doing, particularly given that small outperforms minimal on galfiltered avg_sfr.
+| head | scaling | sc.R² (s42) | sc.R² (s7) | sc.R² (mean) | raw R² (s42) | raw R² (s7) | raw R² (mean) | MAE (s42) | MAE (s7) | MAE (mean) |
+|------|---------|-------------|------------|--------------|--------------|-------------|---------------|-----------|-----------|------------|
+| minimal | logit_std | 0.461 | 0.448 | 0.455 | 0.233 | 0.147 | 0.190 | 0.0358 | 0.0355 | 0.0356 |
+| small | logit_std | 0.445 | 0.479 | 0.462 | 0.233 | 0.240 | 0.236 | 0.0355 | 0.0357 | 0.0356 |
+| medium | logit_std | 0.438 | 0.473 | 0.456 | 0.217 | 0.221 | 0.219 | 0.0373 | 0.0349 | 0.0361 |
+| minimal | plain_std | — | 0.273 | — | — | 0.273 | — | — | 0.0388 | — |
+| small | plain_std | — | 0.272 | — | — | 0.272 | — | — | 0.0370 | — |
+
+Two of the logit_std runs show the distortion plainly, nearly tied in log-odds space (0.448 vs 0.445) yet split widely in raw space (0.147 vs 0.233). That gap is the logit transform's doing: the sigmoid inversion expands fdm's packed near-1 tail, so a small log-odds difference on the extreme galaxies maps to a large raw-space one. R² in log-odds space is a poor proxy for R² in raw space, and "best checkpoint by logit val loss" need not be the best by raw-space R².
+
+The raw-space R² values look alarmingly low next to the unfiltered head-size sweep's 0.763/0.769, but that comparison is invalid. R² normalizes by the target's variance, and galfiltering collapses the fdm spread by removing the entire low-fdm tail. The unfiltered population runs 0.001 to 0.999 with std 0.27, while the galfiltered val set runs 0.53 to 0.998 with std 0.076, a roughly 13x smaller variance (0.0057 vs 0.073). Since R² = 1 - RMSE²/Var(y), that shrunken denominator drives R² down even when predictions are accurate. Backing the raw-space R² out into raw fdm units, the galfiltered logit models reach RMSE about 0.066-0.070, roughly half the unfiltered model's 0.131. In absolute fdm units the galfiltered models predict more accurately, not less; the low R² reflects the narrower target range alone. Compare fdm models across the filtered and unfiltered populations by raw RMSE or MAE, not R². The logit_std sweep now covers minimal, small, and medium at both seeds. By raw R² the order is small (0.236) > medium (0.219) > minimal (0.190), but minimal's mean is dragged down by a wide seed spread (0.233 at seed 42 versus 0.147 at seed 7) while small and medium stay tight across seeds. By raw MAE minimal and small tie (0.0356) with medium marginally worse (0.0361). Small is the most consistent performer across both metrics and both seeds, echoing the galfiltered avg_sfr result that the small head suits the filtered population.
 
 ### SV-logit scaling for fgas: abandoned (2026-10-07)
 
@@ -67,6 +74,8 @@ With n equal to the dataset image count (~12,650 for galfiltered with 11 project
 The root cause is structural. The SV squish was designed for rating scales where every respondent is expected to land somewhere interior; it maps the extreme rating to a near-boundary value, not a genuine boundary event. Applied to a physical quantity with a real mass point at exactly zero, it pushes the zero stratum to a near-boundary position the formula never intended to handle. No squish parameter resolves this: smaller n pulls gas-free galaxies further from -inf but compresses the whole (0, 1) interval and reduces resolution everywhere else.
 
 Reverted to plain standardization. The galfiltered fgas distribution is narrow (median 0.06, max ~0.20) with no structural pile-up near either edge, so plain standardization is appropriate and the exact zeros are well-behaved under it.
+
+A later check confirmed that reverting to plain standardization gave up no real performance. The best svlogit checkpoint (seed 7, epoch 19) posts a scaled-space R² of 0.598, which once looked like it beat plain_std. That number is in sv_logit_std space, though, not comparable to plain_std's. Evaluated in raw fgas units the same checkpoint scores R² 0.448 and MAE 0.0188, both worse than every galfiltered plain_std head (R² 0.515-0.520, MAE 0.017-0.018). So even at its pre-crash peak, svlogit offered no real gain over plain standardization. The apparent 0.598 advantage was a scaling artifact of the same kind that inflates fdm's logit-space R².
 
 ### fdm clamped predictions: switched to logit scaling (2026-10-06)
 

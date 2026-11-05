@@ -76,13 +76,14 @@ Everything tried so far, grouped by theme, newest first:
 
 These runs apply the galfiltered fdm split to the unfiltered avg_sfr HDF5, training on the avg_sfr values of the galfiltered galaxies. The split's source dataset is arbitrary; what matters is which galaxy IDs it selects.
 
-| head | val R² (s42) | val R² (s7) |
-|------|-------------|------------|
-| small | 0.361 | — |
-| minimal | 0.338 | — |
-| tiny | 0.334 | 0.336 |
+| head | val R² (s42) | val R² (s7) | mean R² |
+|------|-------------|------------|---------|
+| medium | 0.348 | 0.334 | 0.341 |
+| small | 0.361 | 0.392 | 0.377 |
+| minimal | 0.338 | 0.367 | 0.353 |
+| tiny | 0.334 | 0.336 | 0.335 |
 
-Small beats minimal and tiny by a real margin (0.361 vs 0.338/0.334). Minimal and tiny are indistinguishable with each other. This is a different pattern from the [head-size sweep on fgas and fdm][head-sweep-new], where minimal beat or tied small on both targets. Direct comparison to the backbone-dropout baseline (0.299/0.287) is not clean because the val populations differ, but the direction is consistent with galfiltering removing the noisiest galaxies. Still missing: small/seed 7, minimal/seed 7. The small > minimal reversal relative to the unfiltered sweep (where they tie) raises the question of whether a medium galfiltered run would improve further; see the [fgas and fdm experiment log][fgas-fdm-log] for the analogous open question on those targets.
+I had originally only run tiny up to small. Then the monotonic increase in performance as I increased capacity made me it worth while to explore whether that trend continued into medium. However, small is the clear winner here, beating every other head on both seeds (0.361/0.392, mean 0.377) ahead of minimal (0.353), medium (0.341), and tiny (0.335). The ordering holds per-seed, not just in the mean, so it reads as a real effect rather than seed noise. The medium runs answer the open question the earlier single-seed table raised: going bigger than small does not help, medium lands below both small and minimal. This also differs from the unfiltered avg_sfr [capacity sweep][head-sweep] (small and minimal tied) and the fgas/fdm [head sweep][head-sweep-new] (minimal beat or tied small), so on galfiltered avg_sfr specifically the small head is genuinely the sweet spot. Seed 7 runs noticeably higher than seed 42 for the two strongest heads (small +0.031, minimal +0.029), a seed spread worth remembering. Direct comparison to the unfiltered backbone-dropout baseline (0.299/0.287) is not clean because the val populations differ, but the direction is consistent with galfiltering removing the noisiest galaxies.
 
 ### Heteroscedastic regression head (2026-07-20)
 
