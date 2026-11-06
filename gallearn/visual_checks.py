@@ -518,6 +518,120 @@ def plot_mass_target_distributions(
     plt.show()
 
 
+def plot_scaling_distribution(checkpoint_path, n_bins=50):
+    """
+    Plot target distributions before and after scaling, using a saved
+    checkpoint's fitted scaling statistics.
+
+    The function draws two panels side by side. Panel (a) shows the
+    raw target distribution. Panel (b) shows the training-space
+    distribution after spec.scale(). Each panel draws one histogram
+    line for the training split and one for the validation split, using
+    the train_idxs and val_idxs the checkpoint saved at training time.
+    Those indices already exclude invalid rows (e.g. quenched galaxies
+    for sSFR), so they exactly reproduce the population the model saw.
+
+    Parameters
+    ----------
+    checkpoint_path : str or pathlib.Path
+        Path to a checkpoint saved by scripts/train.py. The checkpoint
+        must carry train_idxs, val_idxs, target_stats, and
+        train_config with keys dataset and tgt_type.
+    n_bins : int, optional
+        Number of histogram bins per panel. Default 50.
+
+    Returns
+    -------
+    None
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import torch
+
+    from . import preprocessing
+    from . import target_specs
+
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    tc = checkpoint['train_config']
+    tgt_type = tc['tgt_type']
+    target_stats = checkpoint['target_stats']
+
+    d, N, _ = preprocessing.load_metadata(tc['dataset'])
+    spec = target_specs.get(tgt_type)
+
+    train_idxs = checkpoint['train_idxs']
+    val_idxs = checkpoint['val_idxs']
+
+    ys = torch.FloatTensor(d['ys_sorted'][:N])
+
+    def _split_data(idxs):
+        raw = ys[idxs]
+        scaled = spec.scale(raw, target_stats).numpy().flatten()
+        return raw.numpy().flatten(), scaled
+
+    train_raw, train_scl = _split_data(train_idxs)
+    val_raw, val_scl = _split_data(val_idxs)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    ax_int, ax_scl = axes
+
+    int_edges = np.histogram_bin_edges(
+        np.concatenate([train_raw, val_raw]),
+        bins=n_bins,
+    )
+    scl_edges = np.histogram_bin_edges(
+        np.concatenate([train_scl, val_scl]),
+        bins=n_bins,
+    )
+
+    groups = [
+        (train_raw, train_scl,
+         'train (N={0})'.format(len(train_idxs))),
+        (val_raw, val_scl,
+         'val (N={0})'.format(len(val_idxs))),
+    ]
+    kw = dict(density=True, histtype='step', linewidth=2)
+    for i_vals, s_vals, label in groups:
+        ax_int.hist(i_vals, bins=int_edges, label=label, **kw)
+        ax_scl.hist(s_vals, bins=scl_edges, label=label, **kw)
+
+    unit_suffix = ' ({0})'.format(spec.unit) if spec.unit else ''
+    raw_xlabel = '{0}{1}'.format(spec.axis_label, unit_suffix)
+
+    method = target_stats.get('method', 'scaled')
+    scl_xlabel = '{0} ({1})'.format(spec.axis_label, method)
+
+    ax_int.set_xlabel(raw_xlabel)
+    ax_int.set_ylabel('Density')
+    ax_int.set_title('{0} raw'.format(spec.axis_label))
+    ax_int.legend()
+
+    ax_scl.set_xlabel(scl_xlabel)
+    ax_scl.set_ylabel('Density')
+    ax_scl.set_title('{0} training space'.format(spec.axis_label))
+    ax_scl.legend()
+
+    ax_scl_int = ax_scl.twiny()
+    x0, x1 = ax_scl.get_xlim()
+    ax_scl_int.set_xlim(x0, x1)
+    visible_ticks = np.array(
+        [t for t in ax_scl.get_xticks() if t>=x0 and t<=x1]
+    )
+    scl_int_labs = spec.unscale(
+        torch.FloatTensor(visible_ticks.reshape(-1, 1)),
+        target_stats
+    ).numpy().flatten()
+    ax_scl_int.set_xticks(visible_ticks)
+    ax_scl_int.set_xlabel(raw_xlabel)
+    fmt = '{:.1e}' if spec.sci_notation else '{:.3f}'
+    ax_scl_int.set_xticklabels(
+        [fmt.format(x) for x in scl_int_labs]
+    )
+
+    fig.tight_layout()
+    plt.show()
+
+
 def load_gal_for_imshow(gal_id, img_orientation, d):
     """Extract and preprocess one galaxy image for matplotlib imshow.
 
