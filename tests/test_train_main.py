@@ -16,9 +16,11 @@ import numpy as np
 import pytest
 
 import h5py
+import torch
 
 from gallearn import config
 from gallearn import dataset_lock
+from gallearn import preprocessing
 from gallearn import train
 
 
@@ -116,3 +118,5 @@ def test_main_runs_a_fresh_regressor_epoch(
         (tmp_path / run_name).glob('checkpoint_epoch*.pt')
     )
     assert len(checkpoints) == 1
+    checkpoint = torch.load(checkpoints[0], weights_only=False)
+    assert checkpoint['scaling_stretch'] == preprocessing.IMAGE_STRETCH

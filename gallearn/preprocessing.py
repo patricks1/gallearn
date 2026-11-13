@@ -4,6 +4,9 @@ import time
 import math
 import torch
 
+# Asinh stretch for image bands. Checkpoints record the value a run used.
+IMAGE_STRETCH = 1.e-5
+
 
 @contextlib.contextmanager
 def _open_hdf5(path):
@@ -121,7 +124,7 @@ def load_metadata(fname):
 def compute_scaling_stats(
         hdf5_path,
         indices,
-        stretch=1.e-5,
+        stretch=IMAGE_STRETCH,
         chunk_size=256):
     '''
     Compute per-channel mean and std for transformed X data without loading
@@ -144,7 +147,9 @@ def compute_scaling_stats(
         indexing requires strictly increasing indices, so this function
         sorts a local copy; it doesn't touch the caller's own tensor.
     stretch : float, optional
-        Asinh stretch factor applied to image channels 0-2. Default 1e-5.
+        Asinh stretch factor applied to image channels 0-2. Defaults to
+        gallearn.preprocessing.IMAGE_STRETCH, the stretch new training
+        runs use.
     chunk_size : int, optional
         Number of samples to load per iteration. Default 256.
 
@@ -312,7 +317,7 @@ class LazyGalaxyDataset(torch.utils.data.Dataset):
             self._file.close()
 
 
-def sasinh_imgs_sscale_vmaps(X, stretch=1.e-5):
+def sasinh_imgs_sscale_vmaps(X, stretch=IMAGE_STRETCH):
     import torch
     X = X.detach().clone()
     
@@ -329,7 +334,12 @@ def sasinh_imgs_sscale_vmaps(X, stretch=1.e-5):
     return X
 
 
-def std_asinh(X, stretch=1.e-5, return_distrib=False, means=None, stds=None):
+def std_asinh(
+        X,
+        stretch=IMAGE_STRETCH,
+        return_distrib=False,
+        means=None,
+        stds=None):
     '''
     Apply asinh to the dataset with the given stretch and standardize the
     result along axis 1 e.g. the color channels of a
@@ -340,7 +350,9 @@ def std_asinh(X, stretch=1.e-5, return_distrib=False, means=None, stds=None):
     X: torch.tensor, shape (N_obs, N_chan, h, w)
         Dataset to process.
     stretch: float
-        The value by which to multiply X before applying asinh.
+        The value by which to multiply X before applying asinh. Defaults to
+        gallearn.preprocessing.IMAGE_STRETCH, the image-band stretch. Pass a
+        target's own stretch when scaling targets.
     return_distrib: bool, default False
         If True, return the means and standard deviations of each channel so
         the user can apply them later without recalculating

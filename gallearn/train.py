@@ -348,7 +348,6 @@ def create_model(
             backbone = torchvision.models.resnet18()
         model = cnn.StandardNet(
             lr=lr,
-            momentum=0.9,
             backbone=backbone,
             dataset=dataset,
             in_channels=4,
@@ -372,7 +371,6 @@ def create_model(
             run_name,
             N_out_channels=1,
             lr=lr,
-            momentum=0.9,
             resblock=cnn.BasicResBlock,
             n_blocks_list=[1, 1, 1, 1],
             dataset=dataset,
@@ -517,6 +515,7 @@ def save_checkpoint(
         train_generator_state,
         scaling_means,
         scaling_stds,
+        scaling_stretch,
         target_stats=None):
     """
     Save a training checkpoint.
@@ -557,6 +556,10 @@ def save_checkpoint(
     scaling_stds : torch.Tensor
         Per-channel image scaling stds, fit on train_idxs alone.
         Same as scaling_means: a resumed run reuses this directly.
+    scaling_stretch : float
+        The asinh stretch applied to image channels 0-2 before fitting
+        scaling_means and scaling_stds. Resumed runs and evaluation
+        reuse it, so they apply the transform these stats were fit on.
     target_stats : dict, optional
         Target scaling stats for regressor, fit on train_idxs
         alone. The target's spec decides the keys (sSFR stores
@@ -579,6 +582,7 @@ def save_checkpoint(
         'train_generator_state': train_generator_state,
         'scaling_means': scaling_means,
         'scaling_stds': scaling_stds,
+        'scaling_stretch': scaling_stretch,
     }
     if target_stats is not None:
         checkpoint['target_stats'] = target_stats
@@ -1341,7 +1345,6 @@ def main(
     # via a chunked pass over HDF5 that never loads the full image
     # tensor.
     print('Computing scaling stats...')
-    stretch = 1.e-5
     if checkpoint is not None:
         targets, valid_indices, target_stats = prepare_targets(
             task,
@@ -1353,6 +1356,9 @@ def main(
         )
         scaling_means = checkpoint['scaling_means']
         scaling_stds = checkpoint['scaling_stds']
+        # Literal, not IMAGE_STRETCH: every checkpoint saved before this
+        # key existed used 1e-5, whatever the constant says now.
+        stretch = checkpoint.get('scaling_stretch', 1.e-5)
     else:
         targets, valid_indices, target_stats = prepare_targets(
             task,
@@ -1361,10 +1367,12 @@ def main(
             train_idxs,
             tgt_type,
         )
+        stretch = preprocessing.IMAGE_STRETCH
         scaling_means, scaling_stds = (
             preprocessing.compute_scaling_stats(
                 hdf5_path,
                 train_idxs,
+                stretch=stretch,
             )
         )
 
@@ -1672,6 +1680,7 @@ def main(
                 train_generator.get_state(),
                 scaling_means,
                 scaling_stds,
+                stretch,
                 target_stats=target_stats,
             )
             update_best_symlink(run_dir, path)
@@ -1695,6 +1704,7 @@ def main(
         train_generator.get_state(),
         scaling_means,
         scaling_stds,
+        stretch,
         target_stats=target_stats,
     )
     print(

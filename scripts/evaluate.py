@@ -251,7 +251,8 @@ def load_val_dataset(checkpoint, split_file_path):
         val_idxs,
         checkpoint['scaling_means'],
         checkpoint['scaling_stds'],
-        1.e-5,
+        # Checkpoints saved before this key existed all used 1e-5.
+        checkpoint.get('scaling_stretch', 1.e-5),
         targets[val_idxs],
         rs[val_idxs],
     )

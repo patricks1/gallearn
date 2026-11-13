@@ -36,7 +36,10 @@ def make_embedding(data):
     import torch
 
     reducer = umap.UMAP(n_neighbors=5)
-    X = preprocessing.std_asinh(data['X'], stretch=1.e-5)
+    X = preprocessing.std_asinh(
+        data['X'],
+        stretch=preprocessing.IMAGE_STRETCH,
+    )
     X = torch.flatten(X, start_dim=1)
     reducer.fit(X)
     embedding = reducer.transform(X)
@@ -95,7 +98,10 @@ def plt_interactive_umap():
     output_notebook()
 
     d = preprocessing.load_data('gallearn_data_128x128_3proj_wsat_sfr_tgt.h5')
-    images = preprocessing.std_asinh(d['X'], stretch=1.e-5)
+    images = preprocessing.std_asinh(
+        d['X'],
+        stretch=preprocessing.IMAGE_STRETCH,
+    )
     sfrs = d['ys_sorted']
     scaled_sfrs = preprocessing.std_asinh(sfrs, 1.e11)
 

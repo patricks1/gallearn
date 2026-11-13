@@ -17,13 +17,12 @@ def test_StandardNet():
     resnet18 = torchvision.models.resnet18()
     classifier = gallearn.cnn.StandardNet(
         lr=1.e-4,
-        momentum=0.5,
         backbone=resnet18,
         dataset='test_data',
         in_channels=X.shape[1]
     )
 
-    X_scaled = classifier.scaling_function(X)
+    X_scaled = gallearn.preprocessing.sasinh_imgs_sscale_vmaps(X)
 
     classifier.init_optimizer()
     y_pred = classifier(X_scaled, rs)

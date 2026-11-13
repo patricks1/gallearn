@@ -19,10 +19,8 @@ class Net(nn.Module):
                 N_groups,
                 N_out_channels,
                 lr,
-                momentum,
                 run_name,
                 dataset,
-                scaling_function
             ):
         from . import config
         import os
@@ -42,11 +40,9 @@ class Net(nn.Module):
         self.conv_channels = conv_channels
         self.N_groups = N_groups
         self.N_out_channels = N_out_channels
-        self.momentum = momentum
         self.lr = lr
         self.run_name = run_name
         self.dataset = dataset
-        self.scaling_function = scaling_function
         self.features = {}
 
         self.run_dir = os.path.join(config.config[f'{__package__}_paths']['models_dir'], self.run_name)
@@ -179,10 +175,8 @@ class Net(nn.Module):
             'N_groups': self.N_groups,
             'N_out_channels': self.N_out_channels,
             'lr': self.lr,
-            'momentum': self.momentum,
             'net_type': 'original',
             'dataset': self.dataset,
-            'scaling_function': self.scaling_function
         }
         with open(os.path.join(config.config[f'{__package__}_paths']['models_dir'], self.run_name + '_args' + '.pkl'),
                   'wb') as f:
@@ -328,20 +322,38 @@ def _make_backbone_feature_extractor(module):
 
 
 class StandardNet(nn.Module):
+    '''
+    Network built on an off-the-shelf torchvision backbone (train.py passes
+    ResNet-18), as opposed to the hand-built cnn.ResNet. The loss that train.py
+    pairs it with decides whether it acts as a classifier or a regressor; the
+    class itself is the same either way. It ends in a fixed 256-128-64-1 head
+    with BatchNorm, unlike cnn.ResNet's configurable head_widths, and forward()
+    concatenates rs (each galaxy's unscaled Sersic radius Re) to the pooled
+    features before the head.
+
+    Parameters
+    ----------
+        lr: learning rate for the Adam optimizer init_optimizer builds.
+        backbone: a torchvision model. __init__ strips its final pooling and
+            fully connected layers so it outputs feature maps.
+        dataset: filename of the dataset the model trains on.
+        in_channels: input channel count. When given, __init__ replaces the
+            backbone's first conv layer to accept that many channels.
+        pretrained: True when backbone carries ImageNet weights. The new
+            first conv then keeps the pretrained filters for the channels
+            they already cover and initializes only the extra channel from
+            scratch.
+    '''
     def __init__(
                 self,
                 lr,
-                momentum,
                 backbone,
                 dataset,
                 in_channels=None,
                 pretrained=False,
             ):
-        from . import preprocessing
-
         super().__init__()
         self.lr = lr
-        self.momentum = momentum
         self.backbone = backbone
         self.dataset = dataset
 
@@ -356,8 +368,6 @@ class StandardNet(nn.Module):
                     self.backbone, in_channels,
                     preserve_weights=pretrained):
                 raise ValueError("No Conv2d layer found in backbone")
-
-        self.scaling_function = preprocessing.sasinh_imgs_sscale_vmaps
 
         self.head = nn.Sequential(
             nn.LazyLinear(256),
@@ -400,7 +410,6 @@ class ResNet(nn.Module):
                 run_name,
                 N_out_channels=None,
                 lr=None,
-                momentum=None,
                 resblock=None,
                 n_blocks_list=None,
                 dataset=None,
@@ -439,7 +448,6 @@ class ResNet(nn.Module):
         '''
         from . import config
         import os
-        from . import preprocessing
 
         super().__init__()
 
@@ -463,7 +471,6 @@ class ResNet(nn.Module):
 
         self.resblock = resblock
         self.N_out_channels = N_out_channels
-        self.momentum = momentum
         self.lr = lr
         self.n_blocks_list = n_blocks_list
         self.out_channels_list = out_channels_list
@@ -474,7 +481,6 @@ class ResNet(nn.Module):
 
         self.last_epoch = 0
 
-        self.scaling_function = preprocessing.sasinh_imgs_sscale_vmaps
         self.activation_module = nn.ReLU
 
         self.features = {}
@@ -569,8 +575,8 @@ class ResNet(nn.Module):
         """
         Args:
             x: input image tensor
-            rs: auxiliary redshift scalar tensor, concatenated to the
-                pooled feature vector before the head
+            rs: each galaxy's Sersic effective radius Re, unscaled,
+                concatenated to the pooled feature vector before the head
         Returns:
             x: target prediction
         """
