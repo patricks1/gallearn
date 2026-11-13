@@ -8,19 +8,19 @@ Best val R² and intuitive-space MAE at best checkpoint, two seeds, from the mos
 
 **Galfiltered.** fdm R² is raw-space (scaled logit R² is not comparable).
 
-| target | architecture | head | R² (s42) | R² (s7) | MAE (s42) | MAE (s7) | source |
-|--------|--------------|------|----------|---------|-----------|-----------|--------|
-| avg_sfr | ResNet | small (128..8) | 0.361 | 0.392 | 0.192 dex | 0.189 dex | [galfiltered avg_sfr][galfiltered-avgsfr] |
-| fgas | ResNet | minimal (64/32) | 0.520 | 0.509 | 0.0175 | 0.0176 | [galfiltered fgas/fdm][galfiltered-runs] |
-| fdm | ResNet | minimal (64/32), logit | 0.233 | 0.147 | 0.0358 | 0.0355 | [galfiltered fgas/fdm][galfiltered-runs] |
+| target | architecture | head | R² (s42) | R² (s7) | R² (mean) | MAE (s42) | MAE (s7) | MAE (mean) | source |
+|--------|--------------|------|----------|---------|-----------|-----------|----------|------------|--------|
+| avg_sfr | ResNet | small (128..8) | 0.361 | 0.392 | 0.377 | 0.192 dex | 0.189 dex | 0.190 dex | [galfiltered avg_sfr][galfiltered-avgsfr] |
+| fgas | ResNet | minimal (64/32) | 0.520 | 0.509 | 0.515 | 0.0175 | 0.0176 | 0.0176 | [galfiltered fgas/fdm][galfiltered-runs] |
+| fdm | ResNet | minimal (64/32), logit | 0.233 | 0.147 | 0.190 | 0.0358 | 0.0355 | 0.0357 | [galfiltered fgas/fdm][galfiltered-runs] |
 
 **Unfiltered.**
 
-| target | architecture | head | R² (s42) | R² (s7) | MAE (s42) | MAE (s7) | source |
-|--------|--------------|------|----------|---------|-----------|-----------|--------|
-| avg_sfr | ResNet | minimal (64/32, ~321K params) | 0.302 | 0.284 | 0.235 dex | 0.240 dex | [capacity sweep][head-sweep-sfr] |
-| fgas | ResNet | minimal (64/32, ~10K params) | 0.6228 | 0.6154 | 0.0367 | 0.0359 | [head-size sweep][head-sweep-new] |
-| fdm | ResNet | minimal (64/32, ~10K params) | 0.7631 | 0.7694 | 0.0641 | 0.0658 | [head-size sweep][head-sweep-new] (pre-logit) |
+| target | architecture | head | R² (s42) | R² (s7) | R² (mean) | MAE (s42) | MAE (s7) | MAE (mean) | source |
+|--------|--------------|------|----------|---------|-----------|-----------|----------|------------|--------|
+| avg_sfr | ResNet | minimal (64/32, ~321K params) | 0.302 | 0.284 | 0.293 | 0.235 dex | 0.240 dex | 0.238 dex | [capacity sweep][head-sweep-sfr] |
+| fgas | ResNet | minimal (64/32, ~10K params) | 0.6228 | 0.6154 | 0.619 | 0.0367 | 0.0359 | 0.0363 | [head-size sweep][head-sweep-new] |
+| fdm | ResNet | minimal (64/32, ~10K params) | 0.7631 | 0.7694 | 0.766 | 0.0641 | 0.0658 | 0.0650 | [head-size sweep][head-sweep-new] (pre-logit) |
 
 ## Project status: the vmap carries the signal (2026-09-08)
 
