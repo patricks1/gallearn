@@ -223,6 +223,8 @@ end
 
 const HALO_STATS_FNAME = "firebox_summary_stats.csv"
 
+const MTOT_RHALFSTAR_FNAME = "mtot_rhalfstar.csv"
+
 # FIREbox galaxy catalog produced by Jorge Moreno's group.
 # It keeps only objects that pass: Nbaryon >= 128, Nstar >= 128,
 # Rvir > 2 kpc/h, fgas < 0.2, fstar < 0.5. load_images filters
@@ -249,7 +251,15 @@ end
 # so keep the list of valid values here rather than restating it at
 # each throw site, where one copy can fall out of date with the
 # branches and report a target as invalid after it has been added.
-const TGT_TYPES = ("2d", "3d", "sfr", "avg_sfr", "fgas", "fdm")
+const TGT_TYPES = (
+    "2d",
+    "3d",
+    "sfr",
+    "avg_sfr",
+    "fgas",
+    "fdm",
+    "mtot_rhalfstar",
+)
 const TGT_TYPE_ERR = (
     "`tgt_type` should be one of "
     * join(map(t -> "\"$t\"", TGT_TYPES), ", ", ", or ")
@@ -292,6 +302,19 @@ function read_halo_stats_tgt()
     )
     y_df.id .= "object_" .* string.(y_df.id)
     DataFrames.rename!(y_df, :id => :Simulation)
+    return y_df
+end
+
+# mtot_rhalfstar is each galaxy's total mass (stars, gas, and dark matter)
+# within its 3D half-stellar-mass radius, precomputed by
+# scripts/gen_mtot_rhalfstar.py. It is a per-galaxy property, so it matches on
+# Simulation alone, like the sfr and halo-stats targets.
+function read_mtot_rhalfstar_tgt()
+    y_df = CSV.read(
+        joinpath(gallearn_dir, MTOT_RHALFSTAR_FNAME),
+        DataFrames.DataFrame
+    )
+    y_df.Simulation = "object_" .* string.(y_df.galaxyID)
     return y_df
 end
 
@@ -353,6 +376,10 @@ function load_images(
         Nbands = 3
     elseif tgt_type in ("fgas", "fdm")
         y_df = read_halo_stats_tgt()
+        all_bands = true
+        Nbands = 3
+    elseif tgt_type == "mtot_rhalfstar"
+        y_df = read_mtot_rhalfstar_tgt()
         all_bands = true
         Nbands = 3
     else
@@ -647,7 +674,7 @@ function load_images(
             orientation_mask[i, :] .= y_df[!, "view"] .== orientations[i]
         end
         mask = id_mask .& orientation_mask
-    elseif tgt_type in ("sfr", "avg_sfr", "fgas", "fdm")
+    elseif tgt_type in ("sfr", "avg_sfr", "fgas", "fdm", "mtot_rhalfstar")
         # These targets are properties of the galaxy rather than of the
         # projection, so they match on Simulation alone, with no view.
         # mask is (length(ids_X), nrow(y_df)); see comment above.
@@ -798,6 +825,9 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
     elseif tgt_type == "fdm"
         ys = Array(y_df[:, "fdm"])
         ys = reshape(ys, (size(ys)..., 1))
+    elseif tgt_type == "mtot_rhalfstar"
+        ys = Array(y_df[:, "mtot_rhalfstar"])
+        ys = reshape(ys, (size(ys)..., 1))
     else
         throw(ArgumentError(TGT_TYPE_ERR))
     end
@@ -810,6 +840,8 @@ function build_training_data(tgt_type; Nfiles=nothing, save=false, res=256)
         tgt_source = sfr_tgt_fname(tgt_type)
     elseif tgt_type in ("fgas", "fdm")
         tgt_source = HALO_STATS_FNAME
+    elseif tgt_type == "mtot_rhalfstar"
+        tgt_source = MTOT_RHALFSTAR_FNAME
     elseif tgt_type == "2d"
         tgt_source = join(
             [
