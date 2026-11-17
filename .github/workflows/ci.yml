@@ -5,18 +5,23 @@ on: [push]
 jobs:
   ci:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # A login shell runs the conda init that setup-miniconda writes, so
+        # base's bin (mamba, flake8) lands on PATH in every step.
+        shell: bash -el {0}
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v5
+    # The Ubuntu 26.04 runner image no longer ships Miniconda, so install
+    # Miniforge here instead of relying on the image's $CONDA. Miniforge
+    # defaults to conda-forge and includes mamba.
+    - name: Set up Miniforge
+      uses: conda-incubator/setup-miniconda@v4
       with:
-        python-version: '3.10'
-    - name: Add conda to system path
-      run: |
-        # $CONDA is an environment variable pointing to the root of the 
-        # miniconda directory
-        echo $CONDA/bin >> $GITHUB_PATH
+        miniforge-version: latest
+        auto-activate: true
+        activate-environment: ""
     - name: Install dependencies
       run: |
         # environment.yml's pip section (astrophot, FIRE_studio,
@@ -28,12 +33,11 @@ jobs:
         # use the classic SAT solver, which explodes on this unpinned env:
         # after conda-forge shipped a new torch stack on 2026-10-29 it
         # churned ~7h then got OOM-killed, never reaching pytest. mamba
-        # resolves the same env in seconds, so install mamba into base and
-        # build the gallearn env (environment.yml's own name) with it.
-        # Building a separate env instead of updating base also leaves
-        # base's python untouched, avoiding a post-link churn when
-        # environment.yml pins python 3.10.
-        conda install -n base -y -c conda-forge mamba
+        # resolves the same env in seconds, so build the gallearn env
+        # (environment.yml's own name) with Miniforge's mamba. Building a
+        # separate env instead of updating base also leaves base's python
+        # untouched, avoiding a post-link churn when environment.yml pins
+        # python 3.10.
         mamba env create -f environment.yml
     - name: Lint with flake8
       run: |
