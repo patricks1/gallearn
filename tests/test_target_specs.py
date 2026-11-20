@@ -16,7 +16,7 @@ def test_registry_covers_every_target_the_cli_offers():
     '''Verify that every target name is registered and resolves to a
     spec, and that an unknown name raises rather than falling back to
     some default target.'''
-    for tgt_type in ['sfr', 'avg_sfr', 'fgas', 'fdm']:
+    for tgt_type in ['sfr', 'avg_sfr', 'fgas', 'fdm', 'mtot_rhalfstar']:
         assert target_specs.get(tgt_type) is not None
     with pytest.raises(ValueError, match='No target spec'):
         target_specs.get('unknown_target')
@@ -31,7 +31,10 @@ def test_sfr_and_avg_sfr_share_one_spec_class():
     )
 
 
-@pytest.mark.parametrize('tgt_type', ['avg_sfr', 'fgas', 'fdm'])
+@pytest.mark.parametrize(
+    'tgt_type',
+    ['avg_sfr', 'fgas', 'fdm', 'mtot_rhalfstar'],
+)
 def test_scale_unscale_round_trips(tgt_type):
     '''Verify that unscale inverts scale for each target, so
     predictions can be mapped back to raw units. This is what lets
@@ -42,6 +45,8 @@ def test_scale_unscale_round_trips(tgt_type):
         raw = _vals([0., 0.02, 0.11, 0.4, 0.9])
     elif tgt_type == 'fdm':
         raw = _vals([1.e-6, 0.1, 0.5, 0.8, 0.999])
+    elif tgt_type == 'mtot_rhalfstar':
+        raw = _vals([1.e9, 5.e10, 3.e11, 1.4e12])
     else:
         raw = _vals([1.e-12, 4.e-11, 2.e-10, 9.e-10, 3.e-9])
 
@@ -76,6 +81,17 @@ def test_fgas_keeps_gas_free_galaxies():
     raw = _vals([0., 0.05, 0., 0.3])
     assert spec.select_valid(raw).tolist() == [0, 1, 2, 3]
     assert 'gas-free' in spec.population_summary(raw)
+
+
+def test_mtot_rhalfstar_trains_on_every_galaxy():
+    '''Verify that the total-mass-within-R_half target trains on every
+    galaxy and fits log-standardized scaling. It has no structural
+    zero, so no row is held out, and its values span orders of
+    magnitude, so it scales in log10.'''
+    spec = target_specs.get('mtot_rhalfstar')
+    raw = _vals([1.e9, 5.e10, 3.e11, 1.4e12])
+    assert spec.select_valid(raw).tolist() == [0, 1, 2, 3]
+    assert spec.fit(raw)['method'] == 'log_std'
 
 
 def test_fdm_trains_on_every_galaxy():

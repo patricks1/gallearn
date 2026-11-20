@@ -97,3 +97,16 @@ def test_compute_valid_indices_follows_the_target():
     assert train.compute_valid_indices(
         'regressor', d, 4, 'avg_sfr'
     ).tolist() == [1, 3]
+
+
+def test_prepare_targets_log_scales_mtot_rhalfstar():
+    '''Verify that the total-mass target fits log-standardized scaling
+    and trains the regressor on every galaxy.'''
+    raw = _vals([1.e9, 5.e10, 3.e11, 1.4e12])
+    d = {'ys_sorted': raw}
+    targets, valid, stats = train.prepare_targets(
+        'regressor', d, 4, torch.tensor([0, 1, 2, 3]), 'mtot_rhalfstar'
+    )
+    assert stats['method'] == 'log_std'
+    assert valid.tolist() == [0, 1, 2, 3]
+    assert targets.shape == (4, 1)

@@ -92,6 +92,14 @@ before computing metrics.
 `plot_scale = 'logit'` spreads the near-1 tail for visualization and
 keeps scatter plots legible.
 
+### Total mass within R_half,*
+
+Total mass within the half-stellar-mass radius (`mtot_rhalfstar`) is each galaxy's enclosed stellar, gas, and dark-matter mass inside the 3D radius that holds half of its stellar mass. The enclosed stellar part is fixed at half the total stellar mass by construction, but the enclosed gas and dark matter vary from galaxy to galaxy, so the total is a genuine central mass scale, not a restatement of the stellar mass.
+
+The values are strictly positive and span orders of magnitude (roughly 1e9 to over 1e12 solar masses), so training uses log10 then standardize. Log10 turns the multiplicative spread into an additive one the optimizer can resolve evenly across the whole range, and standardization centers it to roughly unit variance. Predictions unscale through a power of ten, so they are guaranteed positive. Every galaxy has a value, so the regressor trains on all of them, with no structural zero and no hurdle stage.
+
+`plot_scale = 'log'` independently, so scatter plots and distribution panels read naturally across the multi-order range.
+
 ## Summary
 
 | target | training transform | notes |
@@ -99,3 +107,4 @@ keeps scatter plots legible.
 | sSFR | asinh + standardize | asinh handles the multi-order range and stays defined at zero |
 | fgas | standardize | exact zeros are undefined under log/logit |
 | fdm | logit + standardize | spreads the near-1 concentration; metrics are in log-odds units |
+| mtot_rhalfstar | log10 + standardize | strictly positive, multi-order; total (stars+gas+DM) within R_half,* |

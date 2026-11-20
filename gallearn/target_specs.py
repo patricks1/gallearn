@@ -101,6 +101,18 @@ def _logit_std_unscale(scaled, stats):
     return torch.sigmoid(scaled * stats['stds'] + stats['means'])
 
 
+def _log_std_scale(vals, stats):
+    return preprocessing.std_scale(
+        torch.log10(vals),
+        means=stats['means'],
+        stds=stats['stds'],
+    )
+
+
+def _log_std_unscale(scaled, stats):
+    return 10 ** (scaled * stats['stds'] + stats['means'])
+
+
 class TargetSpec:
     """
     Base class describing how to train on one target.
@@ -452,6 +464,62 @@ class FdmTarget(TargetSpec):
         return unscale_fn(scaled, stats)
 
 
+class MtotRhalfstarTarget(TargetSpec):
+    """
+    Total mass within the half-stellar-mass radius.
+
+    This is each galaxy's enclosed mass (stars, gas, and dark matter)
+    within the 3D radius that holds half of its stellar mass. Every
+    galaxy has one, so the regressor trains on all of them, with no
+    structural zero and no hurdle stage. The values are strictly
+    positive and span orders of magnitude, so scaling takes log10 before
+    standardizing, and predictions unscale through a power of ten, so
+    they stay positive.
+    """
+
+    name = 'mtot_rhalfstar'
+    column = 'mtot_rhalfstar'
+    supports_classifier = False
+    axis_label = 'total mass within $R_{half,*}$'
+    unit = 'M$_\\odot$'
+    plot_scale = 'log'
+    sci_notation = True
+    intuitive_label = 'dex'
+
+    _METHODS = {
+        'log_std': (_log_std_scale, _log_std_unscale),
+    }
+
+    def to_intuitive(self, y):
+        import numpy as np
+        return np.log10(y)
+
+    def select_valid(self, vals):
+        return torch.arange(len(vals))
+
+    def population_summary(self, vals):
+        return 'Total mass within R_half,*: {0:.0f} galaxy images'.format(
+            len(vals)
+        )
+
+    def fit(self, vals):
+        _, means, stds = preprocessing.std_scale(
+            torch.log10(vals),
+            return_distrib=True,
+        )
+        return {'method': 'log_std', 'means': means, 'stds': stds}
+
+    def scale(self, vals, stats):
+        scale_fn, _ = _dispatch(self._METHODS, stats, self.name)
+        return scale_fn(vals, stats)
+
+    def unscale(self, scaled, stats):
+        _, unscale_fn = _dispatch(
+            self._METHODS, stats, self.name
+        )
+        return unscale_fn(scaled, stats)
+
+
 # Keyed by the `tgt_type` src/Dataset.jl writes into the HDF5 root
 # attributes, which is also what --target accepts. "sfr" and
 # "avg_sfr" are both sSFR, differing only in the averaging window
@@ -462,6 +530,7 @@ REGISTRY = {
     'avg_sfr': SsfrTarget(),
     'fgas': FgasTarget(),
     'fdm': FdmTarget(),
+    'mtot_rhalfstar': MtotRhalfstarTarget(),
 }
 
 
@@ -472,7 +541,8 @@ def get(tgt_type):
     Parameters
     ----------
     tgt_type : str
-        A key of REGISTRY: 'sfr', 'avg_sfr', 'fgas', or 'fdm'.
+        A key of REGISTRY: 'sfr', 'avg_sfr', 'fgas', 'fdm', or
+        'mtot_rhalfstar'.
 
     Returns
     -------
