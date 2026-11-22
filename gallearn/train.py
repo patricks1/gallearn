@@ -1138,6 +1138,15 @@ def main(
         # portable across machines. dataset_fname below follows the
         # same rule for the dataset filename.
         split_fname = os.path.basename(split_file_path)
+        # If the split filename marks a galfiltered population and
+        # "galfiltered" is not already in the note, inject it so the
+        # run name records the filtered origin without the caller
+        # having to remember --name-note every time.
+        if 'galfiltered' in split_fname and (
+                note is None or 'galfiltered' not in note):
+            note = 'galfiltered' if note is None else (
+                'galfiltered_' + note
+            )
 
     dataset_fname = os.path.basename(dataset)
 
