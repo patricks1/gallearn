@@ -1,10 +1,10 @@
 # Project status: overview
 
-Living summary of where this project stands. See [sSFR experiments](status_sfr.md) for the full sSFR regression experiment log and [fgas and fdm experiments](status_fgas_fdm.md) for the fgas and fdm experiment log. This file is the entry point: current results, the key cross-target finding, and links forward.
+Living summary of where this project stands. See [sSFR experiments](status_sfr.md) for the full sSFR regression experiment log, [fgas and fdm experiments](status_fgas_fdm.md) for the fgas and fdm log, and [mtot_rhalfstar experiments](status_mtot_rhalfstar.md) for the enclosed-mass log. This file is the entry point: current results, the key cross-target finding, and links forward.
 
 ## Current flagship models
 
-Best val R² and intuitive-space MAE at best checkpoint, two seeds, from the most recent clean experiment per target. MAE units differ by target (dex for avg_sfr, raw gas/dark-matter fraction for fgas/fdm), so MAE does not compare across targets. The galfiltered and unfiltered rows are different val populations and do not compare either; note that the galfiltered models reach lower R² yet smaller MAE, the variance artifact described in the [fgas and fdm log](status_fgas_fdm.md).
+Best val R² and intuitive-space MAE at best checkpoint, two seeds, from the most recent clean experiment per target. MAE units differ by target (dex for avg_sfr and mtot_rhalfstar, raw fraction for fgas/fdm), so MAE does not compare across targets. The galfiltered and unfiltered rows are different val populations and do not compare either; note that the galfiltered models reach lower R² yet smaller MAE, the variance artifact described in the [fgas and fdm log](status_fgas_fdm.md).
 
 **Galfiltered.** fdm R² is raw-space (scaled logit R² is not comparable).
 
@@ -13,6 +13,7 @@ Best val R² and intuitive-space MAE at best checkpoint, two seeds, from the mos
 | avg_sfr | ResNet | small (128..8) | 0.361 | 0.392 | 0.377 | 0.192 dex | 0.189 dex | 0.190 dex | [galfiltered avg_sfr][galfiltered-avgsfr] |
 | fgas | ResNet | minimal (64/32) | 0.520 | 0.509 | 0.515 | 0.0175 | 0.0176 | 0.0176 | [galfiltered fgas/fdm][galfiltered-runs] |
 | fdm | ResNet | minimal (64/32), logit | 0.233 | 0.147 | 0.190 | 0.0358 | 0.0355 | 0.0357 | [galfiltered fgas/fdm][galfiltered-runs] |
+| mtot_rhalfstar | ResNet | tiny (32/16/8/4) | 0.8218 | 0.8096 | 0.8157 | 0.3131 dex | 0.3107 dex | 0.3119 dex | [galfiltered mtot_rhalfstar][galfiltered-mtot] |
 
 **Unfiltered.**
 
@@ -61,3 +62,4 @@ If fdm survives kinematics-only and dies on mask-only, the dark-matter result is
 [head-sweep-sfr]: status_sfr.md#capacity-sweep-head-width-2026-07-19
 [galfiltered-avgsfr]: status_sfr.md#galfiltered-training-avg_sfr-2026-10
 [galfiltered-runs]: status_fgas_fdm.md#galfiltered-training-first-runs-2026-10
+[galfiltered-mtot]: status_mtot_rhalfstar.md#head-size-sweep-galfiltered-2026-11-23
